@@ -1,0 +1,30 @@
+[
+  { "name": "crm_record_id", "type": "STRING", "mode": "REQUIRED", "description": "Mock CRM record id generated on commit (CRM-XXXXXXXXXX)." },
+  { "name": "ws_user_id", "type": "STRING", "mode": "NULLABLE", "description": "ADK/WebSocket user_id for the session." },
+  { "name": "ws_session_id", "type": "STRING", "mode": "NULLABLE", "description": "ADK/WebSocket session_id -- the conversation-level id (browser-generated)." },
+  { "name": "staged_session_id", "type": "STRING", "mode": "NULLABLE", "description": "mock_db's own internal staged-record uuid (stage -> commit correlation)." },
+  { "name": "agent_mode", "type": "STRING", "mode": "REQUIRED", "description": "'implicit' or 'guided'. Redundant with which table this row is in, kept for safety if tables are ever unioned." },
+  { "name": "campaign_type", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "event_type", "type": "STRING", "mode": "REQUIRED", "description": "Meeting | On-site visit | Phone Call" },
+  { "name": "executive_summary", "type": "STRING", "mode": "NULLABLE", "description": "Overall 1-2 sentence call summary." },
+  { "name": "raw_transcript_backup", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "planned_topics", "type": "STRING", "mode": "REPEATED", "description": "Pre-call planned topic labels the rep selected." },
+  { "name": "missing_topics", "type": "STRING", "mode": "REPEATED", "description": "Planned topics that ended up with no recorded outcome at commit time." },
+  {
+    "name": "topics",
+    "type": "RECORD",
+    "mode": "REPEATED",
+    "fields": [
+      { "name": "topic", "type": "STRING", "mode": "NULLABLE" },
+      { "name": "disposition_code", "type": "INTEGER", "mode": "NULLABLE" },
+      { "name": "disposition_label", "type": "STRING", "mode": "NULLABLE" },
+      { "name": "executive_summary", "type": "STRING", "mode": "NULLABLE" },
+      { "name": "discussed", "type": "BOOLEAN", "mode": "NULLABLE" },
+      { "name": "needs_manual_review", "type": "BOOLEAN", "mode": "NULLABLE", "description": "Guided flow: true if 3 disposition-confirm attempts failed." }
+    ]
+  },
+  { "name": "correction_count", "type": "INTEGER", "mode": "NULLABLE", "description": "How many times the record was re-staged/corrected before commit." },
+  { "name": "staged_at", "type": "TIMESTAMP", "mode": "NULLABLE" },
+  { "name": "committed_at", "type": "TIMESTAMP", "mode": "REQUIRED" },
+  { "name": "environment", "type": "STRING", "mode": "NULLABLE", "description": "e.g. 'local_dev' -- distinguishes demo-local data from future real deployments." }
+]
