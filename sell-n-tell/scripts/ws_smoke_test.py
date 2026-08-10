@@ -57,6 +57,19 @@ IMPLICIT_SCENARIOS: dict[str, list[str]] = {
     ],
 }
 
+# NOTE on the trailing "Okay." turns below.
+#
+# After the last topic is dispositioned, record_topic_disposition returns
+# "all topics are dispositioned, call commit_guided_notes now" -- and the model
+# reliably does NOT act on it. It emits an empty output turn, closes the turn,
+# and waits. Observed with a 15s quiet period and no nudge rescue.
+#
+# In a real session that is dead air at the worst moment: every question has
+# been answered, the record is complete, and nothing is saved. It is logged as
+# a defect (see docs/AIML-2698-experiments.md). The trailing turn here exists
+# only so the scenario can reach a commit and exercise the rest of the
+# pipeline -- it is NOT evidence that the flow works unaided, and it should be
+# removed once the stall is fixed.
 GUIDED_SCENARIOS: dict[str, list[str]] = {
     "clean_save": [
         "Yes let's begin.",
@@ -68,6 +81,7 @@ GUIDED_SCENARIOS: dict[str, list[str]] = {
         "Yes that's right.",
         "They already placed an order for the renewal.",
         "Yes correct.",
+        "Okay.",  # trailing nudge -- see NOTE above
     ],
     "playback_then_save": [
         "Start.",
@@ -142,6 +156,68 @@ def _summarize_event(evt: dict) -> str | None:
     return f"[{author}] " + " | ".join(bits)
 
 
+# How long the agent must stay silent AFTER a turn_complete before we accept
+# that it has finished and send the next scripted turn.
+QUIET_PERIOD_S = 3.0
+# After the LAST scripted turn the agent often still owes trailing work -- e.g.
+# guided's record_topic_disposition returns "all topics done, call
+# commit_guided_notes now", which needs another beat (and may need main.py's
+# auto-continue nudge to land). Closing the socket at the normal quiet period
+# cuts the commit off and the scenario ends with no CRM record for reasons that
+# have nothing to do with the code under test.
+FINAL_QUIET_PERIOD_S = 15.0
+# Absolute cap on how long one scripted turn may take.
+TURN_TIMEOUT_S = 60.0
+
+
+async def _drain_until_agent_settles(
+    ws, quiet_period: float = QUIET_PERIOD_S
+) -> None:
+    """Read events until the agent has genuinely finished its response.
+
+    A single agent response emits MULTIPLE ``turnComplete`` events -- one after
+    a tool call returns, another after it finishes speaking, and so on. Breaking
+    on the first one sends the next scripted turn while the agent is still
+    working, so the "rep" ends up answering a question that has not been asked
+    yet. That desynchronisation is not cosmetic: it makes the model answer its
+    own questions, which turn_guard then (correctly) blocks, which leaves
+    required state unset, which makes the final commit fail. One race,
+    four layers of fallout, and none of it reproducible against a real rep.
+
+    So instead of stopping at the first turn_complete, we keep reading until
+    the agent has been silent for QUIET_PERIOD_S after at least one
+    turn_complete.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + TURN_TIMEOUT_S
+    saw_turn_complete = False
+
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            print("(turn timeout -- moving on)")
+            return
+        # Before the first turn_complete, wait as long as the overall cap
+        # allows. After it, a short silence means the agent is done.
+        wait_for = min(quiet_period, remaining) if saw_turn_complete else remaining
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=wait_for)
+        except asyncio.TimeoutError:
+            if saw_turn_complete:
+                return  # agent has gone quiet -- safe to send the next turn
+            print("(no response from agent -- moving on)")
+            return
+
+        evt = json.loads(raw)
+        if RAW_MODE:
+            print("RAW:", json.dumps(evt))
+        summary = _summarize_event(evt)
+        if summary:
+            print(summary)
+        if evt.get("turnComplete"):
+            saw_turn_complete = True
+
+
 async def run_scenario(
     agent_mode: str, scenario: str, turns: list[str], planned_topics: str
 ) -> None:
@@ -161,31 +237,16 @@ async def run_scenario(
     async with websockets.connect(url, max_size=None) as ws:
         for i, turn in enumerate(turns, start=1):
             if i > 1:
-                # Real reps take a beat to react/speak after the agent's
-                # spoken reply; a real turn also takes time to render as
-                # audio server-side. Firing the next turn instantly (as a
-                # bare text send) races the Live session's own turn
-                # finalization and gets treated as a barge-in interrupt with
-                # an empty response. This settle delay avoids that -- it's a
-                # test-harness artifact, not something a real mic client
-                # would hit.
-                await asyncio.sleep(4.0)
+                # Small courtesy pause only; the real synchronisation is the
+                # quiet-period wait below.
+                await asyncio.sleep(0.5)
             print(f"\n--- turn {i}: REP SAYS: {turn!r} ---")
             await ws.send(json.dumps({"type": "text", "text": turn}))
-            try:
-                async with asyncio.timeout(25):
-                    while True:
-                        raw = await ws.recv()
-                        evt = json.loads(raw)
-                        if RAW_MODE:
-                            print("RAW:", json.dumps(evt))
-                        summary = _summarize_event(evt)
-                        if summary:
-                            print(summary)
-                        if evt.get("turnComplete"):
-                            break
-            except TimeoutError:
-                print("(timed out waiting for turn_complete -- moving on)")
+            is_last = i == len(turns)
+            await _drain_until_agent_settles(
+                ws, FINAL_QUIET_PERIOD_S if is_last else QUIET_PERIOD_S
+            )
+        print("\n--- scenario complete ---")
 
 
 async def main() -> None:

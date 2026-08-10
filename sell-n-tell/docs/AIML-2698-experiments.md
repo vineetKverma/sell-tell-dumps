@@ -449,6 +449,47 @@ legitimate paraphrase. Mitigations applied and recommended:
 
 Same class as F2: the model fills a gap plausibly rather than leaving it empty.
 
+### F5 — Guided mode stalls before `commit_guided_notes` (dead air at the end)
+
+Found while running `ws_smoke_test.py guided --scenario clean_save`.
+
+After the final topic is dispositioned, `record_topic_disposition` returns:
+
+```
+{'status': 'all_topics_done',
+ 'instruction_for_model': "Say: 'Got it.' All topics are dispositioned.
+                           Call commit_guided_notes now, then speak its
+                           closing_statement verbatim and end."}
+```
+
+The model then emits `OUT_TX text='' finished=True`, closes its turn, and does
+nothing further. Observed with a 15-second quiet period; `main.py`'s
+auto-continue nudge did not rescue it (the 4-nudge session cap may already have
+been consumed earlier in the conversation). Sending any further rep utterance
+unblocks it.
+
+**Impact:** in a live session this is dead air at the worst possible moment —
+every question has been answered, the record is complete, and nothing is saved.
+The rep has no way to know the save didn't happen. Violates AIML-2697's "no
+dead air / recoverable prompt" and AIML-2698's "clear agent recovery".
+
+**Not yet fixed.** Candidate directions, in order of preference:
+
+1. Have `record_topic_disposition`'s `all_topics_done` branch commit directly
+   rather than instructing the model to make a second call. The record is
+   already complete at that point and no further rep input is needed, so the
+   extra hop buys nothing and is exactly where the flow stalls.
+2. Exempt readback-owed nudges from `_MAX_NUDGES_PER_SESSION`, or raise the cap.
+3. Prompt-level insistence — **not recommended**; this is the same class of
+   problem where prompt rules have already failed three times in this ticket.
+
+Option 1 is structural and removes the failure mode rather than retrying it.
+
+**Harness note:** the guided scenarios now carry a trailing `"Okay."` turn so
+they can reach a commit and exercise the rest of the pipeline. That turn is a
+workaround for this defect, not evidence the flow works unaided, and should be
+removed once F5 is fixed.
+
 ### Still outstanding
 
 - `turn_guard` reset on WebSocket teardown (Experiment 3, not yet reproduced).

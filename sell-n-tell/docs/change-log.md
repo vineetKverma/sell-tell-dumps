@@ -166,6 +166,40 @@ structure that points the other way. Change the structure and the behaviour
 follows; leave the structure and the rule is ignored, however emphatically it
 is worded.
 
+## Batch 7 — Make the smoke harness able to hold a conversation
+
+Ticket: AIML-2698 (AC#1, AC#5) · Commit: pending
+
+Guided mode had never been exercised automatically. Investigating why produced
+two fixes, neither of which is in the agent logic.
+
+| File | Change | Why |
+|---|---|---|
+| `main.py` | `upstream_task` calls `turn_guard.record_user_turn()` for non-empty **text** turns | The counter only incremented on `input_transcription` events, which audio produces and text does not. Every turn_guard-gated tool (`commit_visit_notes`, `set_event_type`, `record_topic_disposition`, `choose_post_dictation_action`) was therefore permanently blocked in text mode — so the harness could never get past `capture_dictation`. A typed turn is a genuine rep turn and must count. |
+| `ws_smoke_test.py` | Wait for the agent to fall silent (`_drain_until_agent_settles`) instead of breaking on the first `turnComplete` | One agent response emits several `turnComplete` events. Breaking on the first sent the next scripted turn mid-response — the "rep" answered questions before they were asked, the model then answered its own question, `turn_guard` (correctly) blocked it, required state was never set, and the commit failed. One race, four layers of fallout. |
+| `ws_smoke_test.py` | Longer quiet period after the final turn; trailing `"Okay."` on `clean_save` | Works around F5 so scenarios can reach a commit. Marked in-code as a workaround, not a fix. |
+
+**Diagnosis note.** The turn_guard blocks looked like a bug for most of a day.
+Instrumenting `record_user_turn` / `snapshot` / `has_new_reply` and interleaving
+them with `Upstream text` in one log settled it in minutes: `snapshot
+baseline<-4` followed 1s later by `has_new_reply current=4 baseline=4 -> False`
+with no rep turn in between — the model calling two tools in one turn. **The
+guard was right every time.** Worth remembering before "fixing" it again; the
+temporary instrumentation is described here rather than left in the code.
+
+**Status: `verified-live`.** All 8 scenarios across both modes now commit:
+
+| Mode | Scenario | Outcome |
+|---|---|---|
+| guided | clean_save | Pricing=8, Renewal=2 |
+| guided | rerecord | Renewal=2 only — re-record correctly discarded prior state |
+| guided | ambiguous_disposition | no code, `needs_manual_review=true`, summary "Rep was unsure how to classify the outcome after three attempts" |
+| guided | playback_then_save | **did not commit — hit F5** |
+| implicit | clean_save | Pricing=8 |
+| implicit | correction | event type corrected to Meeting |
+| implicit | missing_topic | Renewal skipped, no code — coverage path |
+| implicit | multi_topic | Pricing=8, Renewal=2 |
+
 ## Open: needs sign-off from the project lead (mechanism solved)
 
 **The `renewals` disposition registry has no code for "customer is interested

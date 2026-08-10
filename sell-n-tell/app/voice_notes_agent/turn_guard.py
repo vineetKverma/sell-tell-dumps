@@ -21,7 +21,11 @@ tools (reader) access directly -- no ADK state indirection involved.
 
 from __future__ import annotations
 
+import logging
+
 from google.adk.tools import ToolContext
+
+logger = logging.getLogger(__name__)
 
 # session_id -> number of genuine, non-empty, finished user speech turns seen.
 _TURN_COUNTS: dict[str, int] = {}
@@ -54,7 +58,18 @@ def has_new_reply(tool_context: ToolContext) -> bool:
     session_id = tool_context.session.id
     current = _TURN_COUNTS.get(session_id, 0)
     baseline = _BASELINES.get(session_id, -1)
-    return current > baseline
+    result = current > baseline
+    if not result:
+        # The counter/baseline pair is the only way to explain a refused tool
+        # call after the fact, so log it on the blocking path only (DEBUG to
+        # keep normal runs quiet).
+        logger.debug(
+            "turn_guard blocked: session_id=%s current=%d baseline=%d",
+            session_id,
+            current,
+            baseline,
+        )
+    return result
 
 
 def mark_awaiting_readback(session_id: str) -> None:

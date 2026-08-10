@@ -511,10 +511,20 @@ async def websocket_endpoint(
                 msg_type = json_message.get("type")
 
                 if msg_type == "text":
-                    logger.info("Upstream text: %r", json_message.get("text"))
-                    content = types.Content(
-                        parts=[types.Part(text=json_message["text"])]
-                    )
+                    text = json_message.get("text") or ""
+                    logger.info("Upstream text: %r", text)
+                    # A typed turn is a genuine rep turn and must count towards
+                    # turn_guard, exactly like a spoken one. The audio path
+                    # increments the counter from input_transcription events in
+                    # downstream_task, but text input produces no transcription
+                    # event -- so without this every turn_guard-gated tool
+                    # (commit_visit_notes, set_event_type,
+                    # record_topic_disposition, choose_post_dictation_action)
+                    # is permanently blocked with "no_reply_heard" in text
+                    # mode, which is what scripts/ws_smoke_test.py uses.
+                    if text.strip():
+                        turn_guard.record_user_turn(session_id)
+                    content = types.Content(parts=[types.Part(text=text)])
                     live_request_queue.send_content(content)
 
     async def downstream_task() -> None:
