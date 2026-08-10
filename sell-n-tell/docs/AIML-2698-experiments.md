@@ -278,6 +278,79 @@ They do **not** exercise guided mode's conversational state machine
 `record_topic_disposition` → `commit_guided_notes`), which needs a live
 WebSocket session or an extended `ws_smoke_test.py`.
 
+## Live session results (implicit mode)
+
+Real WebSocket sessions against Vertex AI with native audio. Campaign
+`standard_sales`, planned topics *Contract / agreement renewal* and
+*Pricing & promotions*.
+
+### L1 — happy path: **PASS**
+
+Dictated both topics. The model emitted a single `stage_visit_notes` call,
+copied both planned-topic labels verbatim (so coverage matched), spoke the
+confirmation, waited for a reply, and committed on "Save" — `CRM-BF661C5CA6`.
+No `BLOCKED:` lines; native audio throughout.
+
+### L2 — coverage gate live: **PASS**
+
+Dictated only the renewal, leaving *Pricing & promotions* uncovered.
+
+1. Readback asked for the missing outcome instead of offering to save.
+2. Said "Save it" anyway → `commit_visit_notes` returned the `409`, and the
+   agent spoke: *"I still need an outcome for Pricing & promotions before I
+   can save. What happened with that topic?"* — recovered cleanly, no loop,
+   no silence, no error text read aloud.
+3. Answered "I didn't get to the pricing" → re-staged with the topic as
+   `discussed=false` and the call summary updated.
+4. "Save" → committed as `CRM-20E3FED366`.
+
+This is AC#1's "clear agent recovery" and AC#3's coverage gate demonstrated in
+a live conversation, not just at the REST layer.
+
+## Findings from live runs (not yet fixed)
+
+### F1 — Frontend reports success on a blocked commit *(regression, ours)*
+
+During L2 step 2, with nothing saved, the UI showed **"Saved to CRM. Session
+complete."** and flipped the record badge to **committed**, directly
+contradicting what the agent said aloud.
+
+`commit_visit_notes` now has three outcomes (`success` / `blocked` / `error`);
+the frontend appears to treat any tool result as success, which was safe only
+while commit could not fail cleanly. A viewer sees a CRM confirmation for a
+record that does not exist. Fix belongs in `app/static/js/app.js`: branch on
+`status`, keep the record `staged` when blocked, and surface `missing_topics`.
+
+Related: the panel kept showing the **previous** session's `crm_record_id`
+next to a `staged` badge — staged records have no CRM id, so it should clear
+on each new stage.
+
+### F2 — Disposition mapping is inconsistent for the same outcome
+
+The same real-world outcome ("customer agreed to re-sign for another year")
+mapped to different codes across runs:
+
+| Run | Code assigned | Reads in the CRM as |
+|---|---|---|
+| L1 | 5 — Buying from preferred vendor already | customer is committed to *another* supplier (lost) |
+| L2 | 2 — Order Placed | closed the sale (won) |
+
+Both are valid `standard_sales` codes, so AC#2 ("100% valid disposition codes")
+passes either way — but they mean opposite things to a manager reading the
+record. Code 5's `mapping_keywords` ("preferred vendor", "happy with current
+supplier") genuinely match the rep's *words*, so the model matched phrasing
+rather than outcome.
+
+Root cause is structural, not a model defect: **every code in the registry is a
+reason a sale did or did not advance, and there is no "renewal agreed"
+outcome.** Lowering temperature will not fix it — the registry has no correct
+answer to select. Options: add a renewal-positive disposition, or require
+confirm-or-clarify when two codes compete (the ticket's "confirm-or-clarify,
+never silent wrong code"). Needs a product decision, not just code.
+
+**Note the distinction for the ticket: validity and correctness are different
+problems. We fixed validity. Consistency remains open.**
+
 ### Still outstanding
 
 - `turn_guard` reset on WebSocket teardown (Experiment 3, not yet reproduced).

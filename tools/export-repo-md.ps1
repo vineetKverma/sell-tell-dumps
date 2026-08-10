@@ -84,7 +84,14 @@ foreach ($g in $groups) {
     [void]$sb.AppendLine()
 
     foreach ($f in ($g.Group | Sort-Object)) {
-        $text = Get-Content -LiteralPath $f -Raw
+        # Read as UTF-8 explicitly. PS 5.1's Get-Content defaults to the ANSI
+        # codepage, which mangles every non-ASCII byte (emoji in index.html
+        # came through as mojibake before this).
+        $full = $f
+        if (-not [System.IO.Path]::IsPathRooted($full)) {
+            $full = Join-Path (Get-Location) $full
+        }
+        $text = [System.IO.File]::ReadAllText($full, [System.Text.Encoding]::UTF8)
         if ($null -eq $text) { $text = "" }
         $text = Get-Redacted -Path $f -Text $text
         $ext  = [System.IO.Path]::GetExtension($f).ToLower()
