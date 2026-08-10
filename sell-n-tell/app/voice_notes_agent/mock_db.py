@@ -44,6 +44,16 @@ class DispositionCode(IntEnum):
     PRICING_CONCERNS = 8
     RECENTLY_DISCUSSED = 9
     RECENTLY_PURCHASED_RELATED = 10
+    # Escape hatch, available in EVERY campaign. Without an explicit "none of
+    # these" option the model has no way to express that the registry does not
+    # cover what happened -- filling a structured field is an argmax over the
+    # allowed values, so it always returns a "best" code even when the best is
+    # wrong. Measured: a renewals call where the customer asked for a quote
+    # (no matching code exists) returned 2 "Order Placed" or 3 "No current
+    # need" at random across six runs -- opposite meanings, both false. Making
+    # "not covered" an ordinary peer option lets the model select it normally
+    # instead of having to volunteer an exception against the grain.
+    OUTCOME_NOT_COVERED = 99
 
 
 class DiscussionTopic(BaseModel):
@@ -221,8 +231,28 @@ _FULL_DISPOSITION_REGISTRY: list[dict[str, Any]] = [
     },
 ]
 
+# Appended to EVERY campaign's registry by get_agent_config -- see the
+# OUTCOME_NOT_COVERED note on DispositionCode. Kept out of
+# _FULL_DISPOSITION_REGISTRY so campaign subsets stay a clean list of real
+# business outcomes and this is added deliberately in one place.
+_NOT_COVERED_RULE: dict[str, Any] = {
+    "code": DispositionCode.OUTCOME_NOT_COVERED,
+    # Kept short: the agent reads this label aloud in the confirmation.
+    "label": "Outcome not covered - needs manual review",
+    "mapping_keywords": [
+        "none of the other codes describe what happened",
+        "the real outcome is not in this list",
+        "would have to force a code that misstates the call",
+    ],
+}
+
 _DISPOSITION_BY_CODE: dict[int, dict[str, Any]] = {
-    int(rule["code"]): rule for rule in _FULL_DISPOSITION_REGISTRY
+    # _NOT_COVERED_RULE is included here even though it is deliberately absent
+    # from _FULL_DISPOSITION_REGISTRY: label lookups (disposition_label, used
+    # to build the spoken confirmation) must resolve code 99, otherwise the
+    # agent reads it back to the rep as "Other".
+    int(rule["code"]): rule
+    for rule in [*_FULL_DISPOSITION_REGISTRY, _NOT_COVERED_RULE]
 }
 
 
@@ -379,8 +409,12 @@ def get_agent_config(campaign_type: str | None) -> dict[str, Any]:
         "campaign_type": key if key in _CAMPAIGN_CONFIGS else _DEFAULT_CAMPAIGN,
         "system_instruction_template": config["system_instruction_template"],
         "allowed_event_types": list(config["allowed_event_types"]),
+        # Every campaign gets the "not covered" escape hatch appended, so a
+        # narrowed registry can never leave the agent with no way to say the
+        # outcome isn't representable.
         "disposition_registry": [
-            dict(rule) for rule in config["disposition_registry"]
+            dict(rule)
+            for rule in [*config["disposition_registry"], _NOT_COVERED_RULE]
         ],
     }
 
@@ -629,6 +663,15 @@ def stage_notes(
     """
     session_id = str(uuid.uuid4())
     planned_topics = planned_topics or []
+
+    # A topic the agent could not map to a real outcome is by definition one a
+    # human has to look at. Set the flag here rather than trusting each caller
+    # to pair the code with it, so implicit, guided and plain REST all agree.
+    for topic in payload.get("topics") or []:
+        if topic.get("disposition_code") == int(
+            DispositionCode.OUTCOME_NOT_COVERED
+        ):
+            topic["needs_manual_review"] = True
     previous = (
         _STAGED_NOTES.get(previous_session_id) if previous_session_id else None
     )

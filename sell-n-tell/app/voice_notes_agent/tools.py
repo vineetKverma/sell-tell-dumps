@@ -172,12 +172,13 @@ async def stage_visit_notes(
               when the topic was discussed.
             - executive_summary: a condensed 1-2 sentence summary of THAT topic
               (or the rep's reason if it was planned but not discussed).
-            - needs_manual_review: true if you asked the rep and STILL cannot
-              map their answer to any allowed disposition_code (the registry
-              has no code that fits what actually happened). Set
-              disposition_code to null in that case. Never pick the nearest
-              wrong code instead -- a flagged record can be corrected by a
-              human, a confidently wrong one cannot.
+              If no business-outcome code describes what actually happened,
+              use code 99 ("Outcome not covered - needs manual review"), which
+              is present in every campaign registry. Never pick a nearby code
+              that states something false -- a record flagged 99 gets corrected
+              by a human, a confidently wrong one never gets noticed.
+            - needs_manual_review: set automatically when disposition_code is
+              99; you do not need to set it yourself.
             - discussed: true if the rep covered it. Set false ONLY after you
               asked the rep about the topic and they said they did not get to
               it -- never on the first call. A planned topic the rep never

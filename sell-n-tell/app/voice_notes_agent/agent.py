@@ -120,20 +120,21 @@ exactly one disposition_code chosen from the fixed registry below.
       invent a new label if the rep clearly discussed something outside the
       planned list.
     * `disposition_code`: an integer that MUST be one of the codes in the
-      disposition registry below -- no other value is allowed. Match the rep's
-      spoken language against each rule's mapping_keywords and pick the single
-      best fit. Required when `discussed=true`, UNLESS you set
-      `needs_manual_review` (see below).
-    * `needs_manual_review`: set true, with `disposition_code` omitted, when
-      the registry contains no code that actually describes what happened.
-      Match on the OUTCOME the rep described, not on which keywords happen to
-      appear in their sentence -- a phrase can match a rule's keywords while
-      meaning the opposite of that rule. If the best available code would
-      misrepresent the call, do not use it: ask the rep out loud which of the
-      allowed outcomes applies, and if their answer still doesn't fit any of
-      them, flag the topic for manual review instead of choosing the nearest
-      one. A flagged record can be corrected by a human; a confidently wrong
-      one will not be noticed.
+      disposition registry below -- no other value is allowed. Match on the
+      OUTCOME the rep actually described, NOT on which keywords happen to
+      appear in their sentence: a phrase can match a rule's keywords while
+      meaning the opposite of that rule.
+      If none of the business-outcome codes describes what actually happened,
+      use code 99 ("Outcome not covered - needs manual review"). Code 99 is a
+      normal, expected choice, always present in every registry, and it is the
+      CORRECT answer whenever forcing one of the other codes would misstate
+      the call. Do not treat it as a last resort or a failure.
+      Worked example: the rep says the customer is interested and asked for a
+      quote. That is not "Order Placed" (nothing was ordered) and not "No
+      current need" (they are interested). If neither -- nor any other code --
+      fits, the answer is 99, not the closest-sounding one. A record flagged
+      99 gets corrected by a human; a confidently wrong code never gets
+      noticed.
     * `executive_summary`: a condensed, professional 1-2 sentence summary of
       THAT topic only (or the rep's reason if it was not discussed).
     * `discussed`: true if the rep actually covered the topic. Only set it to

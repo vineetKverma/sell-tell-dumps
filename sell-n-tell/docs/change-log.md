@@ -88,28 +88,113 @@ Ticket: AIML-2698 · Commit: pending · Evidence: F2/F5
 | `agent.py` | Prompt: match on the OUTCOME, not on which keywords appear; if no allowed code fits, ask the rep, then flag rather than choose the nearest | Baseline showed the same utterance mapping to codes 2 and 3 — opposite meanings, both wrong |
 | `agent.py` | Prompt: never state a skip reason the rep did not give, including in the overall summary | F4b: the invention relocated from the topic summary to the call summary |
 
-**Status:** `untested` · `mitigation`. This converts a silently wrong record
-into a flagged one. It does **not** fix the root cause — see the open decision
-below.
+**Status, split by change:**
+
+- `tools.py` plumbing — **`verified-rest`, keep.** This was a genuine bug:
+  `needs_manual_review` was *unreachable* from implicit mode. `_normalize_topics`
+  rebuilt each topic dict from scratch and silently dropped the field, so
+  nothing could ever set it. Worth keeping regardless of the prompt outcome —
+  it is what makes an "outcome doesn't fit" option implementable at all.
+- Prompt rules — **`attempted, ineffective`.** Measured over 6 live runs of the
+  same utterance (3 before, 3 after): the agent never once flagged, and the
+  inconsistency was unchanged.
+
+| Config | Runs | Codes returned | Flagged? |
+|---|---|---|---|
+| Before | 3 | 2, 3, 3 | never |
+| After | 3 | 2, 2, 3 | never |
+| Control (correct code exists) | 2 | 8, 8 (correct) | n/a |
+
+File sync was verified by marker/line-count comparison before the final run, so
+this is not a stale-file artifact.
+
+**Why it failed.** Filling a structured field is effectively an argmax over the
+allowed options — there is always a "best" one. Flagging instead requires the
+model to judge that its own best answer is still wrong, which is
+self-calibration, and `temperature=0.1` explicitly pushes it to commit to the
+top choice. The instruction also competes with everything else in the system
+telling it to produce a code: the schema has the field, the flow expects it,
+the registry is presented as the list to choose from. Same pattern as
+`turn_guard` and F3 — a prompt rule losing to structure. The difference is
+those had a structural fix available at our layer and this one does not.
+
+Note the model is not confused about the call: its own summary said "expressed
+interest, requested a quote", which is accurate. The loss happens in the
+**compression** onto five buckets, not in comprehension.
+
+**What would work instead** (needs the lead's approval, see below): make "none
+of these apply" a real code in the registry rather than a meta-instruction.
+That turns flagging into an ordinary option competing on equal terms, which
+argmax can select, instead of an exception the model must volunteer against
+the grain.
 
 ---
 
-## Open: needs a decision from the project lead
+## Batch 6 — Make "no code fits" a selectable option (SOLVED)
+
+Ticket: AIML-2698 · Commit: pending · Supersedes the Batch 5 prompt attempt
+
+Batch 5 failed because it asked the model to volunteer an exception outside the
+set of allowed values. Filling a structured field is an argmax over that set —
+so the fix is to put the escape hatch *inside* the set.
+
+| File | Change | Why |
+|---|---|---|
+| `mock_db.py` | `DispositionCode.OUTCOME_NOT_COVERED = 99` | The registry needed a real value meaning "none of these" |
+| `mock_db.py` | `_NOT_COVERED_RULE`, appended to every campaign by `get_agent_config` | A narrowed campaign registry must never leave the agent unable to say the outcome isn't representable |
+| `mock_db.py` | `_DISPOSITION_BY_CODE` includes the rule | **Bug found in testing:** without it `disposition_label(99)` fell through to `"Other"`, and the agent read "marked as other" aloud while the UI badge showed the correct label |
+| `mock_db.py` | `stage_notes` sets `needs_manual_review` whenever code is 99 | Server-side so implicit, guided and plain REST agree, rather than trusting each caller to pair them |
+| `agent.py` | Prompt: match on OUTCOME not keywords; 99 is a normal expected choice, with a worked example | Presents 99 as a peer option rather than a failure state |
+| `tools.py` | Tool docstring points at 99 | The model had no way to know the option existed |
+
+**Status: `verified-live`.** Six runs across three scenarios:
+
+| Test | Campaign | Utterance | Expected | Result |
+|---|---|---|---|---|
+| A | renewals | "interested, wants a quote" | 99 — no fitting code exists | **99, 99** |
+| B | renewals | "price ~10% higher than a competitor" | 8 — fitting code exists | **8, 8** |
+| C | standard_sales | "interested, wants a quote" | 1 — fitting code exists | **1, 1** |
+
+A and C are the same sentence under different campaigns. B and C are the
+over-triggering controls: 99 never won when a real code was available. Prior to
+this change the A scenario returned 2 or 3 at random across six runs and never
+once flagged.
+
+**Transferable lesson:** three fixes in this ticket followed the same shape —
+`turn_guard`, F3 (self-skip) and this one. A prompt rule cannot beat a
+structure that points the other way. Change the structure and the behaviour
+follows; leave the structure and the rule is ignored, however emphatically it
+is worded.
+
+## Open: needs sign-off from the project lead (mechanism solved)
 
 **The `renewals` disposition registry has no code for "customer is interested
 and requested a quote."** Measured behaviour, one utterance, four runs:
 
-| Run | Campaign | Code | Correct? |
-|---|---|---|---|
-| 1 | renewals | 2 — Order Placed | no (nothing was ordered) |
-| 2 | renewals | 3 — No current need | no (opposite of run 1) |
-| 3 | renewals | 3 — No current need | no |
-| 4 (control) | renewals | 8 — Pricing concerns | **yes** |
+Utterance: *"Just got off the phone with Acme about their renewal. They're
+really interested and want me to send over a quote."* Campaign `renewals`,
+which allows codes 2, 3, 5, 8, 9.
 
-Run 4 proves the model maps correctly when a correct code exists, so the fault
-is the registry, not the agent. In run 1 the free-text summary was accurate
-("next step is to prepare and send a formal quote") while the disposition code
-said Order Placed — the structured field that feeds reporting was the wrong one.
+| Runs | Codes returned | Correct? |
+|---|---|---|
+| 6 (3 before + 3 after the prompt mitigation) | 2, 3, 3, 2, 2, 3 | **no** — 2 means the sale closed, 3 means there is no deal; opposite meanings, neither true |
+| 2 control: *"our price is ~10% higher than a competitor"* | 8, 8 | **yes**, both times |
 
-Options: add code 1 to `renewals`, or add an explicit "outcome does not fit"
-code. Either is a product decision.
+The control proves the model maps correctly when a correct code exists, so the
+fault is the registry, not the agent. In one run the free-text summary was
+accurate ("next step is to prepare and send a formal quote") while the
+disposition code said Order Placed — **the structured field that feeds
+reporting was the wrong one**, while the prose a human would read was right.
+
+A prompt-level mitigation was attempted and measurably failed (see Batch 5).
+
+**Options, both product decisions:**
+
+1. **Add code 1 (Create Opportunity) to `renewals`.** Renewal conversations do
+   generate new opportunities; excluding it looks like an oversight.
+2. **Add a registry-wide "outcome not covered by this registry" code.** More
+   general — catches every future gap and gives the agent a way to say "I don't
+   know" that it can actually express.
+
+Recommend both: (1) closes this hole, (2) makes the system fail loudly rather
+than silently the next time a hole appears.
