@@ -103,12 +103,18 @@ def _normalize_topics(
         # explicit False marks a planned-but-not-covered topic.
         discussed = item.get("discussed")
         discussed = True if discussed is None else bool(discussed)
+        # The rep was asked but no allowed code genuinely fits what they said.
+        # Flagging for a human is a legitimate terminal state, not an error --
+        # without carrying this through, the model's only options are to guess
+        # a wrong code or loop.
+        needs_review = bool(item.get("needs_manual_review", False))
 
         if not topic:
             problems.append(f"topic #{idx + 1} is missing a subject label")
         # A discussed topic needs a valid disposition; a not-discussed planned
-        # topic is allowed to have none (it's awaiting the rep's feedback).
-        if discussed and code is None:
+        # topic is allowed to have none (it's awaiting the rep's feedback), and
+        # so is one explicitly flagged for manual review.
+        if discussed and code is None and not needs_review:
             problems.append(
                 f"topic '{topic or idx + 1}' is missing a valid "
                 f"disposition_code from the registry"
@@ -120,6 +126,7 @@ def _normalize_topics(
                 "disposition_code": code,
                 "executive_summary": (item.get("executive_summary") or "").strip(),
                 "discussed": discussed,
+                "needs_manual_review": needs_review,
             }
         )
 
@@ -165,8 +172,18 @@ async def stage_visit_notes(
               when the topic was discussed.
             - executive_summary: a condensed 1-2 sentence summary of THAT topic
               (or the rep's reason if it was planned but not discussed).
-            - discussed: true if the rep covered it; false for a planned topic
-              they did not get to (then disposition_code may be omitted).
+            - needs_manual_review: true if you asked the rep and STILL cannot
+              map their answer to any allowed disposition_code (the registry
+              has no code that fits what actually happened). Set
+              disposition_code to null in that case. Never pick the nearest
+              wrong code instead -- a flagged record can be corrected by a
+              human, a confidently wrong one cannot.
+            - discussed: true if the rep covered it. Set false ONLY after you
+              asked the rep about the topic and they said they did not get to
+              it -- never on the first call. A planned topic the rep never
+              mentioned must be omitted from this list entirely, so the
+              coverage check can remind you to ask. If they give no reason,
+              leave executive_summary empty rather than inventing one.
 
     Returns:
         A dict containing ``confirmation_text`` -- the exact sentence to read

@@ -351,6 +351,104 @@ never silent wrong code"). Needs a product decision, not just code.
 **Note the distinction for the ticket: validity and correctness are different
 problems. We fixed validity. Consistency remains open.**
 
+### F3 — The model could skip topics on the rep's behalf, bypassing the gate
+
+Found live. Planned topics *Contract / agreement renewal* + *Pricing &
+promotions*; the rep dictated only the renewal and said nothing else. The model
+staged **both**, marking the second:
+
+```json
+{"topic": "Pricing & Promotions",
+ "executive_summary": "Rep did not get to pricing due to time constraints.",
+ "discussed": false}
+```
+
+The rep never mentioned time constraints. The agent then skipped the coverage
+reminder entirely and went straight to "Should I save this?".
+
+**Two independent causes.**
+
+*Why the gate missed it.* `compute_missing_topics` treated a planned topic as
+covered once its label appeared in `topics`, regardless of `discussed`. That was
+deliberate — a rep who says "I skipped it" has addressed the topic. But presence
+carries no provenance: a rep-stated skip and a model-invented skip produce
+byte-identical payloads. **The gate checked presence, not provenance.**
+
+*Why it invented a reason.* `DiscussionTopic.executive_summary` was a required
+field, and the tool docstring said it should hold "the rep's reason if it was
+planned but not discussed". Having decided to stage a skip, the model had to
+supply a summary it had no data for — so the schema made confabulation
+mandatory. The prompt's "never invent facts" rule cannot win against a required
+field.
+
+*Why runs differed.* The prompt contradicts itself. Step 2 says to add an entry
+for "EVERY planned topic the rep **actually discussed**"; the field-mapping rules
+describe `discussed: false` as a plain value with no timing constraint. Both
+readings are faithful, so sampling decides which one is followed — an earlier
+run asked about Pricing correctly, this one did not.
+
+**Fix.** Encode the ordering in code rather than prose:
+
+- `compute_missing_topics(..., allow_skips)` — `discussed=false` counts as
+  coverage only when `allow_skips=True`.
+- `stage_notes` sets `allow_skips = previous is not None`: **False on the first
+  staging call, True on a re-stage.** A re-stage only happens after the agent
+  asked and the rep answered, so a skip is trustworthy exactly then. The flag is
+  stored on the record so `commit_notes` applies the same rule.
+- `executive_summary` is now optional (`default=""`), removing the pressure to
+  invent. The same pressure existed on the legitimate re-stage path too.
+- Prompt and tool docstring aligned: set `discussed=false` only after asking,
+  omit unmentioned topics entirely, leave the summary empty if no reason given.
+
+### Regression suite v2
+
+`C3` was revised (its original form — a skip on the first stage — is now the
+bypass being blocked) and `C5` added. All nine pass:
+
+| Case | Checks | Result |
+|---|---|---|
+| A | uncovered topic → commit blocked (409) | PASS |
+| B | campaign-illegal event type + code → 422 | PASS |
+| C1 | full coverage → commits | PASS |
+| C2 | legal `renewals` payload → stages | PASS |
+| C3a | first stage reports the gap | PASS |
+| C3b | re-stage accepts the skip | PASS |
+| C3c | commits after a real skip | PASS |
+| C4 | `needs_manual_review` with no code → commits | PASS |
+| C5 | self-skip on first stage does **not** count as coverage | PASS |
+
+C5 replays the exact payload observed live.
+
+### F4 — Invented skip reasons relocate rather than disappear
+
+After the F3 fix, the rep answered the coverage question with exactly "I skipped
+it" — no reason given. Results:
+
+- Topic-level `executive_summary`: **"Topic was skipped."** — factual, no
+  invention. The optional-field change worked where it applied.
+- Overall `executive_summary`: *"The planned discussion on pricing and
+  promotions was skipped **due to time constraints**."* — invented, and the
+  same phrase the model produced in F3.
+
+The overall summary is still a required field (legitimately — every record needs
+one), so the pressure moved there. The recurrence of the identical phrase
+suggests this is also a language-model tendency to embellish "skipped" into
+"skipped because X", not purely a schema artifact.
+
+**This cannot be fully closed in code.** There is no server-side way to verify
+whether a sentence of free prose reflects something the rep actually said;
+matching it against the transcript would be brittle and would fail on
+legitimate paraphrase. Mitigations applied and recommended:
+
+1. Prompt rule added (`agent.py`, Hard rules): if the rep skips without giving
+   a reason, do not state a reason anywhere, including the overall summary.
+   Reduces but does not guarantee — same caveat as every prompt rule here.
+2. Document as a known failure mode in the FAR runbook (AC#4). Mitigating
+   factor: `raw_transcript_backup` preserves what was actually said, so a
+   human can always check the record against the rep's words.
+
+Same class as F2: the model fills a gap plausibly rather than leaving it empty.
+
 ### Still outstanding
 
 - `turn_guard` reset on WebSocket teardown (Experiment 3, not yet reproduced).

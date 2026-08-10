@@ -74,8 +74,14 @@ class DiscussionTopic(BaseModel):
         ),
     )
     executive_summary: str = Field(
-        ...,
-        description="Condensed 1-2 sentence summary of THIS topic",
+        default="",
+        description=(
+            "Condensed 1-2 sentence summary of THIS topic. Leave empty rather "
+            "than inventing one -- a topic the rep skipped without giving a "
+            "reason has nothing to summarize, and a required field here forces "
+            "the model to confabulate (observed live: 'Rep did not get to "
+            "pricing due to time constraints' when the rep never said so)."
+        ),
     )
     discussed: bool = Field(
         default=True,
@@ -256,17 +262,31 @@ def _topic_key(label: str) -> str:
 
 
 def compute_missing_topics(
-    planned_topics: list[str], staged_topics: list[dict[str, Any]]
+    planned_topics: list[str],
+    staged_topics: list[dict[str, Any]],
+    allow_skips: bool = True,
 ) -> list[str]:
     """Return planned topics that have no corresponding entry in the payload.
 
     A planned topic is considered *covered* once it appears in the staged
-    ``topics`` list (whether or not it was actually discussed -- a topic the
-    rep explicitly skipped still counts as addressed). Matching is tolerant of
-    case/whitespace and falls back to substring overlap so the model doesn't
-    have to reproduce the catalog label verbatim.
+    ``topics`` list. Matching is tolerant of case/whitespace and falls back to
+    substring overlap so the model doesn't have to reproduce the catalog label
+    verbatim.
+
+    ``allow_skips`` decides whether a ``discussed=false`` entry counts as
+    coverage. It must be False on the FIRST staging call: the model can
+    otherwise mark a topic the rep never mentioned as "not discussed", invent a
+    reason for it, and satisfy the coverage check without the rep ever being
+    asked (observed live: a topic came back as "Rep did not get to pricing due
+    to time constraints" when the rep said nothing of the kind). A skip is only
+    trustworthy once the rep has actually been asked, which is exactly what a
+    re-stage represents -- so skips count only on a correction.
     """
-    covered_keys = {_topic_key(t.get("topic", "")) for t in staged_topics}
+    covered_keys = {
+        _topic_key(t.get("topic", ""))
+        for t in staged_topics
+        if allow_skips or t.get("discussed", True)
+    }
     missing: list[str] = []
     for planned in planned_topics:
         pk = _topic_key(planned)
@@ -466,7 +486,9 @@ def _join_natural(items: list[str]) -> str:
 
 
 def build_confirmation_text(
-    payload: dict[str, Any], planned_topics: list[str] | None = None
+    payload: dict[str, Any],
+    planned_topics: list[str] | None = None,
+    allow_skips: bool = True,
 ) -> str:
     """Compose the full implicit-confirmation string from staged JSON values.
 
@@ -482,7 +504,9 @@ def build_confirmation_text(
     overall = (payload.get("executive_summary") or "").strip()
     summary_clause = f"Here's my summary: {overall} " if overall else ""
 
-    missing = compute_missing_topics(planned_topics or [], topics)
+    missing = compute_missing_topics(
+        planned_topics or [], topics, allow_skips=allow_skips
+    )
 
     if topics:
         topic_parts = [
@@ -608,14 +632,23 @@ def stage_notes(
     previous = (
         _STAGED_NOTES.get(previous_session_id) if previous_session_id else None
     )
+    # A "skip" (discussed=false) only counts as coverage once the rep has
+    # actually been asked about the topic -- which is what a re-stage means.
+    # On the first staging call the model can otherwise skip topics on the
+    # rep's behalf and bypass the coverage reminder entirely.
+    allow_skips = previous is not None
     if previous:
         confirmation_text = build_change_confirmation(
             previous["payload"], payload, planned_topics
         )
     else:
-        confirmation_text = build_confirmation_text(payload, planned_topics)
+        confirmation_text = build_confirmation_text(
+            payload, planned_topics, allow_skips=allow_skips
+        )
 
-    missing = compute_missing_topics(planned_topics, payload.get("topics", []))
+    missing = compute_missing_topics(
+        planned_topics, payload.get("topics", []), allow_skips=allow_skips
+    )
     # A correction re-stages under a brand-new session_id, so the count has to
     # be carried forward from the record it's correcting rather than derived
     # from this one alone.
@@ -631,6 +664,9 @@ def stage_notes(
         # the campaign this record was actually staged under, rather than
         # trusting whatever the commit caller claims.
         "campaign_type": campaign_type,
+        # Whether skips were trustworthy for THIS staging, so the commit gate
+        # applies the same rule the confirmation text was built from.
+        "allow_skips": allow_skips,
     }
     logger.info(
         "Staged notes session_id=%s event_type=%s topics=%d missing=%d "
@@ -681,7 +717,9 @@ def commit_notes(
 
     planned_topics = record.get("planned_topics") or []
     missing_topics = compute_missing_topics(
-        planned_topics, record["payload"].get("topics", [])
+        planned_topics,
+        record["payload"].get("topics", []),
+        allow_skips=record.get("allow_skips", True),
     )
     # Coverage gate: refuse to write a record the system already knows is
     # incomplete. This runs BEFORE the record is marked committed so a blocked
