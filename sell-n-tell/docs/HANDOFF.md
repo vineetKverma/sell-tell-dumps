@@ -6,35 +6,39 @@ current deliverable), `change-log.md` (what we changed and why), and
 
 ---
 
-## ⚠️ START HERE — the lead has pushed changes we don't have
+## ✅ START HERE — rebase done, both demo blockers closed
 
-`feature/AIML-2130-guided-flow` tip is **`c6860bd`** (pushed 2026-08-11, visible
-in the Bitbucket/web UI):
+**Branch to work on and demo: `feature/AIML-2698-on-2130`.**
+The lead's `c6860bd` with our six `[AIML-2698]` commits rebased on top.
+Not yet pushed. See `change-log.md` Batches 6–7 for what his commit contained
+and how the conflicts were resolved.
 
-> `[AIML-2130] Fixed both implicit and guided flow disposition fields and now
-> has latest working solution which was used for demo with leadership`
+**Both demo-blocking gaps are closed:**
 
-Our branch is based on `3ecd956` (2026-07-29), so `c6860bd` is one commit we do
-not have. **It probably overlaps our disposition work directly** — campaign-scoped
-codes, code 99, the coverage gate.
+- **Gap 18** (guided leaves the record card empty) — closed by *his*
+  `c6860bd`: `renderPayload(guidedPayload)` at `app.js:845`.
+- **Gap 6** (guided stalls before saving) — closed by ours, `3ce0c34`:
+  `record_topic_disposition` commits directly at `all_topics_done`.
+  Verified with the harness workaround removed.
 
-**The local clone does not fetch it.** `git fetch origin --prune` followed by
-`git rev-parse --short origin/feature/AIML-2130-guided-flow` still prints
-`3ecd956` even though the web UI shows `c6860bd`. Diagnose before trusting any
-local ref — a stale remote-tracking ref already produced one wrong "his branch
-never moved" conclusion on 2026-08-11:
+**Verified 2026-08-11:** 4 guided + 4 implicit scenarios, one CRM record each,
+no duplicates.
 
-```powershell
-git remote -v
-git config --get-all remote.origin.fetch
-git ls-remote origin "refs/heads/feature/AIML-2130-guided-flow"   # asks the server directly
-```
+### Still open
 
-Once it fetches, assess with `tools/compare-trees.ps1` (three-way: baseline vs
-his vs ours).
+1. **Tell Sainitheesh.** He does not know about the rebase, that his fix closed
+   one of our documented gaps, or that our Gap 6 fix touches his guided flow.
+2. **Push the branch.**
+3. **Rehearse** — `demo-golden-path.md`, Scenario A ×3, Scenario B ×5.
+4. Decision #1 below (how the fixes get carried forward) is **still unanswered**.
 
-**Decided 2026-08-11:** if the changes overlap, **rebase our 2698 fixes on top of
-his branch** — his is what leadership saw, so it is the demo-credible base.
+### Lesson worth keeping
+
+A stale remote-tracking ref produced a confident wrong conclusion ("his branch
+never moved") on 2026-08-11. When the web UI and a local ref disagree, settle it
+with `git ls-remote`, which asks the server, not `git rev-parse`, which reads a
+cache. `tools/compare-trees.ps1` does a three-way tree comparison if his branch
+moves again.
 
 ---
 
@@ -124,9 +128,10 @@ they differ in how much the rep is asked.
 
 | Branch | State |
 |---|---|
-| `feature/AIML-2130-guided-flow` | lead's — **moved 2026-08-10, see START HERE** |
+| `feature/AIML-2698-on-2130` | **ours, current** — `c6860bd` + 6 commits. Not pushed. **Demo this.** |
+| `feature/AIML-2130-guided-flow` | lead's — tip `c6860bd` (2026-08-11); now our base |
 | `feature/AIML-2686` | hybrid flow — not ours |
-| `feature/AIML-2698-disposition-state-correctness` | ours, based on `3ecd956`, pushed |
+| `feature/AIML-2698-disposition-state-correctness` | ours, superseded by the rebase; based on `3ecd956` |
 
 | Ticket | Title | Sprint | Status |
 |---|---|---|---|

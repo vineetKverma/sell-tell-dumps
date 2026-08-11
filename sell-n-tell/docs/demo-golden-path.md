@@ -111,6 +111,58 @@ said nothing of the kind.
 
 ---
 
+## Scenario C — the honest edge. "The one we can't record."
+
+**Run this only for an engineering audience** (Sainitheesh, the team) — not for
+a room of FARs, where it reads as a broken product rather than a known,
+measured, costed gap.
+
+**Source row:** *"Quote created together on site and sent to GM Marsha for
+approval."* Quoting appears in **142 of 975** real notes (~15% of visits) and
+has **no disposition code**.
+
+**Planned topics:** `Appliances`
+**Mode:** implicit
+
+> "On-site visit at Cedar Ridge. Went through appliances with the GM — we built
+> a quote together on site and I've sent it over to Marsha for approval."
+
+**Expected record:** Appliances → **99, Outcome not covered — needs manual
+review** (implicit), or `null` + `needs_manual_review` (guided).
+
+**What this demonstrates.** Before the code-99 escape hatch, this exact input
+returned codes 2, 3, 3, 2, 2, 3 across six runs — Order Placed and No Current
+Need, opposite meanings, both false, chosen at random. Filling a required
+enum is an argmax over the allowed values, so the model always returns a
+"best" code even when every option is wrong. Adding "not covered" as an
+ordinary peer option lets it select that normally instead of having to
+volunteer an exception.
+
+**The ask this sets up:** three common outcomes have no code — quote
+created (~15%), no contact made (~8%), renewal agreed. That is roughly **a
+quarter of real visits with no correct code available**. Code 99 stops the
+system lying about them; it does not make them recordable. That needs a
+product decision, not an engineering fix.
+
+---
+
+## Running it for Sainitheesh (engineering review)
+
+Four beats, ~8 minutes. This is a working demo of the fixes *and* the real
+data, ending in the one decision only the business can make.
+
+| # | Beat | Show |
+|---|---|---|
+| 1 | **Real data drives the catalog** | The planned-topic list is now Jeremy's 13 product categories, served from `mock_db` via `/api/v1/config/planned-topics`. Mention that only Appliances, HVAC, Pool and Plumbing appear with real frequency in the 1000-row sample — and that 67% of notes name no category at all. |
+| 2 | **Scenario A, implicit** | Speed. ~30 seconds, two topics, two correct dispositions. |
+| 3 | **Scenario B, guided** | Two fixes at once: the record card populates as it goes (**his** `renderPayload` fix), and it saves at the last disposition without stalling (**our** Gap 6 fix). Narrate the coverage gate refusing to save at turn 4. |
+| 4 | **Scenario C** | The registry gap, with the measurement behind it. End on the decision, not the defect. |
+
+Have `far-notes-dataset-analysis.md` open — the frequency tables are what turn
+"this is broken" into "this happens on a quarter of visits, here's the count."
+
+---
+
 ## Known risks on stage
 
 | Risk | Where | Mitigation |

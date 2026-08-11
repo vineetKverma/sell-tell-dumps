@@ -209,11 +209,16 @@ async def get_planned_topics() -> PlannedTopicCatalogResponse:
 async def stage_notes(
     payload: StagedVisitPayload,
     previous_session_id: str | None = Query(default=None),
+    agent_mode: str = Query(default="implicit"),
 ) -> StageResponse | JSONResponse:
     """Stage notes parsed by the Gemini agent and return a confirmation string.
 
     When ``previous_session_id`` is supplied (a correction), the confirmation
     reads back only what changed relative to that prior staged record.
+
+    ``agent_mode`` decides whether a ``discussed=false`` topic counts as
+    coverage on a FIRST stage -- see the allow_skips note in mock_db.stage_notes.
+    Guided asks about every topic before recording a skip; implicit does not.
     """
     data = payload.model_dump()
     planned_topics = data.pop("planned_topics", [])
@@ -247,6 +252,7 @@ async def stage_notes(
         previous_session_id=previous_session_id,
         planned_topics=planned_topics,
         campaign_type=campaign_type,
+        agent_mode=agent_mode,
     )
     return StageResponse(**result)
 

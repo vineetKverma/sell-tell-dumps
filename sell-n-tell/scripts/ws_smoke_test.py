@@ -57,19 +57,18 @@ IMPLICIT_SCENARIOS: dict[str, list[str]] = {
     ],
 }
 
-# NOTE on the trailing "Okay." turns below.
+# These scenarios end at the rep's last real utterance -- no trailing nudge.
 #
-# After the last topic is dispositioned, record_topic_disposition returns
-# "all topics are dispositioned, call commit_guided_notes now" -- and the model
-# reliably does NOT act on it. It emits an empty output turn, closes the turn,
-# and waits. Observed with a 15s quiet period and no nudge rescue.
+# They used to carry a trailing "Okay." turn, because after the final topic was
+# dispositioned the model reliably did NOT act on "call commit_guided_notes
+# now": it emitted an empty output turn, closed the turn, and waited. In a real
+# session that is dead air at the worst moment -- every question answered, the
+# record complete, and nothing saved.
 #
-# In a real session that is dead air at the worst moment: every question has
-# been answered, the record is complete, and nothing is saved. It is logged as
-# a defect (see docs/AIML-2698-experiments.md). The trailing turn here exists
-# only so the scenario can reach a commit and exercise the rest of the
-# pipeline -- it is NOT evidence that the flow works unaided, and it should be
-# removed once the stall is fixed.
+# Fixed 2026-08-11: record_topic_disposition now commits directly at
+# all_topics_done rather than asking for a second tool call. The nudge turns
+# were removed with it, deliberately -- keeping them would let the stall come
+# back without any scenario failing.
 GUIDED_SCENARIOS: dict[str, list[str]] = {
     "clean_save": [
         "Yes let's begin.",
@@ -81,7 +80,6 @@ GUIDED_SCENARIOS: dict[str, list[str]] = {
         "Yes that's right.",
         "They already placed an order for the renewal.",
         "Yes correct.",
-        "Okay.",  # trailing nudge -- see NOTE above
     ],
     "playback_then_save": [
         "Start.",

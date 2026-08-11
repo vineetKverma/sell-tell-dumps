@@ -663,6 +663,7 @@ def stage_notes(
     previous_session_id: str | None = None,
     planned_topics: list[str] | None = None,
     campaign_type: str | None = None,
+    agent_mode: str = "implicit",
 ) -> dict[str, Any]:
     """Stage an extracted payload for confirmation; return id + confirmation.
 
@@ -690,7 +691,16 @@ def stage_notes(
     # actually been asked about the topic -- which is what a re-stage means.
     # On the first staging call the model can otherwise skip topics on the
     # rep's behalf and bypass the coverage reminder entirely.
-    allow_skips = previous is not None
+    #
+    # Guided is exempt. There, a discussed=false entry can ONLY be produced by
+    # record_topic_disposition, which is gated by turn_guard.has_new_reply --
+    # so the rep provably answered the outcome question for that topic before
+    # the skip was recorded. The provenance the re-stage rule infers is already
+    # guaranteed at the tool level. Without this exemption guided deadlocks:
+    # it asks about the topic, the rep says they skipped it, and the first (and
+    # only) staging call then reports that same topic as uncovered, so the
+    # commit 409s and the agent asks again. Observed live 2026-08-11.
+    allow_skips = previous is not None or agent_mode == "guided"
     if previous:
         confirmation_text = build_change_confirmation(
             previous["payload"], payload, planned_topics

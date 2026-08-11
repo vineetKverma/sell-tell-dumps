@@ -232,3 +232,127 @@ A prompt-level mitigation was attempted and measurably failed (see Batch 5).
 
 Recommend both: (1) closes this hole, (2) makes the system fail loudly rather
 than silently the next time a hole appears.
+
+---
+
+## Batch 6 — Rebase onto the lead's branch, and Gap 6 closed
+
+Date: 2026-08-11 · Branch: `feature/AIML-2698-on-2130`
+
+### Context
+
+`feature/AIML-2130-guided-flow` had moved to `c6860bd` after all. An earlier
+check read a stale remote-tracking ref and concluded it had not — always settle
+that with `git ls-remote`, not `git rev-parse`, when the web UI disagrees.
+
+Decision: **rebase our five 2698 commits on top of `c6860bd`** rather than
+merging his into ours. His branch is what leadership saw, so it is the
+demo-credible base.
+
+### What his commit contained
+
+Despite the message ("Fixed both implicit and guided flow disposition fields"),
+`c6860bd` does **not** touch the disposition registry. It contains:
+
+| File | Change |
+|---|---|
+| `app.js` (+186), `style.css` (+20), `index.html` (+16) | Guided-flow record card rendering |
+| `mock_db.py` (+19) | Idempotent `commit_notes` — returns the original `crm_record_id` on retry instead of minting a duplicate |
+| `main.py` (+41), `agent_guided.py` (+23) | Supporting changes |
+| `demo_assets/` | Slide generators + 5 PNGs — a leadership deck, not code |
+
+**`app.js:845` — `renderPayload(guidedPayload)` — closes Gap 18.** Guided mode
+now populates the on-screen record card from its incremental tool calls. That
+was on our list as a demo blocker; his fix removed it.
+
+### Conflicts and how they were resolved
+
+| File | Resolution |
+|---|---|
+| `mock_db.py :: commit_notes` | His idempotency guard placed **above** our coverage gate. Safe because the gate runs before `record["committed"] = True` is ever set, so `committed=True` implies the record already passed validation. Kept his `record["crm_record_id"] = crm_record_id` (the guard reads a key nothing else wrote); dropped his duplicate assignment block, which would otherwise have marked the record committed *before* validation. |
+| `app.js` | Kept his `renderPayload` call **and** our comment about `turnComplete` re-arming the mic. Ours was comment-only; taking either side alone would have lost something. |
+
+Also caught: `VOICE_NOTES_BQ_ENABLED=false` had ridden into a commit. Restored
+to `true` (`6b7e27b`); the local override belongs in the working tree,
+uncommitted.
+
+**Status:** `verified-live` — server boots, both modes reach a commit.
+
+---
+
+## Batch 7 — Gap 6 / F5: guided stalls before saving
+
+Ticket: AIML-2698 · Commit: `3ce0c34`
+
+| File | Change | Why |
+|---|---|---|
+| `tools_guided.py` | `record_topic_disposition` commits directly at `all_topics_done` instead of returning "call `commit_guided_notes` now" | The model reliably did not act on that instruction — empty output turn, turn closed, nothing saved, no signal to the rep. The second hop bought nothing: no further rep input is needed at that point. |
+| `tools_guided.py` | `_S_COMMIT_RESULT`; `commit_guided_notes` replays the prior result instead of re-staging | Without it, a model that still makes the call re-stages under a **new** `session_id` and mints a duplicate record. `mock_db`'s idempotency guard keys on `session_id` and cannot catch that. |
+| `ws_smoke_test.py` | Removed the trailing `"Okay."` nudge from `clean_save` | It existed only to mask this defect. Leaving it in would let the stall return without any scenario failing. |
+
+This is the fifth fix in this ticket to follow the same shape: **a structural
+change beat an instruction the model was free to ignore.** The one prompt-only
+attempt (Batch 5) remains the only measured failure.
+
+**Status:** `verified-live`. 4 guided + 4 implicit scenarios, one CRM record
+each, no duplicates. `clean_save` reaches `CRM-0408460644` with the nudge turn
+removed — the fix stands unaided.
+
+---
+
+## Batch 8 — Guided deadlocked whenever the rep skipped a planned topic
+
+Ticket: AIML-2698 · Found during live rehearsal, 2026-08-11
+
+### Symptom
+
+Scenario B (guided, Appliances + Pool Supplies, rep skips Pool Supplies): the
+agent asked *"What was the outcome for Pool Supplies?"*, the rep answered
+*"we didn't get to it"* — and the agent then said "Let me check" and hung.
+
+```
+record_topic_disposition topic=Pool Supplies code=None remaining=0
+Staged notes ... topics=2 missing=1
+Commit BLOCKED ... planned topics without an outcome: ['Pool Supplies']
+POST /api/v1/notes/commit 409 Conflict
+Guided commit blocked -- uncovered topics: ['Pool Supplies']
+```
+
+### Cause
+
+`stage_notes` sets `allow_skips = previous is not None` — a `discussed=false`
+topic counts as coverage only on a **re-stage**, because a re-stage implies the
+rep was asked (the F3 fix, Batch 3).
+
+Guided stages exactly **once**, from `commit_guided_notes`. So the skip never
+counted, the commit 409'd, and the agent was instructed to ask about a topic it
+had just asked about — a loop with no exit.
+
+### Fix
+
+| File | Change |
+|---|---|
+| `mock_db.py` | `stage_notes(..., agent_mode="implicit")`; `allow_skips = previous is not None or agent_mode == "guided"` |
+| `main.py` | `/api/v1/notes/stage` accepts `agent_mode` as a query param and passes it through |
+| `tools_guided.py` | `commit_guided_notes` stages with `params={"agent_mode": "guided"}` |
+
+**Why guided is safe to exempt:** a `discussed=false` entry there can only be
+produced by `record_topic_disposition`, which is gated on
+`turn_guard.has_new_reply` — the rep provably answered the outcome question for
+that topic. The provenance the re-stage rule *infers* is guaranteed at the tool
+level. **Implicit is unchanged**, so the F3 protection still applies where it
+was measured.
+
+**Status:** `verified-live`. `topics=2 missing=0`, commit 200, `CRM-9B6000D420`
+with Pool Supplies as `discussed=false` carrying the rep's own reason.
+
+### Why this took so long to find
+
+The Gap 6 stall was **masking** it. Guided never reached the commit, so the 409
+never fired. Every guided session where the rep skipped a planned topic would
+have deadlocked — and on real data that is the *common* case, since 67% of
+notes mention no planned category at all.
+
+Neither the REST suite nor `ws_smoke_test` covered "rep skips a topic in
+guided". **Live rehearsal found it; the harness would not have.** Add that case
+to both before AIML-2702.
