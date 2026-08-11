@@ -267,17 +267,28 @@ _DISPOSITION_BY_CODE: dict[int, dict[str, Any]] = {
 # selected topic, reminding the rep about any topic that was never mentioned.
 # ---------------------------------------------------------------------------
 
+# Product category titles, per the business (Jeremy Daniell, 2026-08-07):
+# reps plan a call around the categories they intend to sell into.
+#
+# Note from the real-notes sample (1000 rows, see
+# docs/far-notes-dataset-analysis.md): only Appliances, HVAC, Pool and Plumbing
+# appear with real frequency in post-visit notes; Ceiling Fans never appears,
+# and 67% of notes mention no category at all. Coverage reminders will
+# therefore be the common path rather than the exception.
 PLANNED_TOPIC_CATALOG: list[dict[str, str]] = [
-    {"id": "new_product_intro", "label": "New product introduction"},
-    {"id": "pricing_promotions", "label": "Pricing & promotions"},
-    {"id": "contract_renewal", "label": "Contract / agreement renewal"},
-    {"id": "reorder_replenishment", "label": "Reorder & replenishment"},
-    {"id": "upsell_crosssell", "label": "Upsell & cross-sell opportunities"},
-    {"id": "competitive_landscape", "label": "Competitive landscape"},
-    {"id": "account_review", "label": "Account satisfaction & service review"},
-    {"id": "delivery_logistics", "label": "Delivery & logistics"},
-    {"id": "payment_terms", "label": "Payment terms & credit"},
-    {"id": "brand_compliance", "label": "Marketing & brand compliance"},
+    {"id": "appliances", "label": "Appliances"},
+    {"id": "cleaning_janitorial", "label": "Cleaning & Janitorial"},
+    {"id": "electrical", "label": "Electrical"},
+    {"id": "hardware", "label": "Hardware"},
+    {"id": "hvac", "label": "HVAC"},
+    {"id": "lighting_ceiling_fans", "label": "Lighting & Ceiling Fans"},
+    {"id": "linens_towels", "label": "Linens & Towels"},
+    {"id": "office_supplies", "label": "Office Supplies"},
+    {"id": "paint_supplies", "label": "Paint & Supplies"},
+    {"id": "plumbing", "label": "Plumbing"},
+    {"id": "pool_supplies", "label": "Pool Supplies"},
+    {"id": "storage", "label": "Storage"},
+    {"id": "tools", "label": "Tools"},
 ]
 
 

@@ -31,6 +31,12 @@ _S_SUMMARY = "guided_executive_summary"
 _S_EVENT_TYPE = "guided_event_type"
 _S_TOPIC_RESULTS = "guided_topic_results"
 _S_PENDING_TOPICS = "guided_pending_topics"
+# Set once the record has actually been committed, so a second
+# commit_guided_notes call replays the original result instead of re-staging
+# and minting a duplicate CRM record. Needed because the last topic's
+# disposition now commits directly (see record_topic_disposition) -- the model
+# may still make the call it was previously instructed to make.
+_S_COMMIT_RESULT = "guided_commit_result"
 # Written by agent_guided's config callback (literal to avoid a circular import).
 _AGENT_CONFIG_KEY = "agent_config"
 _CAMPAIGN_TYPE_KEY = "campaign_type"
@@ -361,13 +367,29 @@ async def record_topic_disposition(
                 f"{pending[0]}?' and run the disposition loop again."
             ),
         }
-    return {
-        "status": "all_topics_done",
-        "instruction_for_model": (
-            f"{note}All topics are dispositioned. Call commit_guided_notes "
-            "now, then speak its closing_statement verbatim and end."
-        ),
-    }
+    # Every topic is dispositioned. Commit HERE rather than instructing the
+    # model to make a second tool call.
+    #
+    # Gap 6 / F5: asking for that second call is where guided mode stalls --
+    # the model emits `OUT_TX text='' finished=True`, closes its turn and
+    # never calls commit_guided_notes. The rep has answered everything, the
+    # record is complete, and nothing is saved, with no signal that the save
+    # didn't happen. Reproduced on demand via ws_smoke_test.
+    #
+    # The extra hop bought nothing: no further rep input is needed at this
+    # point, so the record can be committed directly and the model handed only
+    # the words to say. A prompt rule cannot fix this -- the model is being
+    # asked to act when it has nothing left to say, which is exactly when it
+    # ends the turn.
+    result = await commit_guided_notes(tool_context)
+    if result.get("status") not in ("blocked", "rejected", "error"):
+        result["instruction_for_model"] = (
+            f"{note}Read the closing_statement verbatim. The session is now "
+            "complete."
+        )
+    # blocked/rejected/error keep their own recovery instruction -- the model
+    # asks the rep, re-records, and calls commit_guided_notes itself.
+    return result
 
 
 async def commit_guided_notes(tool_context: ToolContext) -> dict:
@@ -375,7 +397,23 @@ async def commit_guided_notes(tool_context: ToolContext) -> dict:
 
     Call this only after every topic has a recorded disposition (or
     needs_manual_review flag).
+
+    Normally the last record_topic_disposition call commits directly and you
+    do not need to call this at all -- but calling it again is safe.
     """
+    # Idempotency. The final disposition already commits, so a model that
+    # still makes this call would otherwise re-stage under a NEW session_id
+    # and mint a duplicate CRM record -- mock_db's own idempotency guard is
+    # keyed on session_id and cannot catch that.
+    prior = tool_context.state.get(_S_COMMIT_RESULT)
+    if prior:
+        logger.info(
+            "commit_guided_notes: already committed as crm_record_id=%s -- "
+            "replaying the original result instead of re-staging",
+            prior.get("crm_record_id"),
+        )
+        return prior
+
     event_type = tool_context.state.get(_S_EVENT_TYPE)
     topics = tool_context.state.get(_S_TOPIC_RESULTS) or []
     transcript = tool_context.state.get(_S_TRANSCRIPT) or ""
@@ -515,7 +553,7 @@ async def commit_guided_notes(tool_context: ToolContext) -> dict:
         if manual_review_topics
         else ""
     )
-    return {
+    result = {
         "status": data.get("status", "success"),
         "crm_record_id": data.get("crm_record_id"),
         "manual_review_topics": manual_review_topics,
@@ -529,3 +567,5 @@ async def commit_guided_notes(tool_context: ToolContext) -> dict:
             "complete."
         ),
     }
+    tool_context.state[_S_COMMIT_RESULT] = result
+    return result

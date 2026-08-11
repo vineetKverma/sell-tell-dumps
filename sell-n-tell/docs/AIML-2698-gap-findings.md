@@ -338,6 +338,70 @@ Recorded because the flows are actively being extended.
 
 ---
 
+## Gap 18 — Guided mode leaves the on-screen record card empty
+
+**Reproduction (live).** Run any Guided session through to a successful save and
+look at the "Staged CRM Record" panel.
+
+**Observed.** The record commits and a `CRM-…` id appears, but every other field
+is blank:
+
+```
+Event type              : —
+Call summary            : —
+Planned-topic coverage  : (empty)
+Discussion topics       : —
+CRM record id           : CRM-C776A61EBC
+```
+
+**Cause.** The frontend populates that card from the arguments of a
+`stage_visit_notes` call. Guided never makes one — it builds the record
+incrementally across five tools and stages only at the end, inside
+`commit_guided_notes`. `app.js` acknowledges this in a comment ("Guided flow
+never populates the payload card").
+
+**Impact — demo-relevant.** Guided's whole argument is that the rep can see each
+field confirmed before it is saved; on screen it shows less than Implicit, not
+more. Shown side by side, the comparison reads backwards.
+
+---
+
+## Side-by-side comparison (same utterance, both modes)
+
+Campaign `standard_sales`, planned topics *Pricing & promotions* and
+*Contract / agreement renewal*. Identical dictation:
+
+> "Just left Acme. We talked through the contract renewal — they're happy and
+> ready to re-sign for another year. Pricing came up too; they think we're about
+> ten percent higher than a competitor."
+
+| | Implicit | Guided |
+|---|---|---|
+| Record | `CRM-B933E3D4C7` | `CRM-C776A61EBC` |
+| Event type | On-site visit (inferred) | On-site visit (asked) |
+| Contract renewal | **1 — Create Opportunity** | **1 — Create Opportunity** |
+| Pricing & promotions | **8 — Pricing concerns** | **8 — Pricing concerns** |
+| Rep turns | 2 | ~8 |
+| Confirmed each disposition? | no | yes |
+| On-screen record | fully populated | **empty (Gap 18)** |
+
+**Both modes produced identical dispositions**, so the flows agree on extraction
+given the same input; they differ in how much the rep is asked.
+
+**But note the code both chose.** "Happy and ready to re-sign for another year"
+was recorded as *Create Opportunity*. Across earlier sessions the same outcome
+also produced **5 — Buying from preferred vendor already** and **2 — Order
+Placed** — three different codes in the campaign that has the **full** ten-code
+registry.
+
+This widens Gap 5: the problem is not only that `renewals` excludes code 1.
+**There is no "renewal agreed" outcome anywhere in the registry.** Codes 1 and 2
+describe new business; 3–7 are rejection reasons. The single most common
+renewals-desk outcome has no correct code in any campaign, so the model settles
+on a different neighbour each run.
+
+---
+
 ## Not reproduced
 
 ### Gap 15 — Orphaned staged records after a correction
