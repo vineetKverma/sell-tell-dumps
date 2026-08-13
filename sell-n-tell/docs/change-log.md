@@ -356,3 +356,112 @@ notes mention no planned category at all.
 Neither the REST suite nor `ws_smoke_test` covered "rep skips a topic in
 guided". **Live rehearsal found it; the harness would not have.** Add that case
 to both before AIML-2702.
+
+---
+
+## Batch 9 — Two findings from live rehearsal (open, not fixed)
+
+Date: 2026-08-11 · Found rehearsing the golden path, not by any harness.
+
+### F6 — The registry gap is campaign-specific, not registry-wide
+
+**Correction to `far-notes-dataset-analysis.md`.** That doc claims "quote
+created/sent (~15% of visits) has no disposition code". Measured live:
+
+| Campaign | Registry | Utterance | Result |
+|---|---|---|---|
+| `standard_sales` | full (1-10) | quote built on site and sent for approval | **1 — Create Opportunity** |
+| `renewals` | `[2,3,5,8,9]` | same outcome, renewal framing | **99 — Outcome not covered** |
+
+Code 1's `mapping_keywords` literally include **"send a quote"**, so on any
+campaign carrying code 1 a quote maps correctly. `renewals` excludes code 1 —
+that is where the six-run 2/3/3/2/2/3 thrash came from, and where 99 now fires.
+
+**The accurate claim:** *campaigns whose registry excludes code 1 cannot express
+a quote.* Narrower, precise, and it points at a one-line fix — add code 1 to
+`renewals`. The broader "the registry can't express quotes" statement does not
+survive measurement and should not be taken into a room.
+
+Still genuinely uncovered on every campaign: **no contact made** (~8% of real
+visits) which also has no valid event type, and **renewal agreed**.
+
+### F7 — Coverage matching breaks on inflection, and duplicates the topic
+
+`compute_missing_topics` matches planned topics case/whitespace-tolerantly with
+a two-way substring fallback. It does **not** handle inflection:
+
+```
+planned:  "Appliances"
+recorded: "Appliance Contract Renewal"
+"appliances" not in "appliance contract renewal"  -> reported UNCOVERED
+```
+
+The agent then asks about a topic it just recorded. Worse, when the rep answers,
+the model **adds a second topic row** rather than reconciling with the first —
+observed live, `CRM-7FABDC6FA2` carries both "Appliance Contract Renewal" (99)
+and "Appliances" (99) for a single discussion. The agent says so out loud:
+*"Done. I've added a new topic, 'Appliances'."*
+
+**Impact.** Not a wrong code — both entries were correct — but one conversation
+produces two CRM rows, and the rep is interrogated about something already
+covered. With the 13 product categories this will recur constantly: *Tools* ->
+"Tool order", *Linens & Towels* -> "Linen order".
+
+**Not fixed** (found the day before a demo; matching logic is load-bearing for
+the coverage gate). Candidate directions:
+
+1. Normalise both sides before comparing — casefold, strip punctuation, and
+   stem or at minimum handle trailing `s`/`es`.
+2. Have the tool constrain the topic label to the planned-topic catalog rather
+   than letting the model free-text it. Structural, and the shape that has
+   worked five times in this ticket.
+3. On a re-stage, merge into an existing topic whose label overlaps instead of
+   appending a new one.
+
+Option 2 is the real fix; option 1 is the cheap mitigation.
+
+**Demo mitigation:** phrase the dictation so the planned label is the salient
+noun ("On appliances -- the GM wants a quote") rather than offering a phrase the
+model will adopt as a topic name ("Appliance Contract Renewal").
+
+---
+
+## Batch 10 — The `renewals` registry is too narrow for renewal conversations
+
+Date: 2026-08-11 · From Dharun's guided test case, run live on
+`feature/AIML-2698-on-2130`.
+
+**Setup:** guided, campaign `renewals`, planned topics Appliances + HVAC.
+Rep says the customer *"decided not to renew, they've signed with another
+vendor"*.
+
+**Result:** `CRM-AB4563A8A8` — Appliances -> **5, Buying from preferred vendor
+already**; HVAC -> **8, Pricing concerns**. Phone Call. Both topics covered,
+agent confirmed the ambiguous one before recording (*"I think you mean 'Pricing
+concerns' -- is that correct?"*).
+
+**The finding.** Dharun's script predicted **4 — Contracted to buy from
+competitor**, which is the precisely correct outcome. `renewals` is
+`[2, 3, 5, 8, 9]` — **code 4 is not in it.** The agent returned 5, which is
+defensible (the customer is committed to another supplier) but less precise
+than the outcome deserves.
+
+Combined with F6, the `renewals` subset now demonstrably excludes **two codes
+that renewal conversations produce constantly**:
+
+| Missing | Real outcome it should express | Observed instead |
+|---|---|---|
+| **1** Create Opportunity | "interested, wants a quote" (~15% of all visits) | thrash across 2/3, now 99 |
+| **4** Contracted to buy from competitor | "didn't renew, signed elsewhere" | 5 (preferred vendor already) |
+
+**Recommendation:** add codes **1 and 4** to `renewals`. One line in
+`_CAMPAIGN_CONFIGS`. This is a narrower and better-evidenced ask than "the
+registry cannot express quotes" -- the registry has the right codes, the
+campaign subset withholds them.
+
+**Note for anyone running older demo scripts:** the planned-topic catalog is now
+Jeremy's 13 product categories. Scripts naming "Contract/agreement renewal" or
+"Competitive landscape" refer to the previous catalog and cannot be selected.
+
+**Status:** `verified-live`. Campaign scoping itself is working correctly in
+guided -- this is a registry-content question, not a defect.
