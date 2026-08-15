@@ -64,8 +64,33 @@ export async function startAudioRecorderWorklet(audioRecorderHandler) {
 
   const resampler = createResampler(inputRate, audioRecorderHandler);
 
-  // Connect the microphone source to the worklet.
-  source.connect(audioRecorderNode);
+  // Connect the microphone source to the worklet, low-passing FIRST when we
+  // have to downsample.
+  //
+  // Decimating 48kHz -> 16kHz without this folds everything above 8kHz back
+  // down into the speech band as aliasing noise. It is not subtle: it eats the
+  // consonant detail the model needs, and Gemini starts hearing "the t" where
+  // the browser's own recognizer (which reads the raw mic, unfiltered by us)
+  // correctly hears "Betty".
+  //
+  // Two cascaded biquads = 4th-order Butterworth, with the Q values that give
+  // a maximally flat passband. Cutoff sits below the 8kHz target Nyquist to
+  // leave the filter room to roll off.
+  if (inputRate !== TARGET_SAMPLE_RATE) {
+    const lp1 = audioRecorderContext.createBiquadFilter();
+    lp1.type = "lowpass";
+    lp1.frequency.value = 7000;
+    lp1.Q.value = 0.5412;
+    const lp2 = audioRecorderContext.createBiquadFilter();
+    lp2.type = "lowpass";
+    lp2.frequency.value = 7000;
+    lp2.Q.value = 1.3066;
+    source.connect(lp1);
+    lp1.connect(lp2);
+    lp2.connect(audioRecorderNode);
+  } else {
+    source.connect(audioRecorderNode);
+  }
   audioRecorderNode.port.onmessage = (event) => {
     resampler.push(event.data);
   };
