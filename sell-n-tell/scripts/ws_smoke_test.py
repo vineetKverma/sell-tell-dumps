@@ -44,6 +44,23 @@ IMPLICIT_SCENARIOS: dict[str, list[str]] = {
         "Actually change that to a meeting.",
         "Save.",
     ],
+    # AIML-2703 AC#3. The three correction shapes the ticket names, one per
+    # scenario, because they exercise different paths through stage_notes:
+    # `correction` above changes a top-level field (event_type), the two below
+    # change a topic's disposition and add a topic that was never staged.
+    "correction_disposition": [
+        "Met on site and went through pricing. They placed an order for it. "
+        "End of notes.",
+        "That's wrong -- they didn't order anything, the price was too high "
+        "for their budget.",
+        "Save it.",
+    ],
+    "correction_add_topic": [
+        "Met on site, we went through pricing and they said it was too "
+        "expensive. End of notes.",
+        "I also covered the contract renewal and they placed an order for it.",
+        "Save it.",
+    ],
     "missing_topic": [
         "Talked about pricing, they said it's too expensive.",
         "We didn't get to the contract renewal, ran out of time.",
@@ -116,6 +133,11 @@ GUIDED_SCENARIOS: dict[str, list[str]] = {
 PLANNED_TOPICS_IMPLICIT = {
     "clean_save": "Pricing discussion",
     "correction": "Pricing discussion",
+    "correction_disposition": "Pricing discussion",
+    # Contract renewal is planned but deliberately not mentioned on the first
+    # pass -- the correction turn is what adds it, so this also proves the
+    # coverage gate releases once a re-stage supplies the missing topic.
+    "correction_add_topic": "Pricing discussion,Contract renewal",
     "missing_topic": "Pricing discussion,Contract renewal",
     "multi_topic": "Pricing discussion,Contract renewal",
 }

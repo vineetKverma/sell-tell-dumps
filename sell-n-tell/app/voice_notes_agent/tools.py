@@ -216,6 +216,7 @@ async def stage_visit_notes(
     planned_topics = tool_context.state.get("planned_topics") or []
 
     payload = {
+        "caller_session_id": tool_context.session.id,
         "event_type": event_type,
         "executive_summary": executive_summary,
         "raw_transcript_backup": raw_transcript_backup,
@@ -251,6 +252,7 @@ async def stage_visit_notes(
                 "Tell the user there was a temporary problem saving and to try "
                 "again in a moment."
             ),
+            "ui_event": "tool_error",
         }
 
     if resp.status_code == 422:
@@ -295,6 +297,7 @@ async def stage_visit_notes(
     data = resp.json()
     # Persist the CRM session id so the commit tool can reference it later.
     tool_context.state[_STAGED_SESSION_KEY] = data["session_id"]
+    tool_context.state["last_staged_id"] = data["session_id"]
 
     missing = data.get("missing_topics") or []
     if missing:
@@ -442,6 +445,7 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
                 "Tell the user there was a temporary problem saving and to try "
                 "again in a moment."
             ),
+            "ui_event": "tool_error",
         }
 
     if resp.status_code == 409:

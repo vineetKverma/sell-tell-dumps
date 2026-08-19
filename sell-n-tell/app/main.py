@@ -90,6 +90,26 @@ app = FastAPI(
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
+@app.middleware("http")
+async def _no_store_static(request, call_next):
+    """Forbid caching of /static so a code change is never invisible.
+
+    app.js is loaded as an ES module, which browsers cache aggressively. During
+    this ticket a deployed change stayed invisible for an hour: the file on disk
+    was correct, the server was serving it, and the browser kept executing an
+    older copy with no error anywhere to explain why. A demo machine silently
+    running last week's frontend is a worse failure than any round trip this
+    costs -- these are a handful of small files served from localhost.
+
+    Revisit only if this app is ever put behind a CDN, where the right answer is
+    content-hashed filenames instead.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
+
 # KNOWN LIMITATION: All ADK sessions live in process memory. A server restart drops all
 # sessions. For production, replace this with a DatabaseSessionService (e.g. SQLite, Redis).
 session_service = InMemorySessionService()
@@ -314,6 +334,18 @@ async def commit_notes(body: CommitRequest) -> CommitResponse | JSONResponse:
         )
     except KeyError as exc:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+    except mock_db.SupersededRecordError as exc:
+        # A later correction replaced this draft. Hand back the id that
+        # replaced it so a caller holding a stale id can retry against the
+        # right record rather than guessing.
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "error": "superseded_record",
+                "superseded_by": exc.superseded_by,
+            },
+        )
     except mock_db.IncompleteCoverageError as exc:
         # The rep planned topics that still have no outcome. Refuse the write
         # and hand back exactly which ones, so the caller can collect them.

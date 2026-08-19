@@ -449,6 +449,28 @@ class IncompleteCoverageError(Exception):
         )
 
 
+class SupersededRecordError(Exception):
+    """Raised when a commit targets a draft that a later correction replaced.
+
+    A correction re-stages under a NEW session_id, so the record being
+    corrected stays in ``_STAGED_NOTES``. Without this guard it remains a valid
+    commit target holding the exact data the rep just corrected away from -- and
+    because the idempotency check keys on session_id, committing both drafts
+    looks like two unrelated saves and mints two CRM records for one visit.
+
+    Reproduced by ``scripts/repro_orphan_restage.py`` (AIML-2703): one visit,
+    one correction, two records, the first carrying the rejected event type.
+    """
+
+    def __init__(self, session_id: str, superseded_by: str) -> None:
+        self.session_id = session_id
+        self.superseded_by = superseded_by
+        super().__init__(
+            f"Staged record {session_id} was superseded by {superseded_by}; "
+            "commit the corrected record instead."
+        )
+
+
 def validate_against_campaign(
     payload: dict[str, Any], campaign_type: str | None
 ) -> list[str]:
@@ -721,6 +743,15 @@ def stage_notes(
     # be carried forward from the record it's correcting rather than derived
     # from this one alone.
     correction_count = (previous.get("correction_count", 0) + 1) if previous else 0
+
+    # Retire the record this one corrects. It is otherwise left in
+    # _STAGED_NOTES as a fully valid commit target holding the pre-correction
+    # data -- see SupersededRecordError. Marked rather than deleted so a commit
+    # against it can say what happened and point at the replacement, instead of
+    # 404ing as if the session never existed.
+    if previous is not None and previous_session_id != session_id:
+        previous["superseded_by"] = session_id
+
     _STAGED_NOTES[session_id] = {
         "payload": dict(payload),
         "planned_topics": list(planned_topics),
@@ -803,6 +834,18 @@ def commit_notes(
             "crm_record_id": record["crm_record_id"],
             "closing_statement": "Saved successfully. Have a great day!",
         }
+
+    # Refuse a superseded draft before any coverage work: this record's data is
+    # what the rep explicitly corrected away from, so committing it is wrong
+    # regardless of whether its topic coverage happens to be complete.
+    superseded_by = record.get("superseded_by")
+    if superseded_by:
+        logger.warning(
+            "Commit BLOCKED for session_id=%s: superseded by %s",
+            session_id,
+            superseded_by,
+        )
+        raise SupersededRecordError(session_id, superseded_by)
 
     planned_topics = record.get("planned_topics") or []
     missing_topics = compute_missing_topics(

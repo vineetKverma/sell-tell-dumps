@@ -1,263 +1,81 @@
-# SellNTell — Agentic Voice Notes Logger
+# Agentic AI Voice Notes Logger
 
-A voice-dictation app for field sales reps (FARs). The rep speaks unstructured
-notes after a customer visit; an agent extracts a **structured CRM record** —
-event type, plus one entry per discussion topic with a disposition code and
-summary — reads it back aloud, and commits it on verbal approval.
+A dynamic, agentic voice-dictation app for field sales reps, built on **Google
+ADK** + the **Gemini Live API** (bidirectional audio streaming) and **FastAPI**.
 
-**Why an agent and not a transcriber.** A transcript is useless to a CRM. The
-task is *constrained extraction*: mapping free speech onto a fixed registry of
-outcome codes, hands-free, with no screen. Verification is a spoken readback and
-a verbal yes.
+A rep speaks unstructured notes about a customer visit. The app detects when
+they stop talking (VAD), extracts a single structured CRM record via one Gemini
+function call, reads back a spoken confirmation, and commits to the CRM on
+verbal approval.
 
----
-
-## Architecture
-
-```
-browser mic (16 kHz Int16 PCM, 20 ms chunks)
-   │  WS /ws/{user_id}/{session_id}?campaign_type=&planned_topics=&agent_mode=
-   ▼
-FastAPI  upstream_task ──> ADK LiveRequestQueue ──> Gemini Live (Vertex, native audio)
-                                                          │
-                            downstream_task <── events ────┘
-                                  ├─ function_call → tools.py → HTTP POST → own REST API → store
-                                  └─ audio chunks  → WS → browser playback
+```text
+[User speaks notes] -> [VAD silence stop-trigger] -> [single Mega-Payload tool call]
+   -> [spoken confirmation] -> ["Save" / "Change â€¦"] -> [commit to CRM] -> [end]
 ```
 
-**The agent tools never touch the datastore.** They HTTP-call the app's own
-`/api/v1` endpoints. Two consequences worth knowing:
+## How the spec maps to the code
 
-1. **All enforcement belongs in the REST layer.** Every agent mode inherits it
-   for free — there is no way for a mode to bypass a rule by being written
-   differently.
-2. **Every gap is reproducible with plain HTTP calls** — no microphone, no
-   model, no Vertex dependency, fully deterministic.
+| Spec step | Implementation |
+|-----------|----------------|
+| **1. Dynamic session init & open voice capture** | `before_agent_callback` in `app/voice_notes_agent/agent.py` fetches the campaign-specific schema/instructions from `GET /api/v1/config/agent-schema` and injects them into the system prompt. No trigger words required. |
+| **2. VAD stop-trigger (silence)** | Audio streams continuously and the model's automatic VAD (`RealtimeInputConfig.automatic_activity_detection.silence_duration_ms` in `app/main.py`) finalizes each spoken turn after the silence threshold. The browser shows a live silence countdown and gates the mic while the agent speaks, then re-opens it for the rep's response. **Note:** the spec asks for 2.5â€“3.0s, but the Live API caps `silence_duration_ms` at **2000ms**, so the value is clamped to that maximum. |
+| **3. Single-function extraction (temp 0.1 / top_p 0.8)** | `generate_content_config` on the agent enforces determinism; the prompt forces a single `stage_visit_notes` "Mega-Payload" tool call before any freeform text. The payload carries an overall `event_type` plus a `topics` list â€” one entry per discussion topic, **each with its own `disposition_code` and `executive_summary`**. |
+| **4. Implicit confirmation + generative playback** | The `stage_visit_notes` tool POSTs to `/api/v1/notes/stage`, which builds the confirmation string; the native-audio model speaks it back (AUDIO modality). |
+| **5. Branching (save vs. correction)** | "Save" â†’ `commit_visit_notes` â†’ `POST /api/v1/notes/commit`. A correction â†’ re-call `stage_visit_notes` with the updated payload and re-confirm. |
 
----
+The ADK tools call the REST API over HTTP (true to the spec); the REST API is
+backed by an in-memory mock config DB + CRM store in
+`app/voice_notes_agent/mock_db.py`.
 
-## The two modes
+## API spec endpoints
 
-Selected per session via the `agent_mode` query parameter. One `Runner` each.
+- `GET  /api/v1/config/agent-schema?campaign_type=...` â€” dynamic agent config
+- `POST /api/v1/notes/stage` â€” stage extracted `StagedVisitPayload`
+- `POST /api/v1/notes/commit` â€” commit a staged payload to the CRM
+- `GET  /api/v1/notes/committed` â€” (debug) inspect committed records
 
-| | `implicit` | `guided` |
-|---|---|---|
-| Files | `agent.py`, `tools.py` | `agent_guided.py`, `tools_guided.py` |
-| Tools | 2 | 5 |
-| Rep turns | ~2 | ~8 |
-| Shape | one "Mega-Payload" `stage_visit_notes` call | explicit turn-by-turn script |
-| Confirms each field? | no | yes |
+Try a different `campaign_type` (`standard_sales`, `enterprise_field`,
+`renewals`) to see different allowed event types and disposition registries
+injected dynamically.
 
-Measured on identical input, both modes produce **identical dispositions**. They
-differ only in how much the rep is asked.
+## Run it locally
 
-A third `hybrid` mode exists on `feature/AIML-2686` and is not part of this
-codebase.
-
----
-
-## Campaigns and disposition codes
-
-Each campaign declares its own legal event types and disposition codes. The
-config is injected into the agent's prompt *and* enforced server-side — a prompt
-only asks.
-
-| Campaign | Event types | Disposition codes |
-|---|---|---|
-| `standard_sales` | Meeting, On-site visit, Phone Call | 1–10 |
-| `enterprise_field` | Meeting, On-site visit | 1, 2, 4, 5, 8 |
-| `renewals` | Phone Call, Meeting | 2, 3, 5, 8, 9 |
-
-Codes 1–10 are business outcomes (Create Opportunity, Order Placed, No current
-need, Contracted to competitor, Preferred vendor already, …).
-
-**Code 99 — "Outcome not covered, needs manual review" — is appended to every
-campaign.** It exists because filling a structured field is an argmax over the
-allowed values: there is always a "best" option, even when every option is
-wrong. Without an explicit "none of these" the model returns a confidently wrong
-code. Measured: a `renewals` call where the customer requested a quote returned
-code 2 ("Order Placed") or 3 ("No current need") at random across six runs —
-opposite meanings, both false. With 99 available it selects 99, and controls
-confirm it never wins when a real code fits.
-
----
-
-## Enforcement
-
-These fail loudly rather than producing bad CRM data:
-
-| Guard | Behaviour |
-|---|---|
-| Planned-topic coverage | Commit refused (`409`) until every planned topic has an outcome or an explicit rep-stated skip |
-| Campaign rules | Event types and codes validated against the active campaign (`422`); illegal values rejected and re-asked |
-| Real confirmation | Commit refused unless a genuine rep reply arrived *after* the readback — the agent cannot answer its own question and save |
-| Skip provenance | A topic can only be marked "not discussed" after the rep was asked |
-| Frontend truthfulness | The UI shows "Saved to CRM" only when a CRM record id actually exists |
-
-A refusal is the system working correctly.
-
----
-
-## Running it
-
-```powershell
-uv sync
-gcloud auth application-default login
-gcloud config set project prj-hds-np-data
-
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```bash
+uv sync                       # or: pip install -e .
+# Configure app/.env (GCP project/location for Vertex AI, or an API key).
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Then open <http://localhost:8000>.
+Open http://localhost:8000, pick a campaign, press the mic, and dictate. The
+mic auto-stops on a pause; review the staged record, then say **"Save"** (or
+**"Change the event type to a phone call"**).
 
-**Don't use `--reload` for a demo.** A file save restarts the process, which
-drops every live WebSocket and wipes both the session store and staged records.
+> A **native-audio** Gemini Live model (`gemini-live-2.5-flash-native-audio`) is
+> required for spoken confirmation playback. With a half-cascade model the app
+> falls back to text replies.
 
-**Hard-refresh (Ctrl+Shift+R) after any `app.js` change** — it's a cached ES
-module.
+## Cloud Deployment
 
-### Configuration — `app/.env`
+The service is fully packaged via `Dockerfile` to deploy seamlessly to Google Cloud Run. 
 
-| Variable | Notes |
-|---|---|
-| `GOOGLE_GENAI_USE_VERTEXAI` | `TRUE` for Vertex |
-| `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` | e.g. `prj-hds-np-data` / `us-east1` |
-| `VOICE_NOTES_AGENT_MODEL` | **must be a native-audio model** or spoken playback silently disables itself |
-| `VOICE_NOTES_VAD_SILENCE_MS` | silence before the server VAD finalizes a turn (default 2500) |
-| `BIGQUERY_ENABLED` | selects `bigquery_db` over `mock_db` in `db_interface` |
-| `VOICE_NOTES_BQ_ENABLED` | *separate* flag read by `bigquery_sink` — see Known issues |
-
-`.env` is gitignored; `app/.env.example` is the template.
-
----
-
-## API
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/v1/config/agent-schema?campaign_type=` | per-campaign rules injected into the prompt |
-| `GET /api/v1/config/planned-topics` | catalog of selectable pre-call topics |
-| `POST /api/v1/notes/stage` | stage an extracted payload, return confirmation text |
-| `POST /api/v1/notes/commit` | commit a staged payload to the CRM |
-| `GET /api/v1/notes/committed` | inspect committed records (debug) |
-| `GET /api/v1/client-config` | runtime knobs for the browser |
-| `WS /ws/{user_id}/{session_id}` | bidirectional audio ↔ agent |
-
----
-
-## Testing
-
-**Conversational harness** — no mic, real WebSocket, scripted text turns:
-
-```powershell
-uv run python scripts/ws_smoke_test.py implicit
-uv run python scripts/ws_smoke_test.py guided
-uv run python scripts/ws_smoke_test.py guided --scenario clean_save
+```bash
+gcloud run deploy sell-n-tell \
+  --source . \
+  --region us-east1 \
+  --allow-unauthenticated \
+  --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=your-project,GOOGLE_CLOUD_LOCATION=us-east1,VOICE_NOTES_API_BASE=http://localhost:8080,VOICE_NOTES_AGENT_MODEL=gemini-live-2.5-flash-native-audio"
 ```
+*(See `DEPLOYMENT.md` for a deeper architectural breakdown of Cloud Run vs Vertex AI Agent Engine.)*
 
-Bar: all scenarios reach a commit, one CRM record each, no duplicates.
+## Project layout
 
-`ambiguous_disposition` is **intermittent** — it exercises the deliberately
-confusing 3-strikes path and passes roughly 2 runs in 3. Re-run before treating
-a failure as a regression.
-
-A 9-case REST regression suite (no mic, no model) is documented in
-`docs/AIML-2698-experiments.md`.
-
----
-
-## Layout
-
-```
+```text
 app/
-  main.py                    FastAPI app, REST endpoints, WebSocket bridge
-  static/
-    index.html
-    js/app.js                UI state machine, client VAD, rendering
-    js/audio-recorder.js     mic capture, 16 kHz resampling, anti-alias filter
-    js/audio-player.js       agent playback
+  main.py                       FastAPI: REST spec + WebSocket bridge + static
+  .env                          Model / GCP / VAD / API-base config
   voice_notes_agent/
-    agent.py / tools.py            implicit mode
-    agent_guided.py / tools_guided.py  guided mode
-    mock_db.py               campaign configs, disposition registry, staging + commit
-    db_interface.py          selects mock_db or bigquery_db
-    turn_guard.py            blocks tools acting without a genuine new rep reply
-    bigquery_sink.py         analytics sink (fire-and-forget)
-scripts/ws_smoke_test.py     conversational regression harness
-docs/                        change log, gap findings, demo scripts
-```
-
----
-
-## Audio pipeline
-
-`new AudioContext({sampleRate: 16000})` is a **request, not a guarantee** — on
-many Windows machines the context returns 44100 or 48000. Forwarding those
-samples while telling the Live API they are 16 kHz sends ~3× more audio per
-second than real time, and the server kills the socket:
-
-```
-APIError: 1011 Input data processing failed. This is likely due to the
-client sending data too fast.
-```
-
-So `audio-recorder.js` reads the rate the context *actually* got, low-passes
-(4th-order Butterworth at 7 kHz — decimating without this folds everything above
-8 kHz into the speech band and wrecks consonant detail), then resamples to
-16 kHz and batches to 20 ms chunks. Correct behaviour is **32 000 bytes/sec**
-upstream; the browser console logs the resampling decision on mic start.
-
-`app.js` additionally drops chunks when `websocket.bufferedAmount` exceeds ~2 s
-of audio. There is no catching up on a realtime stream — a backlog delivered
-late reads as "too fast" and kills the session.
-
----
-
-## Known issues
-
-- **Invented skip reasons.** The agent can state a reason the rep never gave
-  ("skipped due to time constraints"), despite an explicit prompt rule
-  forbidding that exact phrase. Needs a server-side fix; prompt text has been
-  measured not to work.
-- **Orphaned staged records.** A correction re-stages under a new `session_id`
-  and leaves the previous draft in place, uncommitted and still committable.
-  Tracked under AIML-2703.
-- **Topic-label matching** (`_topic_matches`) uses substring containment, so an
-  inflected label ("Appliance Contract Renewal" vs planned "Appliances") reports
-  the topic uncovered and can produce a second row for one discussion.
-- **Two flag shapes for "no code fits"** — guided uses a null code plus
-  `needs_manual_review`; implicit uses code 99. Pending unification.
-- **Two BigQuery env vars** — `db_interface` reads `BIGQUERY_ENABLED`,
-  `bigquery_sink` reads `VOICE_NOTES_BQ_ENABLED`.
-- **Registry gaps** — no code expresses "renewal agreed" or "no contact made"
-  on any campaign; a no-contact visit has no valid event type either. Product
-  decision, not an engineering one.
-
----
-
-## Design principle worth knowing before you change anything
-
-**A prompt rule cannot beat a structure pointing the other way.**
-
-Five fixes in this codebase followed that shape and were solved structurally — a
-code-level gate, an ordering constraint, an extra enum value. The one prompt-only
-attempt was measured over six runs before and after and made no difference. When
-the model reliably ignores an instruction, change what the schema or the flow
-makes easy, not how emphatically the prompt is worded.
-
-**Corollary:** when a guard fires unexpectedly, instrument before assuming it's
-wrong. `turn_guard` looked broken for a day and was correct every time.
-
----
-
-## Documentation
-
-| File | Contents |
-|---|---|
-| `docs/HANDOFF.md` | resume with no prior context |
-| `docs/change-log.md` | every change, why, and verification status |
-| `docs/AIML-2698-gap-findings.md` | 18 gaps, reproduction method, priorities |
-| `docs/AIML-2698-experiments.md` | reproductions and the REST suite |
-| `docs/demo-golden-path.md` | scripted demo scenarios per mode and campaign |
-| `docs/demo-runbook-failure-modes.md` | failure modes and recovery for the demo driver |
-| `docs/far-notes-dataset-analysis.md` | analysis of 1000 real FAR notes |
+    agent.py                    Dynamic agent (config injection + instruction provider)
+    tools.py                    stage_visit_notes / commit_visit_notes (HTTP -> REST)
+    mock_db.py                  Mock config registry + CRM store
+  static/                       Frontend (UI + audio worklets + client VAD + Service Worker)
+Dockerfile                      Cloud Run container definition

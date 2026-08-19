@@ -4,17 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Voice Notes Logger</title>
-    <link rel="stylesheet" href="/static/css/style.css" />
-    <script src="/static/js/app.js" type="module"></script>
+    <link rel="stylesheet" href="/static/css/style.css?v=3" />
+    <script src="/static/js/app.js?v=4" type="module"></script>
   </head>
 
   <body>
     <header>
       <div class="header-left">
-        <h1>Ã°Å¸Å½â„¢Ã¯Â¸Â Voice Notes Logger</h1>
+        <h1>ðŸŽ™ï¸ Voice Notes Logger</h1>
         <div class="subtitle">Agentic CRM dictation for field sales reps</div>
       </div>
       <div class="header-right">
+        <label class="rep-identity">
+          <span>Rep:</span>
+          <input type="text" id="repIdInput" class="rep-id-input" />
+        </label>
+        <button id="historyButton" class="btn-secondary history-btn">History</button>
         <label class="campaign-select">
           <span>Solution</span>
           <select id="agentModeSelect">
@@ -38,11 +43,24 @@
     </header>
 
     <div class="main-layout">
+      <div id="offlineIndicator" class="offline-indicator hidden">You are currently offline. Some features may not be available.</div>
       <div class="container">
         <!-- Phase / status banner -->
         <div id="phaseBanner" class="phase-banner phase-idle">
-          <span id="phaseIcon">Ã°Å¸Å½Â¤</span>
+          <span id="phaseIcon">ðŸŽ¤</span>
           <span id="phaseText">Plan your call, then press the mic to start dictating.</span>
+        </div>
+
+        <!-- Run metrics: wall-clock time + estimated token cost for this dictation run -->
+        <div id="runMetrics" class="run-metrics">
+          <div id="runTimerChip" class="metric-chip metric-timer">
+            <span class="metric-label">â± Time to save</span>
+            <span id="runTimerValue" class="metric-value">0.0s</span>
+          </div>
+          <div id="runCostChip" class="metric-chip metric-cost">
+            <span class="metric-label">ðŸ’° Est. cost</span>
+            <span id="runCostValue" class="metric-value">$0.000000</span>
+          </div>
         </div>
 
         <!-- Pre-call planning: select planned topics (multi-select) -->
@@ -55,13 +73,13 @@
             Select one or more topics you intend to cover. The agent will extract
             an outcome for each and remind you about any you don't mention.
           </div>
-          <div id="topicOptions" class="topic-options">Loading topicsÃ¢â‚¬Â¦</div>
+          <div id="topicOptions" class="topic-options">Loading topicsâ€¦</div>
         </div>
 
         <!-- Mic + silence meter -->
         <div class="mic-area">
           <button id="micButton" class="mic-button">
-            <span class="mic-glyph">Ã°Å¸Å½Â¤</span>
+            <span class="mic-glyph">ðŸŽ¤</span>
           </button>
           <div class="silence-meter">
             <div class="level-bar"><div id="levelFill" class="level-fill"></div></div>
@@ -77,11 +95,11 @@
           </div>
           <div id="userCaptionRow" class="caption-row">
             <span class="caption-speaker speaker-user">You</span>
-            <span id="userCaption" class="caption-text placeholder">Waiting for you to speakÃ¢â‚¬Â¦</span>
+            <span id="userCaption" class="caption-text placeholder">Waiting for you to speakâ€¦</span>
           </div>
           <div id="agentCaptionRow" class="caption-row">
             <span class="caption-speaker speaker-agent">Agent</span>
-            <span id="agentCaption" class="caption-text placeholder">Waiting for the agentÃ¢â‚¬Â¦</span>
+            <span id="agentCaption" class="caption-text placeholder">Waiting for the agentâ€¦</span>
           </div>
         </div>
 
@@ -95,21 +113,27 @@
         <div id="payloadCard" class="panel payload-card hidden">
           <div class="panel-title">Staged CRM Record <span id="payloadStatus" class="badge">staged</span></div>
           <dl class="payload-grid">
-            <dt>Event type</dt><dd id="pEventType">Ã¢â‚¬â€</dd>
-            <dt>Call summary</dt><dd id="pSummary">Ã¢â‚¬â€</dd>
+            <dt>Event type</dt><dd id="pEventType">â€”</dd>
+            <dt>Call summary</dt><dd id="pSummary">â€”</dd>
           </dl>
           <div class="topics-label">Planned-topic coverage</div>
           <div id="pCoverage" class="coverage"></div>
           <div class="topics-label">Discussion topics</div>
           <div id="pTopics" class="topics"></div>
           <dl class="payload-grid">
-            <dt>Raw transcript</dt><dd id="pTranscript" class="muted">Ã¢â‚¬â€</dd>
-            <dt>CRM record id</dt><dd id="pCrmId" class="muted">Ã¢â‚¬â€</dd>
+            <dt>Raw transcript</dt><dd id="pTranscript" class="muted">â€”</dd>
+            <dt>CRM record id</dt><dd id="pCrmId" class="muted">â€”</dd>
+            <dt>Audio playback</dt><dd><audio id="playbackAudio" controls style="height: 30px;"></audio></dd>
           </dl>
           <div class="confirm-actions">
-            <button id="saveButton" class="btn-primary" disabled>Ã¢Å“â€ Save</button>
-            <button id="changeButton" class="btn-secondary" disabled>Ã¢Å“Å½ Change</button>
-            <span class="hint">Ã¢â‚¬Â¦or just say Ã¢â‚¬Å“SaveÃ¢â‚¬Â / Ã¢â‚¬Å“Change the event type to a phone callÃ¢â‚¬Â.</span>
+            <button id="saveButton" class="btn-primary" disabled>âœ” Save</button>
+            <button id="changeButton" class="btn-secondary" disabled>âœŽ Change</button>
+            <span class="hint">â€¦or just say â€œSaveâ€ / â€œChange the event type to a phone callâ€.</span>
+          </div>
+          <div id="correctionUi" class="correction-ui hidden">
+            <input type="text" id="correctionInput" placeholder="What should I change? (e.g. 'change the event type to a phone call')" />
+            <button id="submitCorrectionBtn" class="btn-primary">Submit</button>
+            <button id="cancelCorrectionBtn" class="btn-secondary">Cancel</button>
           </div>
         </div>
       </div>
@@ -122,5 +146,30 @@
         <div id="consoleContent" class="console-content"></div>
       </div>
     </div>
+    <dialog id="historyModal" class="history-modal">
+      <div class="modal-header">
+        <h2>Committed Records</h2>
+        <div>
+          <button id="exportCsvBtn" class="btn-secondary">Export CSV</button>
+          <button id="closeHistoryBtn" class="btn-primary">Close</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <table id="historyTable" class="history-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>CRM ID</th>
+              <th>Session ID</th>
+              <th>Event Type</th>
+              <th>Summary</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+    </dialog>
   </body>
 </html>

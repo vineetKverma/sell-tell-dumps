@@ -1,70 +1,83 @@
 # SellNTell — session handoff
 
-Resume with no prior context. Read this, then `AIML-2698-gap-findings.md` (the
-current deliverable), `change-log.md` (what we changed and why), and
-`far-notes-dataset-analysis.md` (real FAR data).
+Resume with no prior context. Read this, then `PR5-review-findings.md` (the
+current work queue), `change-log.md` (what we changed and why), and
+`AIML-2698-gap-findings.md` (the 18-gap analysis).
 
 ---
 
-## ✅ START HERE — rebase done, both demo blockers closed
+## ✅ START HERE — PR #5 is open with changes requested
 
-**Branch to work on and demo: `feature/AIML-2698-on-2130`.**
-The lead's `c6860bd` with our six `[AIML-2698]` commits rebased on top.
-Not yet pushed. See `change-log.md` Batches 6–7 for what his commit contained
-and how the conflicts were resolved.
+**Branch: `feature/AIML-2698-on-2130`** → `development`, PR
+[#5](https://bitbucket.org/fm_ebiz/sell-n-tell/pull-requests/5), tip `e67fc9c`.
+Working tree clean, everything pushed.
 
-**Both demo-blocking gaps are closed:**
+`development` has been merged into the branch; the four conflicts
+(`main.py`, `app.js`, `mock_db.py`, plus a silently-dropped `db_interface`
+import) are resolved and verified.
 
-- **Gap 18** (guided leaves the record card empty) — closed by *his*
-  `c6860bd`: `renderPayload(guidedPayload)` at `app.js:845`.
-- **Gap 6** (guided stalls before saving) — closed by ours, `3ce0c34`:
-  `record_topic_disposition` commits directly at `all_topics_done`.
-  Verified with the harness workaround removed.
+**Suresh reviewed it on 2026-08-19 and requested changes — 25 comments.**
+They are catalogued in **`docs/PR5-review-findings.md`**, grouped:
 
-**Verified 2026-08-11:** 4 guided + 4 implicit scenarios, one CRM record each,
-no duplicates.
+| Group | Count | Action |
+|---|---|---|
+| **A — correctness** | 10 | **Fix in this PR.** A1–A3 and A6 are data loss or wrong data. |
+| **B — design / duplication** | 11 | Raise one follow-up ticket. B1 first. |
+| **C — cosmetic** | 4 | Formatter pass. |
+| **D — positive** | 1 | No action. |
 
-### Still open
+### The work queue, in order
 
-1. **Tell Sainitheesh.** He does not know about the rebase, that his fix closed
-   one of our documented gaps, or that our Gap 6 fix touches his guided flow.
-2. **Push the branch.**
-3. **Rehearse** — `demo-golden-path.md`, Scenario A ×3, Scenario B ×5.
-4. Decision #1 below (how the fixes get carried forward) is **still unanswered**.
+1. **A1 — BigQuery backend is broken and bypasses every gate.** Highest
+   priority. `bigquery_db.commit_notes(session_id, confirmed)` takes none of the
+   kwargs `main.py` now passes, so **every commit under `BIGQUERY_ENABLED=true`
+   raises `TypeError`**. And it never calls `compute_missing_topics`, never
+   checks `superseded_by`, and has no idempotency guard — so the coverage gate
+   (AIML-2698) *and* the supersede gate (AIML-2703) are both absent on that
+   backend, and a retry mints a duplicate CRM record. Since Salesforce syncs
+   from this API's response, not from BigQuery, the headline guarantees of two
+   tickets are silently untrue there.
+   **Fix shape:** have `bigquery_db.commit_notes` delegate all gating to
+   `mock_db.commit_notes` and only own the BigQuery insert.
+2. **A2, A3 — duplicate CRM records in guided**, by two routes neither the 2703
+   fix nor the idempotency guard catches. A2 is a check-then-act race on
+   `_S_COMMIT_RESULT`; A3 is that same key never being cleared between
+   dictations, so the rep's *second* visit of a shift gets told "saved" while
+   nothing was staged.
+3. **A6, A7 — defects we introduced in this PR.** A6: the resampler never
+   flushes its tail buffer, so the last syllable of every dictation is dropped.
+   A7: `crypto.randomUUID()` throws at module load on plain HTTP, breaking the
+   whole frontend. Neither showed up in testing because we only ever ran on
+   `localhost`, which counts as a secure context.
+4. **A4, A5, A8, A9, A10** — contract violations. See the findings doc.
+5. **B** — one follow-up ticket. Lead with **B1**: the stale `CRMStore` Protocol
+   is *why* A1 was invisible to type-checking.
 
-### Lesson worth keeping
+### Also still open
 
-A stale remote-tracking ref produced a confident wrong conclusion ("his branch
-never moved") on 2026-08-11. When the web UI and a local ref disagree, settle it
-with `git ls-remote`, which asks the server, not `git rev-parse`, which reads a
-cache. `tools/compare-trees.ps1` does a three-way tree comparison if his branch
-moves again.
+- **Tell Sainitheesh** about the rebase, that his `c6860bd` closed one of our
+  documented gaps (Gap 18), and that our Gap 6 fix touches his guided flow.
+- **F7** — `_topic_matches` uses substring containment, so an inflected label
+  ("Appliance Contract Renewal" vs planned "Appliances") reports the topic
+  uncovered and can produce two rows for one discussion. Open; demo mitigation
+  is phrasing discipline.
+- **Invented skip reasons** — the agent still writes "due to time constraints"
+  when the rep gave no reason, despite a prompt rule naming that exact phrase.
+  Needs a server-side fix; prompt text has been measured not to work.
 
 ---
 
-## 1. Current situation (as of 2026-08-11)
+## 1. Ticket status
 
-**AIML-2698 has been re-scoped by the lead.** It is now **discovery and
-reproduction only** — document the gaps, close the ticket, raise a new one for
-the fixes. Do not present our fixes as part of 2698.
-
-> "Do some testing with different examples and see what all gaps are there,
-> there is a demo on next Monday Aug 17th with Field Account Representatives
-> here in the office, let's try to make it more matured solution if possible by
-> Thursday, we can connect daily... Just document in this ticket and add details
-> in the ticket or confluence link and can close and create a new ticket."
-
-- **Demo: Monday 17 Aug**, with FARs, in the office.
-- **Target maturity: Thursday 13 Aug.**
-- **Daily check-ins** with Sainitheesh, Vineet, Dharun.
-
-**Deliverable produced:** `docs/AIML-2698-gap-findings.md` — 18 gaps, 15
-reproduced with method and evidence, 3 not reproduced with reasons, priority
-ranked against the demo, plus questions for the business.
-
-**Complication:** we already implemented and verified fixes for most gaps on
-`feature/AIML-2698-disposition-state-correctness` (pushed). Those commits now
-need a home — new ticket, cherry-pick, or PR. Unresolved.
+| Ticket | Title | Status |
+|---|---|---|
+| **AIML-2698** | Disposition + State Correctness | **Closed.** Delivered in PR #5 |
+| **AIML-2705** | Disposition Quality Guardrails | **Closed.** ACs 1/2/5 delivered; AC4 took its "documents residual risk" clause; AC3 met with 3 cases |
+| **AIML-2703** | Correction & Re-stage Reliability | **Done, in PR #5.** Orphan bug reproduced, fixed, regression-tested |
+| **AIML-2702** | Eval Harness (faithfulness / factualness / contextualness) | Not started. Q3-S3 |
+| **AIML-2697** | FAR Demo Hardening: Mode UX + Demo Script | Partly in flight — the audio fixes are tagged to it |
+| **AIML-2651** | Error Handling & Resilience | Not started. No retry/backoff anywhere; timeouts hardcoded |
+| **AIML-2704** | ? | Unknown — a branch exists, not in any plan we've seen |
 
 ---
 
@@ -80,88 +93,64 @@ extraction* — mapping free speech onto a fixed registry of outcome codes,
 hands-free, with no screen. Verification is a spoken readback and a verbal yes.
 
 **Scope reality:** Confluence describes a phone-call product (CarPlay, podcast
-pre-call briefing). What exists is a **browser mic app** with a **mock CRM** and
-a BigQuery sink. No telephony, no Salesforce, no playback direction.
+pre-call briefing). What exists is a **browser mic app** with a mock CRM, an
+optional BigQuery backend, and a BigQuery analytics sink.
 
 ---
 
 ## 3. Architecture
 
 ```
-browser mic (16kHz Int16 PCM)
+browser mic (16 kHz Int16 PCM, 20 ms chunks)
    │  WS /ws/{user_id}/{session_id}?campaign_type=&planned_topics=&agent_mode=
    ▼
 FastAPI upstream_task ──> ADK LiveRequestQueue ──> Gemini Live (Vertex, native audio)
                                                         │
                           downstream_task <── events ───┘
-                                ├─ function_call → tools.py → HTTP POST → own REST API → mock_db
+                                ├─ function_call → tools.py → HTTP POST → own REST API → db
                                 └─ audio chunks  → WS → browser playback
 ```
 
 **The tools never touch the store.** They HTTP-call the app's own `/api/v1`
 endpoints, so **all enforcement belongs in the REST layer** — implicit, guided
-and hybrid inherit it for free. This is also why gaps can be reproduced with
-plain HTTP calls, no mic and no model.
+and hybrid inherit it for free. It's also why gaps reproduce with plain HTTP
+calls, no mic and no model.
 
-**Load-bearing ideas:** dynamic per-session campaign config injected into the
-prompt; implicit's single "Mega-Payload" `stage_visit_notes` call; planned-topic
-coverage checking; and defence-in-depth against the model (`temperature=0.1`,
-`ProactivityConfig`, `turn_guard`, auto-continue nudges).
+**Storage indirection (new, from `development`):**
 
-**Modes** (`agent_mode` param, one `Runner` each):
-- `implicit` — `agent.py` + `tools.py`, 2 tools, ~2 rep turns, decides silently
-- `guided` — `agent_guided.py` + `tools_guided.py`, 5 tools, ~8 turns, confirms
-  each field
+- `db_interface.py` — `get_db()` returns `bigquery_db` when `BIGQUERY_ENABLED=true`,
+  else `mock_db`. Exposes it as `db`. **Its `CRMStore` Protocol is stale (B1).**
+- `bigquery_db.py` — delegates config/staging to `mock_db`, owns only the
+  committed sink. **Currently missing every guard (A1).**
+- `config.py` — just `API_BASE`.
+- **Two BigQuery flags:** `db_interface` reads `BIGQUERY_ENABLED`,
+  `bigquery_sink` reads `VOICE_NOTES_BQ_ENABLED`. One feature, two switches.
+
+**Modes** (`agent_mode`, one `Runner` each):
+- `implicit` — `agent.py` + `tools.py`, 2 tools, ~2 rep turns
+- `guided` — `agent_guided.py` + `tools_guided.py`, 5 tools, ~8 turns
 - hybrid exists on `feature/AIML-2686` — not ours
 
-Measured on identical input, both modes produced **identical dispositions**;
-they differ in how much the rep is asked.
+On identical input both modes produce **identical dispositions**; they differ in
+how much the rep is asked.
 
 ---
 
-## 4. People, branches, tickets
+## 4. Environment
 
-- **Sainitheesh Erra** — lead. **Suresh Thiagarajan** — original POC author.
-- **Dharun** — junior engineer. **Sasidharan** — infra.
-- **Jeremy Daniell** — business contact; supplied the product categories and the
-  real FAR notes.
-
-| Branch | State |
-|---|---|
-| `feature/AIML-2698-on-2130` | **ours, current** — `c6860bd` + 6 commits. Not pushed. **Demo this.** |
-| `feature/AIML-2130-guided-flow` | lead's — tip `c6860bd` (2026-08-11); now our base |
-| `feature/AIML-2686` | hybrid flow — not ours |
-| `feature/AIML-2698-disposition-state-correctness` | ours, superseded by the rebase; based on `3ecd956` |
-
-| Ticket | Title | Sprint | Status |
-|---|---|---|---|
-| **AIML-2698** | Disposition + State Correctness | — | **Discovery complete** — findings doc written; close it |
-| **AIML-2703** | Correction & Re-stage Reliability | Q3-**S2** | Next |
-| **AIML-2702** | Eval Harness (faithfulness/factualness/contextualness) | Q3-**S3** | After 2703 |
-| **AIML-2697** | FAR Demo Hardening: Mode UX + Demo Script | — | Demo-relevant, not started |
-
-**Build the harness once.** 2698 AC#1/#5, 2703 AC#3 and all of 2702 want the
-same artifact. 2702's eval harness is the superset — extend `ws_smoke_test.py`
-in that shape.
-
-**2703 has a head start:** its "commit blocked without a valid staged session +
-required fields" and much of its soft-fail messaging are already satisfied by
-our work.
-
----
-
-## 5. Environment
-
-Repo is on a separate machine (`C:\Personal Storage\developer\sell-n-tell`); a
-reconstructed copy for reading/editing is at
+Repo lives on a separate machine (`C:\Personal Storage\developer\sell-n-tell`);
+a reconstructed copy for reading/editing is at
 `c:\Personal Storage\poc\sellNtell\sell-n-tell`.
 
-**Transfer:** `tools/export-repo-md.ps1` (in the repo, dumps tracked files to
-markdown per folder, `-Include` to scope) and `tools/import-repo-md.ps1`
-(locally, rebuilds the tree). Prefer **targeted edits** over whole-file
-replacement going back. Verify sync by marker/line-count comparison, not hashes
-(repo CRLF, local LF). Don't copy the local `index.html` back — emoji corrupted
-by an early exporter bug, since fixed.
+**Syncing the local copy** — do this before any analysis, or you will reason
+about files that don't exist:
+
+```powershell
+# on the VDI, from the repo root (copy tools/export-repo-md.ps1 there first)
+.\export-repo-md.ps1
+# copy export\ back, then locally:
+.\tools\import-repo-md.ps1 -In .\export -Dest .\sell-n-tell
+```
 
 **Run:**
 
@@ -169,146 +158,118 @@ by an early exporter bug, since fixed.
 uv sync
 gcloud auth application-default login
 gcloud config set project prj-hds-np-data
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload 2>&1 | Tee-Object -FilePath "..\live-run.log"
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-**Keep the `2>&1`** — uvicorn logs to stderr; without it the tee captures almost
-nothing. Red PowerShell error-record wrapping is cosmetic.
+**Do not use `--reload` for a demo** — a file save restarts the process, drops
+every live WebSocket, and wipes the session store and staged records.
 
-**Hard-refresh (Ctrl+Shift+R) after any `app.js` change** — cached ES module.
+**`app/.env` is untracked now** (`.env.example` is the template). Needs a
+**native-audio** model or spoken playback silently disables itself.
 
-**`app/.env`** (tracked; keep local edits out of commits): `us-east1` works
-though the doc says central; `VOICE_NOTES_VAD_SILENCE_MS=2000`;
-`VOICE_NOTES_BQ_ENABLED=false` locally. Model must be **native-audio**.
+### Frontend caching — read this before editing `app.js`
+
+This cost an hour. Three mechanisms were half-wired at once:
+
+1. `index.html` loads `app.js?v=N`. **Bump N** when you change the file — the
+   browser caches by full URL, so a new file at the same URL is invisible.
+2. A **service worker** (`sw.js`) was cache-first with no revalidation. It had
+   already been unregistered in `app.js` but the file was left in the repo, and
+   an installed copy kept serving stale assets. **Deleted.** Note that deleting
+   the file does not uninstall a worker already running in someone's browser.
+3. `main.py` now sends `Cache-Control: no-store` for `/static`, which makes the
+   version query redundant. Keep both.
+
+Symptom to recognise: the file on disk is correct, `Invoke-WebRequest` of the
+plain URL returns the correct content, and the browser still runs old code.
 
 **Debugging:** `_log_event` in `main.py` prints every downstream event without
-PCM noise. Watch `commit_visit_notes BLOCKED:`, `Staging rejected for
+PCM noise. Watch for `commit_visit_notes BLOCKED:`, `Staging rejected for
 campaign_type=`, `Commit BLOCKED for session_id=`.
 
 ---
 
-## 6. Tests
-
-**REST suite — 9 cases, ~15 min, no mic or model.** Full paste-able block in
-`AIML-2698-experiments.md`. Covers: coverage gate (409), campaign rules (422),
-happy path, legal renewals payload, skip-after-reminder, manual review, and
-self-skip rejection. **Run this against the lead's new branch first** — it will
-show exactly which gaps he fixed.
+## 5. Tests
 
 **Conversational harness** (no mic, real WebSocket, text turns):
 
 ```powershell
-uv run python scripts/ws_smoke_test.py guided   2>&1 | Tee-Object -FilePath "..\ac5-guided.log"
-uv run python scripts/ws_smoke_test.py implicit 2>&1 | Tee-Object -FilePath "..\ac5-implicit.log"
+uv run python scripts/ws_smoke_test.py implicit   # 6 scenarios
+uv run python scripts/ws_smoke_test.py guided     # 4 scenarios
 uv run python scripts/ws_smoke_test.py guided --scenario clean_save
 ```
 
-Two fixes were needed to make it work at all (see Gap 7): `turn_guard` counted
-only spoken turns so text input was permanently blocked, and the harness broke
-on the first `turnComplete` and sent turns mid-response. **It hardcodes
-`campaign_type=standard_sales`** — adding `--campaign` is step one for 2702.
+Bar: every scenario commits, one CRM record each, no duplicates.
+**`guided/ambiguous_disposition` is intermittent (~2 in 3)** — it exercises the
+deliberately confusing 3-strikes path. Re-run before calling a failure a
+regression.
+
+**No automated coverage for the AIML-2703 supersede gate.** A repro script was
+written to prove the orphan bug (stage → correct → commit the *old* id, expect
+409) and deliberately **not kept in the repo** — it existed to diagnose, and the
+bug is fixed. Worth knowing: the smoke suite exercises the correction path but
+never tries to commit a superseded draft, so if that gate regressed, all six
+implicit scenarios would still pass. Fold an assertion into the REST suite if
+the gate is ever in question.
+
+**REST suite** — 9 cases, ~15 min, no mic or model. Paste-able block in
+`AIML-2698-experiments.md`. Covers the coverage gate (409), campaign rules
+(422), happy path, skip-after-reminder, manual review, self-skip rejection.
+
+Harness gap: it **hardcodes `campaign_type=standard_sales`**, so none of the
+`enterprise_field` golden-path scenarios are covered. Adding `--campaign` is
+step one for AIML-2702.
 
 ---
 
-## 7. Key findings (detail in `AIML-2698-gap-findings.md`)
+## 6. Lessons worth keeping
 
-**18 gaps.** Highest demo risk:
+**A prompt rule cannot beat a structure pointing the other way.** Five fixes
+followed that shape and were solved structurally — a code-level gate, an
+ordering constraint, an extra enum value. The one prompt-only attempt was
+measured over six runs before and after and made no difference.
 
-1. **Gap 6** — Guided intermittently stalls before saving. All topics answered,
-   agent goes quiet, nothing saved. Any utterance unblocks it. *Intermittent, so
-   it passes rehearsal and can fail live.*
-2. **Gap 5** — Dispositions wrong and non-deterministic when no code fits. Same
-   utterance returned codes 5, 2 and 1 across sessions. **Root cause is the
-   registry, not the model** — proven by a control where a fitting code exists
-   and is chosen correctly every time.
-3. **Gaps 1–4** — commit succeeded on knowingly-incomplete records; campaign
-   rules unenforced; the model marked topics "not discussed" on the rep's behalf
-   with invented reasons.
-4. **Gap 18** — Guided leaves the on-screen record card empty. Undercuts guided's
-   whole "you can see it confirm each field" pitch if both are demoed.
+**When a guard fires unexpectedly, instrument before assuming it's wrong.**
+`turn_guard` looked broken for a day and was correct every time.
 
-**Not reproduced:** orphaned staged records after a correction (relevant to
-2703); `turn_guard` state leaking across reconnects; and the three failure modes
-in the original ticket description, which appear already fixed on the branch.
+**A stale Protocol is worse than no Protocol.** `CRMStore` documented the old
+signatures, so a real mismatch (A1) passed type-checking silently. It was
+noticed during the merge and deferred — that deferral is what let A1 ship.
 
-### The transferable lesson
+**Settle "his branch moved" with `git ls-remote`, not `git rev-parse`** — the
+latter reads a cache. `tools/compare-trees.ps1` does a three-way tree diff.
 
-**A prompt rule cannot beat a structure pointing the other way.** Four fixes
-followed that shape and were solved structurally (a code-level gate, an ordering
-constraint, an extra enum value). One attempt was prompt-only, measured before
-and after over six runs, and made no difference.
-
-**Corollary:** when a guard fires unexpectedly, instrument before assuming it's
-wrong. `turn_guard` looked broken for most of a day and was correct every time —
-the harness was desynchronised.
+**We only ever tested on `localhost`.** That's a secure context and a single
+user, which is exactly why A7 (`crypto.randomUUID` on plain HTTP) and the
+concurrency races (A2, A10) were invisible.
 
 ---
 
-## 8. Real FAR data (new, 2026-08-11)
+## 7. Open decisions for the lead
 
-`Notes Examples(Sheet1).csv` — 1000 rows from Salesforce, column 1 = pre-call
-plan, column 2 = post-meeting notes. Analysis in
-`far-notes-dataset-analysis.md`. Headlines:
-
-- **Planned-topic catalog replaced** with Jeremy's 13 product categories
-  (Appliances … Tools). Already applied in `mock_db.py`.
-- **67% of notes mention no product category at all.** Coverage reminders become
-  the common path, not the exception. Only Appliances, HVAC, Pool and Plumbing
-  appear with real frequency — **use those for the demo.**
-- **Two common outcomes have no disposition code:** quote created/sent (~15% of
-  visits) and no contact made (~8%, "Not there", "Office was closed"). A
-  no-contact visit has no valid event type either.
-- **9% of notes are under 40 characters** ("Junk", "REHAB", "OK for Now") — the
-  inputs most likely to force fabrication.
-- Reps don't actually plan in categories; real plans are campaign codes and
-  follow-ups, heavily abbreviated (FU, EE, BM&S, MRO, PTAC, CAPX).
-- **This is the golden set for 2702.** Sample it stratified — especially the 67%
-  stratum that names no planned topic, which is completely untested.
+1. **Registry content.** No code expresses "renewal agreed", "quote created" on
+   campaigns lacking code 1, or "no contact made" (~25% of real visits between
+   them). A no-contact visit has no valid event type either. Product decision.
+2. **Who consumes `needs_manual_review`?** Nothing downstream reads it.
+3. **Is coverage a blocker or a prompt?** With category topics, most visits will
+   trigger reminders — 67% of real notes name no product category at all.
+4. **Two flag shapes** — guided uses null code + `needs_manual_review`, implicit
+   uses code 99. Unify (this is what's left of AIML-2705's scope).
+5. **Two BigQuery env flags** — `BIGQUERY_ENABLED` vs `VOICE_NOTES_BQ_ENABLED`.
 
 ---
 
-## 9. Open decisions for the lead
-
-1. ~~**How do our fixes get carried forward**~~ — **decided 2026-08-11: rebase
-   our 2698 fixes on top of `feature/AIML-2130-guided-flow`.** His branch is what
-   leadership saw, so it is the demo-credible base. Still needs telling him.
-2. **Registry design.** No code for "renewal agreed", "quote created", or "no
-   contact made". Together that's ~25% of real visits with no correct code.
-   Cannot be solved in engineering.
-3. **Gap 6 approach** — commit directly at `all_topics_done` rather than asking
-   the model for a second call. Touches his guided flow.
-4. **Who consumes `needs_manual_review`?** Nothing downstream reads it.
-5. **Is coverage a blocker or a prompt?** With category topics, most visits will
-   trigger reminders.
-6. **Two flag shapes** — guided uses null code + `needs_manual_review`, implicit
-   uses code 99. Unify.
-
----
-
-## 10. Working agreements
-
-- Enforcement goes in the **REST layer**, not the ADK tools.
-- **Never silently produce a wrong value** — be right, ask, or flag for review.
-- Run the 9-case REST suite after every backend change; run the conversational
-  harness for anything touching conversation flow.
-- Record changes in `change-log.md` with why + verification status. **Mark failed
-  attempts as failed.**
-- `docs/` is local-only tracking, not copied to the repo.
-- Commit with explicit paths (`git add <files>`, never `-a`) to keep `.env` out.
-
----
-
-## 11. Document index
+## 8. Document index
 
 | File | Contents |
 |---|---|
 | `HANDOFF.md` | this file |
-| `AIML-2698-gap-findings.md` | **the deliverable** — 18 gaps, repro method, priorities |
-| `far-notes-dataset-analysis.md` | real FAR notes: what they break |
+| `PR5-review-findings.md` | **the current work queue** — 25 review comments, triaged |
 | `change-log.md` | every change, why, verification status |
+| `AIML-2698-gap-findings.md` | 18 gaps, repro method, priorities |
 | `AIML-2698-experiments.md` | reproductions, findings F1–F5, the 9-case REST suite |
-| `demo-golden-path.md` | **the two scripted demo scenarios** — one per mode, real utterances, expected records |
+| `demo-golden-path.md` | scripted demo scenarios per mode and campaign |
 | `demo-runbook-failure-modes.md` | failure modes & recovery for the demo driver |
+| `far-notes-dataset-analysis.md` | real FAR notes: what they break |
 | `status-updates.md` | ticket portfolio + day-by-day log |
 | `note-disposition-registry-gap.md` | draft to the lead re the registry |
-| `note-2698-story-points.md` | draft re 3 → 5 points |

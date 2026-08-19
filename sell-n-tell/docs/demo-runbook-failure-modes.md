@@ -109,6 +109,44 @@ finished. Library-level, not application code, and no impact on saved data.
 
 ---
 
+## Corrections — what to expect *(AIML-2703)*
+
+**How to correct anything:** just say it. *"Change the event type to a phone
+call"*, *"That's wrong, they didn't order — the price was too high"*, *"I also
+covered the contract renewal."* No keyword is required, and it works at any
+point before you say Save.
+
+**What happens:** the agent re-stages the whole record and reads back **only
+what changed**, not the entire summary again. That is deliberate — a full
+re-read of an eight-line record is what makes voice correction unusable.
+
+**Adding a topic you forgot** is a correction like any other. If it was a
+planned topic the coverage gate was holding the save for, supplying it releases
+the block in the same turn.
+
+**You can correct repeatedly.** Each correction supersedes the last. Only the
+final version is saved.
+
+**If a correction seems ignored:** check the record card rather than the audio.
+The card is the truth; the spoken readback is a summary of it and occasionally
+paraphrases.
+
+### Draft recovered from a previous session
+
+**What you see:** on opening the page, a record card already filled in, badged
+**"draft from a previous session"**, with Save and Change greyed out.
+
+**Why:** the browser keeps a local copy of the last staged record so a refresh
+or a dropped connection doesn't lose the rep's dictation. The matching
+server-side record is gone (it lives in memory), so there is nothing to commit
+against — hence the disabled buttons.
+
+**What to do:** ignore it and start dictating, or hard-refresh. It is reference
+only. **Do not narrate it as a saved record** — it has no CRM record id, and
+the card shows `—` for that field.
+
+---
+
 ## What is enforced, and cannot silently go wrong
 
 These now fail loudly rather than producing bad CRM data:

@@ -23,11 +23,10 @@ from google.adk.agents.callback_context import CallbackContext
 from google.adk.agents.readonly_context import ReadonlyContext
 from google.genai import types
 
+from .config import API_BASE
 from .tools import commit_visit_notes, stage_visit_notes
 
 logger = logging.getLogger(__name__)
-
-_API_BASE = os.getenv("VOICE_NOTES_API_BASE", "http://localhost:8000")
 
 # State keys populated by the before_agent_callback.
 STATE_CAMPAIGN_TYPE = "campaign_type"
@@ -53,9 +52,11 @@ before saving.
 # Conversation flow (follow strictly)
 1. LISTEN: The rep dictates freely. Do NOT respond with chit-chat or freeform
    text while they are dictating. Wait until their dictation turn is finished.
-2. EXTRACT (single call): As soon as the dictation turn ends, call the
-   `stage_visit_notes` tool EXACTLY ONCE with every field fully populated from
-   what was said. For EVERY planned topic the rep actually discussed, add a
+2. EXTRACT (single call): As soon as the dictation turn ends, evaluate the audio.
+   If the transcription is empty or contains no speech, DO NOT call `stage_visit_notes`.
+   Instead, speak to the user, tell them you couldn't hear anything, and ask them to try recording again.
+   If there is speech, call the `stage_visit_notes` tool EXACTLY ONCE with every field
+   fully populated from what was said. For EVERY planned topic the rep actually discussed, add a
    `topics` entry using the EXACT planned-topic label as the `topic` value.
    Say and produce ABSOLUTELY NOTHING out loud before the tool returns -- no
    filler, no "one moment", no narration, no summary, no guess, no question.
@@ -217,7 +218,7 @@ async def load_campaign_config(callback_context: CallbackContext) -> None:
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                f"{_API_BASE}/api/v1/config/agent-schema",
+                f"{API_BASE}/api/v1/config/agent-schema",
                 params={"campaign_type": campaign_type},
             )
         resp.raise_for_status()
@@ -292,3 +293,6 @@ agent = Agent(
     before_agent_callback=load_campaign_config,
     generate_content_config=_GENERATION_CONFIG,
 )
+
+# Required by `adk web` â€” the CLI discovers agents via this name.
+root_agent = agent

@@ -50,6 +50,48 @@ Then, after the readback:
 
 ---
 
+## Scenario A2 — Implicit / `standard_sales`. "Fixing it by saying so."
+
+The correction path. Worth demoing because every rep assumes voice means
+"one shot, hope it heard you" — this is the answer to that objection.
+
+| | |
+|---|---|
+| Solution | **Implicit (Mega-Payload)** |
+| Campaign | **standard_sales** |
+| Topics | **HVAC** + **Plumbing** |
+
+**Say** — one breath:
+
+> "Phone call with Brookfield. Met with Bethany on HVAC — she placed an order
+> for AC units and coils. **End notes.**"
+
+Then, after the readback, correct three different things in turn — wait for the
+agent between each:
+
+| # | You say | What it corrects |
+|---|---|---|
+| 1 | "Actually that was an on-site visit, not a phone call." | a top-level field |
+| 2 | "And she didn't order — the pricing was too high for her budget." | a topic's disposition |
+| 3 | "I also covered plumbing, no current need there." | adds a missing topic |
+| 4 | "Yes, save it." | — |
+
+**Check**
+
+- Each readback mentions **only what changed**, not the whole record again
+- Event type ends as **On-site visit**
+- HVAC → **8 — Pricing concerns** (not 2 — Order Placed)
+- Plumbing → **3 — No current need**
+- Exactly **one** CRM record, not four
+
+**Narrate turn 3.** Before it, Plumbing was an uncovered planned topic and the
+save was blocked. Supplying it releases the gate in the same turn — the rep
+never has to know a gate existed.
+
+*Not yet run end to end.*
+
+---
+
 ## Scenario B — Guided / `standard_sales`. "The one that refuses to guess."
 
 | | |

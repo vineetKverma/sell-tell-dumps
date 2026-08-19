@@ -119,7 +119,7 @@ function renderRunTimer() {
 }
 
 function startRunTimer() {
-  logEvent("incoming", "Run timer started", null, "⏱️");
+  logEvent("incoming", "Run timer started", null, "â±ï¸");
   runTimerStartTs = performance.now();
   latestUsageMetadata = null;
   runTimerValue.textContent = "0.0s";
@@ -160,7 +160,7 @@ function markRunMetricsDone() {
     "incoming",
     `Run timer stopped: ${runTimerValue.textContent} / ${runCostValue.textContent}`,
     { usage: latestUsageMetadata },
-    "⏱️"
+    "â±ï¸"
   );
 }
 
@@ -215,7 +215,7 @@ function applyUsageMetadata(usage) {
   latestUsageMetadata = usage;
   const cost = estimateCostUsd(usage);
   runCostValue.textContent = `$${cost.toFixed(6)}`;
-  logEvent("incoming", `Usage metadata: ${cost.toFixed(6)} so far`, usage, "💰");
+  logEvent("incoming", `Usage metadata: ${cost.toFixed(6)} so far`, usage, "ðŸ’°");
 }
 
 // ---------------------------------------------------------------------------
@@ -328,16 +328,16 @@ if (historyButton) {
       const records = data.records || [];
       records.reverse().forEach(record => {
         const tr = document.createElement("tr");
-        const dateStr = record.staged_at ? new Date(record.staged_at).toLocaleString() : "—";
-        const crmId = record.crm_record_id || "—";
+        const dateStr = record.staged_at ? new Date(record.staged_at).toLocaleString() : "â€”";
+        const crmId = record.crm_record_id || "â€”";
         const payload = record.payload || {};
 
         tr.innerHTML = `
           <td>${dateStr}</td>
           <td>${crmId}</td>
           <td>${record.session_id}</td>
-          <td>${payload.event_type || "—"}</td>
-          <td>${payload.executive_summary || "—"}</td>
+          <td>${payload.event_type || "â€”"}</td>
+          <td>${payload.executive_summary || "â€”"}</td>
         `;
         historyTableBody.appendChild(tr);
       });
@@ -376,12 +376,12 @@ if (closeHistoryBtn) {
 // Phase / UI helpers
 // ---------------------------------------------------------------------------
 const PHASES = {
-  idle: { cls: "phase-idle", icon: "🎤", text: "Press the mic and start dictating your visit notes." },
-  listening: { cls: "phase-listening", icon: "🔴", text: "Listening… speak your notes. I'll stop automatically when you pause." },
-  processing: { cls: "phase-processing", icon: "⚙️", text: "Got it — extracting the structured record…" },
-  confirm: { cls: "phase-confirm", icon: "🟢", text: "Review below. Say “Save” or tell me what to change." },
-  saved: { cls: "phase-saved", icon: "✅", text: "Saved to CRM. Session complete." },
-  error: { cls: "phase-error", icon: "⚠️", text: "Something went wrong." },
+  idle: { cls: "phase-idle", icon: "ðŸŽ¤", text: "Press the mic and start dictating your visit notes." },
+  listening: { cls: "phase-listening", icon: "ðŸ”´", text: "Listeningâ€¦ speak your notes. I'll stop automatically when you pause." },
+  processing: { cls: "phase-processing", icon: "âš™ï¸", text: "Got it â€” extracting the structured recordâ€¦" },
+  confirm: { cls: "phase-confirm", icon: "ðŸŸ¢", text: "Review below. Say â€œSaveâ€ or tell me what to change." },
+  saved: { cls: "phase-saved", icon: "âœ…", text: "Saved to CRM. Session complete." },
+  error: { cls: "phase-error", icon: "âš ï¸", text: "Something went wrong." },
 };
 
 function setPhase(name, customText) {
@@ -453,7 +453,7 @@ function finalizeUserCaption() {
   // Reset the live strip to its placeholder so the committed line isn't shown
   // twice (once in the caption strip and once in the conversation history).
   userCaption.className = "caption-text placeholder";
-  userCaption.textContent = "Waiting for you to speak…";
+  userCaption.textContent = "Waiting for you to speakâ€¦";
 }
 
 function updateAgentCaption(text, finished) {
@@ -478,7 +478,7 @@ function finalizeAgentCaption() {
   // Reset the live strip to its placeholder so the committed line isn't shown
   // twice (once in the caption strip and once in the conversation history).
   agentCaption.className = "caption-text placeholder";
-  agentCaption.textContent = "Waiting for the agent…";
+  agentCaption.textContent = "Waiting for the agentâ€¦";
 }
 
 function finalizeAllCaptions() {
@@ -492,8 +492,8 @@ function resetCaptions() {
   liveAgentText = "";
   userCaption.className = "caption-text placeholder";
   agentCaption.className = "caption-text placeholder";
-  userCaption.textContent = "Waiting for you to speak…";
-  agentCaption.textContent = "Waiting for the agent…";
+  userCaption.textContent = "Waiting for you to speakâ€¦";
+  agentCaption.textContent = "Waiting for the agentâ€¦";
   userCaptionRow.classList.remove("speaking");
   agentCaptionRow.classList.remove("speaking");
   setLiveDot(false);
@@ -540,7 +540,7 @@ function startSpeechRecognition() {
     rec.onerror = (e) => {
       // "no-speech"/"aborted" are routine; only surface real failures.
       if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
-        logEvent("error", `Speech recognition: ${e.error}`, null, "⚠️");
+        logEvent("error", `Speech recognition: ${e.error}`, null, "âš ï¸");
       }
     };
 
@@ -579,7 +579,7 @@ function logEvent(type, summary, data, emoji) {
   const header = document.createElement("div");
   header.className = "console-entry-header";
   const left = document.createElement("span");
-  left.textContent = (emoji || "") + " " + (type === "outgoing" ? "↑" : type === "incoming" ? "↓" : "⚠");
+  left.textContent = (emoji || "") + " " + (type === "outgoing" ? "â†‘" : type === "incoming" ? "â†“" : "âš ");
   const ts = document.createElement("span");
   ts.textContent = new Date().toLocaleTimeString("en-US", { hour12: false });
   header.appendChild(left);
@@ -614,9 +614,9 @@ async function fetchConfig() {
     const cfg = await resp.json();
     dispositionLabels = {};
     (cfg.disposition_registry || []).forEach((r) => (dispositionLabels[r.code] = r.label));
-    logEvent("incoming", `Loaded agent config for "${campaign}"`, cfg, "🧩");
+    logEvent("incoming", `Loaded agent config for "${campaign}"`, cfg, "ðŸ§©");
   } catch (e) {
-    logEvent("error", "Failed to load agent config", { error: String(e) }, "⚠️");
+    logEvent("error", "Failed to load agent config", { error: String(e) }, "âš ï¸");
   }
 }
 campaignSelect.addEventListener("change", () => {
@@ -631,7 +631,7 @@ agentModeSelect.addEventListener("change", () => {
   // A new session id ensures the backend picks a fresh Runner/agent state.
   newSessionId();
   resetSession();
-  logEvent("incoming", `Switched solution to "${agentModeSelect.value}"`, {}, "🔁");
+  logEvent("incoming", `Switched solution to "${agentModeSelect.value}"`, {}, "ðŸ”");
 });
 
 // ---------------------------------------------------------------------------
@@ -643,10 +643,10 @@ async function fetchPlannedTopics() {
     const data = await resp.json();
     plannedTopicCatalog = data.topics || [];
     renderTopicOptions();
-    logEvent("incoming", `Loaded ${plannedTopicCatalog.length} planned topics`, data, "🗂️");
+    logEvent("incoming", `Loaded ${plannedTopicCatalog.length} planned topics`, data, "ðŸ—‚ï¸");
   } catch (e) {
     topicOptions.textContent = "Failed to load topics.";
-    logEvent("error", "Failed to load planned topics", { error: String(e) }, "⚠️");
+    logEvent("error", "Failed to load planned topics", { error: String(e) }, "âš ï¸");
   }
 }
 
@@ -727,7 +727,7 @@ function connectWebsocket() {
       "incoming",
       "WebSocket connected",
       { userId, sessionId, campaign: campaignSelect.value, agentMode: agentModeSelect.value },
-      "🔌",
+      "ðŸ”Œ",
     );
   };
 
@@ -759,7 +759,7 @@ function connectWebsocket() {
     // Ignore close events for sockets we've already replaced (reconnects).
     if (websocket !== ws) return;
     setConnected(false);
-    logEvent("error", "WebSocket closed", null, "🔌");
+    logEvent("error", "WebSocket closed", null, "ðŸ”Œ");
 
     // Attempt WebSocket reconnection with exponential backoff.
     // IMPORTANT: we generate a NEW sessionId on each attempt so the backend
@@ -776,7 +776,7 @@ function connectWebsocket() {
       return;
     }
 
-    // Don't leave the UI stuck on "agent responding…" if the stream dropped
+    // Don't leave the UI stuck on "agent respondingâ€¦" if the stream dropped
     // mid-turn. Recover to a usable state (unless we already finished).
     stopSpeechRecognition();
     micActive = false;
@@ -789,7 +789,7 @@ function connectWebsocket() {
   ws.onerror = (e) => {
     if (websocket !== ws) return;
     setConnected(false);
-    logEvent("error", "WebSocket error", { type: e.type }, "⚠️");
+    logEvent("error", "WebSocket error", { type: e.type }, "âš ï¸");
   };
 }
 
@@ -803,17 +803,17 @@ function handleAdkEvent(ev) {
 
   // Console summary
   let summary = "event";
-  let emoji = "📨";
-  if (ev.turnComplete) { summary = "Turn complete"; emoji = "✅"; }
-  else if (ev.interrupted) { summary = "Interrupted"; emoji = "⏸️"; }
-  else if (ev.inputTranscription) { summary = `Input: "${ev.inputTranscription.text || ""}"`; emoji = "📝"; }
-  else if (ev.outputTranscription) { summary = `Output: "${ev.outputTranscription.text || ""}"`; emoji = "🗣️"; }
+  let emoji = "ðŸ“¨";
+  if (ev.turnComplete) { summary = "Turn complete"; emoji = "âœ…"; }
+  else if (ev.interrupted) { summary = "Interrupted"; emoji = "â¸ï¸"; }
+  else if (ev.inputTranscription) { summary = `Input: "${ev.inputTranscription.text || ""}"`; emoji = "ðŸ“"; }
+  else if (ev.outputTranscription) { summary = `Output: "${ev.outputTranscription.text || ""}"`; emoji = "ðŸ—£ï¸"; }
   else if (ev.content && ev.content.parts) {
     const p = ev.content.parts;
-    if (p.some((x) => x.functionCall)) { const fc = p.find((x) => x.functionCall).functionCall; summary = `Tool call: ${fc.name}`; emoji = "🛠️"; }
-    else if (p.some((x) => x.functionResponse)) { const fr = p.find((x) => x.functionResponse).functionResponse; summary = `Tool result: ${fr.name}`; emoji = "📦"; }
-    else if (p.some((x) => x.inlineData)) { summary = "Audio chunk"; emoji = "🔊"; }
-    else if (p.some((x) => x.text)) { summary = `Text: "${(p.find((x) => x.text).text || "").slice(0, 60)}"`; emoji = "💭"; }
+    if (p.some((x) => x.functionCall)) { const fc = p.find((x) => x.functionCall).functionCall; summary = `Tool call: ${fc.name}`; emoji = "ðŸ› ï¸"; }
+    else if (p.some((x) => x.functionResponse)) { const fr = p.find((x) => x.functionResponse).functionResponse; summary = `Tool result: ${fr.name}`; emoji = "ðŸ“¦"; }
+    else if (p.some((x) => x.inlineData)) { summary = "Audio chunk"; emoji = "ðŸ”Š"; }
+    else if (p.some((x) => x.text)) { summary = `Text: "${(p.find((x) => x.text).text || "").slice(0, 60)}"`; emoji = "ðŸ’­"; }
   }
   // Don't spam the console with every audio chunk.
   const isAudioOnly = ev.content && ev.content.parts &&
@@ -939,7 +939,7 @@ function beginAgentResponse() {
   micActive = false; // stop streaming while the agent speaks
   stopSpeechRecognition(); // don't transcribe the agent's own playback
   levelFill.style.width = "0%";
-  silenceCountdown.textContent = "agent responding…";
+  silenceCountdown.textContent = "agent respondingâ€¦";
   silenceCountdown.classList.remove("counting");
   // The "extracting the structured record" wording only makes sense for the
   // implicit flow's post-dictation moment -- the guided flow's very first
@@ -947,7 +947,7 @@ function beginAgentResponse() {
   // mode-neutral label there instead so the banner doesn't imply something
   // is being extracted when the agent is just talking/asking a question.
   const text =
-    agentModeSelect.value === "guided" ? "Agent is responding…" : undefined;
+    agentModeSelect.value === "guided" ? "Agent is respondingâ€¦" : undefined;
   setPhase("processing", text);
 }
 
@@ -955,11 +955,10 @@ function handleFunctionCall(fc) {
   if (fc.name === "stage_visit_notes") {
     const args = fc.args || {};
     renderPayload(args);
-    localStorage.setItem("sellntell_draft", JSON.stringify(args));
     payloadStatus.textContent = "staged";
     payloadStatus.className = "badge";
   } else if (fc.name === "commit_visit_notes" || fc.name === "commit_guided_notes") {
-    payloadStatus.textContent = "committing…";
+    payloadStatus.textContent = "committingâ€¦";
   } else if (fc.name === "capture_dictation") {
     // Guided flow builds its record incrementally across several small tool
     // calls (no single Mega-Payload). Accumulate the pieces client-side as
@@ -1002,7 +1001,7 @@ function handleFunctionResponse(fr) {
   if (fr.name === "stage_visit_notes") {
     // Confirmation text is spoken by the model; surface it in the log too.
     if (resp.confirmation_text) {
-      logEvent("incoming", `Confirmation: ${resp.confirmation_text}`, resp, "🗣️");
+      logEvent("incoming", `Confirmation: ${resp.confirmation_text}`, resp, "ðŸ—£ï¸");
     }
     // The actual phase switch to "confirm" happens on turnComplete (after the
     // model has finished speaking the confirmation aloud).
@@ -1031,7 +1030,7 @@ function handleFunctionResponse(fr) {
       const detail = missing.length
         ? `${why} (still needed: ${missing.join(", ")})`
         : why;
-      logEvent("incoming", `Commit refused: ${detail}`, resp, "🚫");
+      logEvent("incoming", `Commit refused: ${detail}`, resp, "ðŸš«");
       // Nothing was saved: keep the record staged and leave the rep in the
       // confirm phase so they can answer the agent and try again.
       payloadStatus.textContent = "staged";
@@ -1062,7 +1061,7 @@ function handleFunctionResponse(fr) {
     saveButton.disabled = true;
     changeButton.disabled = true;
     if (resp.closing_statement) {
-      logEvent("incoming", `Closing: ${resp.closing_statement}`, resp, "🗣️");
+      logEvent("incoming", `Closing: ${resp.closing_statement}`, resp, "ðŸ—£ï¸");
     }
   }
 }
@@ -1090,7 +1089,7 @@ function renderCoverage(topics) {
     let state = "pending";
     if (match) state = match.discussed === false ? "skipped" : "covered";
     chip.classList.add("cov-" + state);
-    const icon = state === "covered" ? "✓" : state === "skipped" ? "—" : "…";
+    const icon = state === "covered" ? "âœ“" : state === "skipped" ? "â€”" : "â€¦";
     chip.textContent = `${icon} ${label}`;
     pCoverage.appendChild(chip);
   });
@@ -1101,10 +1100,10 @@ function renderPayload(args) {
   // A newly staged record has not been written to the CRM, so it has no record
   // id. Clear any id left over from a previous commit in this page session --
   // otherwise the card shows a "staged" badge next to a real CRM id.
-  pCrmId.textContent = "—";
+  pCrmId.textContent = "â€”";
 
-  pEventType.textContent = args.event_type || "—";
-  pSummary.textContent = args.executive_summary || "—";
+  pEventType.textContent = args.event_type || "â€”";
+  pSummary.textContent = args.executive_summary || "â€”";
 
   const topics = Array.isArray(args.topics) ? args.topics : [];
   renderCoverage(topics);
@@ -1128,7 +1127,7 @@ function renderPayload(args) {
       disp.textContent = "not discussed";
     } else {
       disp.textContent =
-        code != null ? `${code}${label ? " — " + label : ""}` : "—";
+        code != null ? `${code}${label ? " â€” " + label : ""}` : "â€”";
     }
     head.appendChild(title);
     head.appendChild(disp);
@@ -1142,7 +1141,7 @@ function renderPayload(args) {
     pTopics.appendChild(item);
   });
 
-  const transcript = args.raw_transcript_backup || "—";
+  const transcript = args.raw_transcript_backup || "â€”";
   pTranscript.innerHTML = transcript
     .replace(/\[inaudible\]/gi, '<span class="uncertainty-tag">$&</span>')
     .replace(/\[unclear\]/gi, '<span class="uncertainty-tag">$&</span>');
@@ -1224,7 +1223,7 @@ function audioRecorderHandler(pcmData) {
       return;
     }
   } else {
-    // Reset on any chunk that falls below the threshold — normal speech has
+    // Reset on any chunk that falls below the threshold â€” normal speech has
     // natural dynamic range and will break the streak between words.
     highEnergyStreak = 0;
   }
@@ -1265,16 +1264,16 @@ function audioRecorderHandler(pcmData) {
     if (!hadSpeech) speechStartTs = now;
     hadSpeech = true;
     lastVoiceTs = now;
-    silenceCountdown.textContent = "🎙️ speaking…";
+    silenceCountdown.textContent = "ðŸŽ™ï¸ speakingâ€¦";
     silenceCountdown.classList.remove("counting");
   } else if (hadSpeech && now - speechStartTs > MIN_SPEECH_MS) {
     const silentFor = now - lastVoiceTs;
     if (silentFor >= SILENCE_MS) {
-      silenceCountdown.textContent = "pause detected — wrapping up…";
+      silenceCountdown.textContent = "pause detected â€” wrapping upâ€¦";
       silenceCountdown.classList.remove("counting");
     } else {
       const remaining = Math.max(0, SILENCE_MS - silentFor);
-      silenceCountdown.textContent = `pausing… ${(remaining / 1000).toFixed(1)}s`;
+      silenceCountdown.textContent = `pausingâ€¦ ${(remaining / 1000).toFixed(1)}s`;
       silenceCountdown.classList.add("counting");
     }
   }
@@ -1313,7 +1312,7 @@ async function startDictation() {
     // Drop any stale (closing/closed) socket before reconnecting so we never
     // wait on a dead connection.
     closeWebsocketIntentionally();
-    setPhase("processing", "Connecting…");
+    setPhase("processing", "Connectingâ€¦");
     connectWebsocket();
     const opened = await waitForOpen(8000);
     if (!opened) {
@@ -1350,7 +1349,7 @@ function waitForOpen(timeoutMs = 8000) {
 
 micButton.addEventListener("click", () => {
   if (phase === "listening") {
-    // "Done dictating" — stop sending mic audio but keep the WebSocket OPEN
+    // "Done dictating" â€” stop sending mic audio but keep the WebSocket OPEN
     // so the model can process the buffered audio in the server's
     // LiveRequestQueue. DO NOT call endSession() here: closing the socket
     // kills the Vertex AI Live session before it can respond.
@@ -1358,7 +1357,7 @@ micButton.addEventListener("click", () => {
     // WHY THIS MATTERS: Vertex AI's cold-start handshake takes 6-10 seconds.
     // During that time, audio chunks are buffered server-side. Closing the
     // socket immediately (old behaviour) always raced against the handshake
-    // and killed the session before the model saw the audio — producing the
+    // and killed the session before the model saw the audio â€” producing the
     // "1000 None / client disconnected" error observed in logs.
     //
     // New behaviour: silence the mic, show "processing", and let the 30-second
@@ -1367,8 +1366,8 @@ micButton.addEventListener("click", () => {
     stopSpeechRecognition();
     levelFill.style.width = "0%";
     silenceCountdown.classList.remove("counting");
-    silenceCountdown.textContent = "processing…";
-    setPhase("processing", "Processing your notes — please wait…");
+    silenceCountdown.textContent = "processingâ€¦";
+    setPhase("processing", "Processing your notes â€” please waitâ€¦");
     if (!agentResponseWatchdog) {
       agentResponseWatchdog = setTimeout(() => {
         if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -1427,8 +1426,8 @@ function sendText(text) {
   if (websocket && websocket.readyState === WebSocket.OPEN) {
     addMessage(text, "user");
     websocket.send(JSON.stringify({ type: "text", text }));
-    logEvent("outgoing", `Text: ${text}`, null, "💬");
-    setPhase("processing", "Processing your response…");
+    logEvent("outgoing", `Text: ${text}`, null, "ðŸ’¬");
+    setPhase("processing", "Processing your responseâ€¦");
   }
 }
 
@@ -1489,9 +1488,9 @@ async function fetchClientConfig() {
     const resp = await fetch("/api/v1/client-config");
     const cfg = await resp.json();
     if (cfg.vad_silence_ms) SILENCE_MS = cfg.vad_silence_ms;
-    logEvent("incoming", `Client VAD threshold: ${SILENCE_MS}ms`, cfg, "⏱️");
+    logEvent("incoming", `Client VAD threshold: ${SILENCE_MS}ms`, cfg, "â±ï¸");
   } catch (e) {
-    logEvent("error", "Failed to load client config", { error: String(e) }, "⚠️");
+    logEvent("error", "Failed to load client config", { error: String(e) }, "âš ï¸");
   }
 }
 
@@ -1501,14 +1500,14 @@ fetchConfig();
 fetchPlannedTopics();
 
 // ---------------------------------------------------------------------------
-// Dev/test hook — exposes key internal functions on window.__snTest so they
+// Dev/test hook â€” exposes key internal functions on window.__snTest so they
 // can be called from the browser DevTools console even though this file runs
 // as an ES module (module scope is private and unreachable from the console).
 //
 // Usage (DevTools console):
-//   window.__snTest.simulateAgentStall()   → triggers watchdog test (Test 3)
-//   window.__snTest.simulateToolError()    → injects a tool-error banner (Test 4)
-//   window.__snTest.getPhase()             → returns current phase string
+//   window.__snTest.simulateAgentStall()   â†’ triggers watchdog test (Test 3)
+//   window.__snTest.simulateToolError()    â†’ injects a tool-error banner (Test 4)
+//   window.__snTest.getPhase()             â†’ returns current phase string
 // ---------------------------------------------------------------------------
 window.__snTest = {
   /** Simulate a Gemini Live API stall: enters "agent responding..." and starts
@@ -1551,17 +1550,17 @@ window.addEventListener("DOMContentLoaded", () => {
   window.addEventListener('offline', () => document.body.classList.add('offline'));
   if (!navigator.onLine) document.body.classList.add('offline');
 
-  const draft = localStorage.getItem("sellntell_draft");
-  if (draft) {
-    try {
-      const args = JSON.parse(draft);
-      renderPayload(args);
-      payloadStatus.textContent = "draft recovered";
-      payloadStatus.className = "badge status-warning";
-      saveButton.disabled = false;
-      changeButton.disabled = false;
-    } catch (e) {
-      localStorage.removeItem("sellntell_draft");
-    }
-  }
+  // Offline draft recovery removed (AIML-2703).
+  //
+  // The staged record lives in server memory, keyed by session_id. A copy kept
+  // in localStorage outlives it -- across a server restart, a redeploy, or
+  // simply the next session -- so the card came back showing a record the
+  // backend had never heard of, with Save enabled and no CRM record id.
+  // Committing it could only ever fail (no_staged_notes), and worse, an
+  // already-saved record reappeared as a live draft because nothing cleared
+  // the key after a successful commit.
+  //
+  // Server state is authoritative. This purge runs unconditionally so any
+  // browser still holding a stale draft is cleaned up on its next load.
+  localStorage.removeItem("sellntell_draft");
 });
