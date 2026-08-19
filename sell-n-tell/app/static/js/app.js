@@ -12,11 +12,15 @@ import { startAudioRecorderWorklet } from "./audio-recorder.js";
 // ---------------------------------------------------------------------------
 // Config / constants
 // ---------------------------------------------------------------------------
-const userId = "rep-" + crypto.randomUUID();  
+let userId = localStorage.getItem("sellntell_rep_id");
+if (!userId) {
+  userId = "rep-" + crypto.randomUUID();
+  localStorage.setItem("sellntell_rep_id", userId);
+}
 // Regenerated whenever the campaign or planned topics change so the backend
 // seeds a fresh session with the new selection (in-memory sessions are keyed
 // by id and their seeded state is otherwise sticky).
-let sessionId = "sess-" + crypto.randomUUID();  
+let sessionId = "sess-" + crypto.randomUUID();
 function newSessionId() {
   sessionId = "sess-" + crypto.randomUUID();
 }
@@ -57,6 +61,23 @@ let suppressAgentSpeech = false;
 let speechStartTs = 0;
 let lastVoiceTs = 0;
 let hadSpeech = false;
+
+// Audio quality detection.
+// The browser's autoGainControl in getUserMedia normalizes mic peaks before
+// they reach our JavaScript, so a raw peak-clipping check (Math.max vs 30000)
+// is defeated. Instead we detect SUSTAINED HIGH-ENERGY audio post-AGC:
+// if normalized RMS stays above HIGH_RMS_THRESHOLD for HIGH_ENERGY_STREAK_MAX
+// consecutive chunks, the audio is genuinely saturated/distorted even after
+// the browser's own normalization.
+const HIGH_RMS_THRESHOLD = 0.90; // Raised from 0.85
+const HIGH_ENERGY_STREAK_MAX = 100; // Raised from 50 (now ~12.8 seconds of sustained noise)
+let highEnergyStreak = 0;
+
+// Max bytes allowed to sit unsent in the WebSocket's buffer before we start
+// dropping chunks -- ~2s of audio at 16kHz 16-bit mono (32000 B/s).
+const MAX_BUFFERED_BYTES = 64000;
+let reconnectAttempts = 0;
+let agentResponseWatchdog = null;
 
 // Live transcription buffers (accumulate streaming deltas per speaker)
 let liveUserText = "";
@@ -233,8 +254,123 @@ const pTranscript = document.getElementById("pTranscript");
 const pCrmId = document.getElementById("pCrmId");
 const saveButton = document.getElementById("saveButton");
 const changeButton = document.getElementById("changeButton");
+const correctionUi = document.getElementById("correctionUi");
+const correctionInput = document.getElementById("correctionInput");
+const submitCorrectionBtn = document.getElementById("submitCorrectionBtn");
+const cancelCorrectionBtn = document.getElementById("cancelCorrectionBtn");
 const consoleContent = document.getElementById("consoleContent");
 const clearConsoleBtn = document.getElementById("clearConsole");
+const playbackAudio = document.getElementById("playbackAudio");
+
+let recordingBuffers = []; // Accumulate PCM buffers for playback
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+function createWavBlob(buffers, sampleRate = 16000) {
+  let len = 0;
+  for (const b of buffers) len += b.length;
+  const wav = new Int16Array(len);
+  let offset = 0;
+  for (const b of buffers) {
+    wav.set(b, offset);
+    offset += b.length;
+  }
+  const buffer = new ArrayBuffer(44 + len * 2);
+  const view = new DataView(buffer);
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + len * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, len * 2, true);
+  const wavArray = new Int16Array(buffer, 44, len);
+  wavArray.set(wav);
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+// F3 / F2 / F7 UI Elements
+const repIdInput = document.getElementById("repIdInput");
+const historyButton = document.getElementById("historyButton");
+const historyModal = document.getElementById("historyModal");
+const closeHistoryBtn = document.getElementById("closeHistoryBtn");
+const exportCsvBtn = document.getElementById("exportCsvBtn");
+const historyTableBody = document.getElementById("historyTableBody");
+
+if (repIdInput) {
+  repIdInput.value = userId;
+  repIdInput.addEventListener("change", (e) => {
+    userId = e.target.value.trim() || userId;
+    localStorage.setItem("sellntell_rep_id", userId);
+    repIdInput.value = userId;
+  });
+}
+
+if (historyButton) {
+  historyButton.addEventListener("click", async () => {
+    historyTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
+    historyModal.showModal();
+    try {
+      const res = await fetch("/api/v1/notes/committed");
+      const data = await res.json();
+      historyTableBody.innerHTML = "";
+
+      const records = data.records || [];
+      records.reverse().forEach(record => {
+        const tr = document.createElement("tr");
+        const dateStr = record.staged_at ? new Date(record.staged_at).toLocaleString() : "—";
+        const crmId = record.crm_record_id || "—";
+        const payload = record.payload || {};
+
+        tr.innerHTML = `
+          <td>${dateStr}</td>
+          <td>${crmId}</td>
+          <td>${record.session_id}</td>
+          <td>${payload.event_type || "—"}</td>
+          <td>${payload.executive_summary || "—"}</td>
+        `;
+        historyTableBody.appendChild(tr);
+      });
+
+      exportCsvBtn.onclick = () => {
+        const rows = [["Date", "CRM ID", "Session ID", "Event Type", "Summary"]];
+        records.forEach(record => {
+          const payload = record.payload || {};
+          rows.push([
+            record.staged_at || "",
+            record.crm_record_id || "",
+            record.session_id || "",
+            payload.event_type || "",
+            (payload.executive_summary || "").replace(/"/g, '""')
+          ]);
+        });
+        const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sell_n_tell_history.csv";
+        a.click();
+      };
+    } catch (err) {
+      historyTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Error loading history</td></tr>';
+    }
+  });
+}
+
+if (closeHistoryBtn) {
+  closeHistoryBtn.addEventListener("click", () => historyModal.close());
+}
 
 // ---------------------------------------------------------------------------
 // Phase / UI helpers
@@ -484,7 +620,7 @@ async function fetchConfig() {
   }
 }
 campaignSelect.addEventListener("change", () => {
-  if (websocket && websocket.readyState === WebSocket.OPEN) websocket.close();
+  if (websocket && websocket.readyState === WebSocket.OPEN) closeWebsocketIntentionally();
   // A new session id ensures the backend re-seeds state for this campaign.
   newSessionId();
   resetSession();
@@ -542,7 +678,7 @@ function onTopicToggle(e) {
   }
   // Changing the plan mid-stream means a fresh session is needed so the agent
   // is re-seeded with the new topic list.
-  if (websocket && websocket.readyState === WebSocket.OPEN) websocket.close();
+  if (websocket && websocket.readyState === WebSocket.OPEN) closeWebsocketIntentionally();
   newSessionId();
   updatePlannedCount();
 }
@@ -563,6 +699,15 @@ function setPlanningEnabled(enabled) {
 // ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
+function closeWebsocketIntentionally() {
+  if (websocket) {
+    const ws = websocket;
+    websocket = null;
+    try { ws.close(); } catch (_) { }
+    setConnected(false);
+  }
+}
+
 function wsUrl() {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const campaign = encodeURIComponent(campaignSelect.value);
@@ -589,6 +734,24 @@ function connectWebsocket() {
   ws.onmessage = (event) => {
     if (websocket !== ws) return;
     const ev = JSON.parse(event.data);
+
+    if (ev.type === "ui_event" && ev.event === "tool_error") {
+      const banner = document.createElement("div");
+      banner.className = "ui-error-banner";
+      banner.style.position = "fixed";
+      banner.style.top = "0";
+      banner.style.width = "100%";
+      banner.style.backgroundColor = "red";
+      banner.style.color = "white";
+      banner.style.textAlign = "center";
+      banner.style.padding = "10px";
+      banner.style.zIndex = "9999";
+      banner.textContent = ev.message;
+      document.body.prepend(banner);
+      setTimeout(() => banner.remove(), 5000);
+      return;
+    }
+
     handleAdkEvent(ev);
   };
 
@@ -597,6 +760,22 @@ function connectWebsocket() {
     if (websocket !== ws) return;
     setConnected(false);
     logEvent("error", "WebSocket closed", null, "🔌");
+
+    // Attempt WebSocket reconnection with exponential backoff.
+    // IMPORTANT: we generate a NEW sessionId on each attempt so the backend
+    // creates a fresh Gemini Live session rather than reusing the one that is
+    // still tearing down (which triggers APIError 1000 on the server).
+    const backoffs = [800, 1200, 2000, 3500];
+    if (reconnectAttempts < backoffs.length) {
+      setPhase("processing", "Connection lost. Reconnecting...");
+      setTimeout(() => {
+        reconnectAttempts++;
+        newSessionId(); // fresh session so the server starts a clean Gemini Live session
+        connectWebsocket();
+      }, backoffs[reconnectAttempts]);
+      return;
+    }
+
     // Don't leave the UI stuck on "agent responding…" if the stream dropped
     // mid-turn. Recover to a usable state (unless we already finished).
     stopSpeechRecognition();
@@ -728,6 +907,11 @@ function handleAdkEvent(ev) {
   if (ev.turnComplete) {
     finalizeAllCaptions();
     agentTurnActive = false;
+
+    // Check if the agent completely ignored the user's speech
+    const userSpoke = !!liveUserText;
+    const agentResponded = !!agentActivity || !payloadCard.classList.contains("hidden");
+
     if (committed) {
       // Notes saved -> end the session.
       finishSession();
@@ -735,6 +919,11 @@ function handleAdkEvent(ev) {
       // Agent finished speaking the confirmation -> re-open the mic so the rep
       // can simply say "Save" or a correction.
       enterConfirmPhase();
+    } else if (userSpoke && !agentResponded) {
+      // The user spoke, but the agent emitted turnComplete WITHOUT staging notes 
+      // or saying anything. This is a model glitch (empty turn).
+      setPhase("error", "The agent didn't catch that. Please press the mic and try dictating again.");
+      endSession();
     } else {
       // No staged payload yet -> keep listening for the rep's dictation.
       armVad();
@@ -766,6 +955,7 @@ function handleFunctionCall(fc) {
   if (fc.name === "stage_visit_notes") {
     const args = fc.args || {};
     renderPayload(args);
+    localStorage.setItem("sellntell_draft", JSON.stringify(args));
     payloadStatus.textContent = "staged";
     payloadStatus.className = "badge";
   } else if (fc.name === "commit_visit_notes" || fc.name === "commit_guided_notes") {
@@ -952,7 +1142,14 @@ function renderPayload(args) {
     pTopics.appendChild(item);
   });
 
-  pTranscript.textContent = args.raw_transcript_backup || "—";
+  const transcript = args.raw_transcript_backup || "—";
+  pTranscript.innerHTML = transcript
+    .replace(/\[inaudible\]/gi, '<span class="uncertainty-tag">$&</span>')
+    .replace(/\[unclear\]/gi, '<span class="uncertainty-tag">$&</span>');
+
+  if (playbackAudio && recordingBuffers.length > 0) {
+    playbackAudio.src = URL.createObjectURL(createWavBlob(recordingBuffers));
+  }
 }
 
 function enterConfirmPhase() {
@@ -994,33 +1191,13 @@ function armVad() {
   lastVoiceTs = performance.now();
 }
 
-// Max bytes allowed to sit unsent in the WebSocket's buffer before we start
-// dropping chunks. 16kHz 16-bit mono = 32000 B/s, so this is ~2s of audio.
-// If the uplink (or a Cloudflare tunnel hop) can't keep up with a realtime
-// stream, queueing more only grows an unbounded backlog and delivers audio
-// the Live API reads as "too fast" once it drains. There is no catching up on
-// a realtime stream -- dropping is the only correct response.
-const MAX_BUFFERED_BYTES = 64000;
-
 function audioRecorderHandler(pcmData) {
-  if (!micActive || !websocket || websocket.readyState !== WebSocket.OPEN) return;
-
-  // Stream the chunk to the server, unless we're already backed up.
-  if (websocket.bufferedAmount > MAX_BUFFERED_BYTES) {
-    if (!audioBackpressureWarned) {
-      audioBackpressureWarned = true;
-      console.warn(
-        "Uplink behind realtime (bufferedAmount=" +
-          websocket.bufferedAmount +
-          "B) -- dropping audio chunks until it drains."
-      );
-    }
-  } else {
-    audioBackpressureWarned = false;
-    websocket.send(pcmData);
-  }
-
   // --- Client-side energy VAD ---
+  // --- Distortion detection runs UNCONDITIONALLY (before the micActive
+  // guard) so a sustained noise burst is caught even after the user has
+  // pressed "stop" (micActive = false) while awaiting a model response.
+  // Previously the early return on !micActive prevented the streak counter
+  // from incrementing, so the distortion error was never shown.
   const int16 = new Int16Array(pcmData);
   let sum = 0;
   for (let i = 0; i < int16.length; i++) {
@@ -1028,6 +1205,57 @@ function audioRecorderHandler(pcmData) {
     sum += v * v;
   }
   const rms = Math.sqrt(sum / Math.max(int16.length, 1));
+
+  // Sustained high-energy detection. The browser's autoGainControl normalizes
+  // peaks before they reach JS, so a peak-clipping check (Math.max > 30000)
+  // never fires. Instead we count how many consecutive chunks sit at
+  // HIGH_RMS_THRESHOLD (0.90) or above AFTER AGC has already normalized them.
+  // If audio is genuinely saturated/distorted, it stays pinned near the top
+  // even after AGC. Normal speech produces a much more dynamic RMS pattern.
+  if (rms >= HIGH_RMS_THRESHOLD) {
+    highEnergyStreak++;
+    if (highEnergyStreak >= HIGH_ENERGY_STREAK_MAX) {
+      closeWebsocketIntentionally();
+      stopSpeechRecognition();
+      micActive = false;
+      agentTurnActive = false;
+      highEnergyStreak = 0;
+      setPhase("error", "Audio distortion detected. Please check your microphone and try again.");
+      return;
+    }
+  } else {
+    // Reset on any chunk that falls below the threshold — normal speech has
+    // natural dynamic range and will break the streak between words.
+    highEnergyStreak = 0;
+  }
+
+  // Everything below is only relevant when the mic is actively streaming.
+  if (!micActive) return;
+
+  recordingBuffers.push(new Int16Array(pcmData));
+
+  // Stream the chunk to the server if connected, unless we're already backed
+  // up. 16kHz 16-bit mono is 32000 B/s, so MAX_BUFFERED_BYTES is ~2s of audio.
+  // If the uplink (or a tunnel hop) can't sustain realtime, queueing more only
+  // grows a backlog that the Live API reads as "sending data too fast" once it
+  // drains -- there is no catching up on a realtime stream, so dropping is the
+  // only correct response.
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    if (websocket.bufferedAmount > MAX_BUFFERED_BYTES) {
+      if (!audioBackpressureWarned) {
+        audioBackpressureWarned = true;
+        console.warn(
+          "Uplink behind realtime (bufferedAmount=" +
+            websocket.bufferedAmount +
+            "B) -- dropping audio chunks until it drains."
+        );
+      }
+    } else {
+      audioBackpressureWarned = false;
+      websocket.send(pcmData);
+    }
+  }
+
   levelFill.style.width = Math.min(100, rms * 450).toFixed(0) + "%";
 
   // Client-side silence countdown is informational only: the server's
@@ -1052,12 +1280,13 @@ function audioRecorderHandler(pcmData) {
   }
 }
 
+
 function endSession() {
   // Stop streaming and tear down the live session.
   micActive = false;
   agentTurnActive = false;
   stopSpeechRecognition();
-  if (websocket && websocket.readyState === WebSocket.OPEN) websocket.close();
+  if (websocket && websocket.readyState === WebSocket.OPEN) closeWebsocketIntentionally();
   silenceCountdown.textContent = "VAD idle";
   silenceCountdown.classList.remove("counting");
   levelFill.style.width = "0%";
@@ -1083,10 +1312,7 @@ async function startDictation() {
   if (!websocket || websocket.readyState !== WebSocket.OPEN) {
     // Drop any stale (closing/closed) socket before reconnecting so we never
     // wait on a dead connection.
-    if (websocket) {
-      try { websocket.close(); } catch (_) { /* no-op */ }
-      websocket = null;
-    }
+    closeWebsocketIntentionally();
     setPhase("processing", "Connecting…");
     connectWebsocket();
     const opened = await waitForOpen(8000);
@@ -1123,19 +1349,79 @@ function waitForOpen(timeoutMs = 8000) {
 }
 
 micButton.addEventListener("click", () => {
-  if (phase === "listening" || phase === "confirm") {
-    // End the live session.
+  if (phase === "listening") {
+    // "Done dictating" — stop sending mic audio but keep the WebSocket OPEN
+    // so the model can process the buffered audio in the server's
+    // LiveRequestQueue. DO NOT call endSession() here: closing the socket
+    // kills the Vertex AI Live session before it can respond.
+    //
+    // WHY THIS MATTERS: Vertex AI's cold-start handshake takes 6-10 seconds.
+    // During that time, audio chunks are buffered server-side. Closing the
+    // socket immediately (old behaviour) always raced against the handshake
+    // and killed the session before the model saw the audio — producing the
+    // "1000 None / client disconnected" error observed in logs.
+    //
+    // New behaviour: silence the mic, show "processing", and let the 30-second
+    // watchdog close the connection only if the model genuinely stalls.
+    micActive = false;
+    stopSpeechRecognition();
+    levelFill.style.width = "0%";
+    silenceCountdown.classList.remove("counting");
+    silenceCountdown.textContent = "processing…";
+    setPhase("processing", "Processing your notes — please wait…");
+    if (!agentResponseWatchdog) {
+      agentResponseWatchdog = setTimeout(() => {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          closeWebsocketIntentionally();
+        }
+        agentResponseWatchdog = null;
+        setPhase("error", "The agent took too long to respond. Please try again.");
+      }, 30000);
+    }
+  } else if (phase === "confirm") {
+    // User explicitly aborts the confirmation step.
+    endSession();
+  } else if (phase === "processing") {
+    // Escape hatch: user cancels a stalled connection or processing.
     endSession();
   } else {
     startDictation();
   }
 });
 
+
 saveButton.addEventListener("click", () => sendText("Save it."));
 changeButton.addEventListener("click", () => {
-  const change = prompt("What should I change? (e.g. 'change the event type to a phone call')");
-  if (change) sendText(change);
+  correctionUi.classList.remove("hidden");
+  correctionInput.value = "";
+  correctionInput.focus();
 });
+
+if (submitCorrectionBtn) {
+  submitCorrectionBtn.addEventListener("click", () => {
+    const change = correctionInput.value.trim();
+    if (change) {
+      sendText(change);
+      correctionUi.classList.add("hidden");
+    }
+  });
+}
+
+if (cancelCorrectionBtn) {
+  cancelCorrectionBtn.addEventListener("click", () => {
+    correctionUi.classList.add("hidden");
+  });
+}
+
+if (correctionInput) {
+  correctionInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      submitCorrectionBtn.click();
+    } else if (e.key === "Escape") {
+      cancelCorrectionBtn.click();
+    }
+  });
+}
 
 function sendText(text) {
   if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -1147,7 +1433,9 @@ function sendText(text) {
 }
 
 function resetForNewDictation() {
+  // Narrow reset: keeps audio context and connection alive, clears payload
   committed = false;
+  recordingBuffers = [];
 }
 
 function resetSession() {
@@ -1211,3 +1499,69 @@ setPhase("idle");
 fetchClientConfig();
 fetchConfig();
 fetchPlannedTopics();
+
+// ---------------------------------------------------------------------------
+// Dev/test hook — exposes key internal functions on window.__snTest so they
+// can be called from the browser DevTools console even though this file runs
+// as an ES module (module scope is private and unreachable from the console).
+//
+// Usage (DevTools console):
+//   window.__snTest.simulateAgentStall()   → triggers watchdog test (Test 3)
+//   window.__snTest.simulateToolError()    → injects a tool-error banner (Test 4)
+//   window.__snTest.getPhase()             → returns current phase string
+// ---------------------------------------------------------------------------
+window.__snTest = {
+  /** Simulate a Gemini Live API stall: enters "agent responding..." and starts
+   *  the 10-second watchdog. If no real events arrive, the watchdog fires and
+   *  shows the timeout error, proving Test 3 works correctly. */
+  simulateAgentStall() {
+    if (phase !== "listening" && phase !== "confirm") {
+      console.warn("[__snTest] App must be in listening or confirm phase first. Click the mic and connect.");
+      return;
+    }
+    console.info("[__snTest] Triggering beginAgentResponse(). Watchdog fires in 10s if no events arrive.");
+    beginAgentResponse();
+  },
+
+  /** Inject a tool-error banner directly without a real tool failure (Test 4). */
+  simulateToolError() {
+    const banner = document.createElement("div");
+    banner.className = "ui-error-banner";
+    banner.style.cssText = "position:fixed;top:0;width:100%;background:red;color:white;text-align:center;padding:10px;z-index:9999;";
+    banner.textContent = "There was a problem saving your notes. [simulated]";
+    document.body.prepend(banner);
+    setTimeout(() => banner.remove(), 5000);
+    console.info("[__snTest] Tool-error banner injected. It will auto-dismiss in 5s.");
+  },
+
+  /** Return the current UI phase. */
+  getPhase() { return phase; },
+};
+
+window.addEventListener("DOMContentLoaded", () => {
+  if ('serviceWorker' in navigator) {
+    // Unregister any previously installed service workers. The SW feature was
+    // removed because it caused a GET / redirect loop that broke the app.
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach(r => r.unregister());
+    });
+  }
+
+  window.addEventListener('online', () => document.body.classList.remove('offline'));
+  window.addEventListener('offline', () => document.body.classList.add('offline'));
+  if (!navigator.onLine) document.body.classList.add('offline');
+
+  const draft = localStorage.getItem("sellntell_draft");
+  if (draft) {
+    try {
+      const args = JSON.parse(draft);
+      renderPayload(args);
+      payloadStatus.textContent = "draft recovered";
+      payloadStatus.className = "badge status-warning";
+      saveButton.disabled = false;
+      changeButton.disabled = false;
+    } catch (e) {
+      localStorage.removeItem("sellntell_draft");
+    }
+  }
+});

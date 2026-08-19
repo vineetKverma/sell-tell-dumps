@@ -75,12 +75,12 @@ class DiscussionTopic(BaseModel):
     topic: str = Field(
         ..., description="Short label / subject of this call topic"
     )
-    disposition_code: DispositionCode | None = Field(
+    disposition_code: int | None = Field(
         default=None,
         description=(
             "Disposition outcome for THIS topic, chosen from the fixed "
             "disposition registry (DispositionCode). Required when the topic "
-            "was discussed; null for a planned-but-not-discussed topic."
+            "was discussed; null for a planned-but-not-discussed topic. Values: 1 to 10."
         ),
     )
     executive_summary: str = Field(
@@ -292,6 +292,7 @@ PLANNED_TOPIC_CATALOG: list[dict[str, str]] = [
 ]
 
 
+
 def get_planned_topic_catalog() -> list[dict[str, str]]:
     """Return the selectable pre-call planned-topic catalog (copy)."""
     return [dict(t) for t in PLANNED_TOPIC_CATALOG]
@@ -390,6 +391,7 @@ _CAMPAIGN_CONFIGS: dict[str, dict[str, Any]] = {
 
 _DEFAULT_CAMPAIGN = "standard_sales"
 
+VALID_CAMPAIGN_TYPES = set(_CAMPAIGN_CONFIGS.keys())
 VALID_EVENT_TYPES = ["Meeting", "On-site visit", "Phone Call"]
 VALID_DISPOSITION_CODES = [int(c) for c in DispositionCode]
 
@@ -664,6 +666,7 @@ def stage_notes(
     planned_topics: list[str] | None = None,
     campaign_type: str | None = None,
     agent_mode: str = "implicit",
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Stage an extracted payload for confirmation; return id + confirmation.
 
@@ -673,7 +676,7 @@ def stage_notes(
     drives the coverage check: any planned topic not yet addressed turns the
     confirmation into a reminder asking the rep for an outcome.
     """
-    session_id = str(uuid.uuid4())
+    session_id = session_id or str(uuid.uuid4())
     planned_topics = planned_topics or []
 
     # A topic the agent could not map to a real outcome is by definition one a
@@ -701,6 +704,7 @@ def stage_notes(
     # only) staging call then reports that same topic as uncovered, so the
     # commit 409s and the agent asks again. Observed live 2026-08-11.
     allow_skips = previous is not None or agent_mode == "guided"
+
     if previous:
         confirmation_text = build_change_confirmation(
             previous["payload"], payload, planned_topics
@@ -779,6 +783,27 @@ def commit_notes(
             "closing_statement": "No problem, I've discarded this note.",
         }
 
+    if record.get("committed"):
+        # Idempotent retry -- e.g. the agent's HTTP client timed out waiting
+        # on a slow response (was previously possible if the BigQuery sink
+        # was slow, since it used to block this endpoint's response) and
+        # retried commit_visit_notes for the same staged session. Return the
+        # original result instead of minting a second CRM record.
+        #
+        # Safe above the coverage gate: the gate runs before the record is
+        # ever marked committed, so committed=True implies it already passed.
+        logger.info(
+            "commit_notes: session_id=%s already committed as crm_record_id=%s "
+            "-- returning original result instead of creating a duplicate",
+            session_id,
+            record.get("crm_record_id"),
+        )
+        return {
+            "status": "success",
+            "crm_record_id": record["crm_record_id"],
+            "closing_statement": "Saved successfully. Have a great day!",
+        }
+
     planned_topics = record.get("planned_topics") or []
     missing_topics = compute_missing_topics(
         planned_topics,
@@ -801,6 +826,8 @@ def commit_notes(
     record["committed"] = True
     record["committed_at"] = datetime.now(timezone.utc).isoformat()
     crm_record_id = f"CRM-{uuid.uuid4().hex[:10].upper()}"
+    record["crm_record_id"] = crm_record_id
+
     committed = {
         "crm_record_id": crm_record_id,
         "staged_session_id": session_id,
@@ -816,6 +843,7 @@ def commit_notes(
         "committed_at": record["committed_at"],
     }
     _COMMITTED_NOTES.append(committed)
+    del _STAGED_NOTES[session_id]
     logger.info(
         "Committed notes session_id=%s crm_record_id=%s agent_mode=%s",
         session_id,

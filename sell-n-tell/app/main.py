@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -39,6 +40,11 @@ load_dotenv(Path(__file__).parent / ".env")
 
 # pylint: disable=wrong-import-position
 from voice_notes_agent import bigquery_sink, mock_db  # noqa: E402
+# `db` is the active CRM store (mock_db or bigquery_db, chosen by
+# BIGQUERY_ENABLED). `mock_db` is still imported directly for the pieces the
+# CRMStore Protocol does not cover: campaign-rule validation and the
+# IncompleteCoverageError type, neither of which is a storage operation.
+from voice_notes_agent.db_interface import db  # noqa: E402
 from voice_notes_agent.agent import (  # noqa: E402
     STATE_CAMPAIGN_TYPE,
     STATE_PLANNED_TOPICS,
@@ -66,7 +72,12 @@ APP_NAME = "voice-notes-logger"
 # A ~2.5s window lets the rep speak several sentences and only ends the turn
 # when they are genuinely done. The browser mirrors this for its UI countdown.
 VAD_SILENCE_MS = int(os.getenv("VOICE_NOTES_VAD_SILENCE_MS", "2500"))
-SERVER_VAD_SILENCE_MS = VAD_SILENCE_MS
+if VAD_SILENCE_MS > 2000:
+    logger.warning(
+        "VAD_SILENCE_MS=%d exceeds Live API cap of 2000ms; clamping to 2000.",
+        VAD_SILENCE_MS,
+    )
+SERVER_VAD_SILENCE_MS = min(VAD_SILENCE_MS, 2000)
 
 app = FastAPI(
     title="Agentic AI Voice Notes Logger API",
@@ -79,6 +90,8 @@ app = FastAPI(
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+# KNOWN LIMITATION: All ADK sessions live in process memory. A server restart drops all
+# sessions. For production, replace this with a DatabaseSessionService (e.g. SQLite, Redis).
 session_service = InMemorySessionService()
 # One Runner per solution so both flows can be compared side by side behind
 # the `agent_mode` toggle: "implicit" (single Mega-Payload extraction, VAD
@@ -112,6 +125,7 @@ class AgentConfigResponse(BaseModel):
 
 
 class StagedVisitPayload(BaseModel):
+    caller_session_id: str | None = None
     event_type: str = Field(
         ...,
         description="Meeting | On-site visit | Phone Call",
@@ -185,7 +199,9 @@ async def get_agent_schema(
     campaign_type: str = Query(default="standard_sales"),
 ) -> AgentConfigResponse:
     """Dynamically inject required fields, tool params, and disposition codes."""
-    config = mock_db.get_agent_config(campaign_type)
+    if campaign_type not in db.VALID_CAMPAIGN_TYPES:
+        campaign_type = "standard_sales"
+    config = db.get_agent_config(campaign_type)
     return AgentConfigResponse(**config)
 
 
@@ -197,7 +213,7 @@ async def get_agent_schema(
 async def get_planned_topics() -> PlannedTopicCatalogResponse:
     """Return the catalog of topics a rep can plan to discuss before a call."""
     return PlannedTopicCatalogResponse(
-        topics=mock_db.get_planned_topic_catalog()
+        topics=db.get_planned_topic_catalog()
     )
 
 
@@ -215,25 +231,28 @@ async def stage_notes(
 
     When ``previous_session_id`` is supplied (a correction), the confirmation
     reads back only what changed relative to that prior staged record.
-
-    ``agent_mode`` decides whether a ``discussed=false`` topic counts as
-    coverage on a FIRST stage -- see the allow_skips note in mock_db.stage_notes.
-    Guided asks about every topic before recording a skip; implicit does not.
     """
     data = payload.model_dump()
     planned_topics = data.pop("planned_topics", [])
     campaign_type = data.pop("campaign_type", None)
+    caller_session_id = data.pop("caller_session_id", None)
 
     # Validate against THIS campaign's rules, not the global registry. The
     # campaign config is injected into the agent's prompt, but a prompt only
     # asks -- an illegal event type or disposition code that slips through
     # would be read back to the rep as if it were valid ("silent wrong code").
+    #
+    # This subsumes the plain `event_type not in VALID_EVENT_TYPES` check:
+    # a campaign's allowed_event_types is always a subset of the global list,
+    # so anything the global check would reject this one rejects too -- and it
+    # additionally catches a type that is globally legal but illegal for the
+    # campaign in scope (e.g. "On-site visit" on renewals).
     problems = mock_db.validate_against_campaign(data, campaign_type)
     if problems:
         logger.warning(
             "Staging rejected for campaign_type=%s: %s", campaign_type, problems
         )
-        config = mock_db.get_agent_config(campaign_type)
+        config = db.get_agent_config(campaign_type)
         return JSONResponse(
             status_code=422,
             content={
@@ -247,14 +266,34 @@ async def stage_notes(
             },
         )
 
-    result = mock_db.stage_notes(
+    result = db.stage_notes(
         data,
         previous_session_id=previous_session_id,
         planned_topics=planned_topics,
         campaign_type=campaign_type,
         agent_mode=agent_mode,
+        session_id=caller_session_id,
     )
     return StageResponse(**result)
+
+
+# Strong refs to fire-and-forget BigQuery writes so they aren't garbage
+# collected mid-flight (asyncio only holds a weak ref to scheduled tasks).
+_bq_write_tasks: set[asyncio.Task] = set()
+
+
+async def _write_bigquery_row_background(
+    record: dict, disposition_config: dict | None
+) -> None:
+    try:
+        await asyncio.to_thread(
+            bigquery_sink.insert_call_record, record, disposition_config
+        )
+    except Exception:  # noqa: BLE001 - a BQ hiccup must never fail commit
+        logger.exception(
+            "BigQuery sink raised for crm_record_id=%s",
+            record.get("crm_record_id"),
+        )
 
 
 @app.post(
@@ -265,7 +304,7 @@ async def stage_notes(
 async def commit_notes(body: CommitRequest) -> CommitResponse | JSONResponse:
     """Push the staged payload to the target CRM instance."""
     try:
-        result = mock_db.commit_notes(
+        result = db.commit_notes(
             body.session_id,
             body.confirmed,
             agent_mode=body.agent_mode,
@@ -289,25 +328,182 @@ async def commit_notes(body: CommitRequest) -> CommitResponse | JSONResponse:
 
     record = result.pop("_record", None)
     if record is not None:
-        disposition_config = mock_db.get_agent_config(
+        # Fire-and-forget: the commit itself (mock_db, above) already
+        # succeeded and is what the rep's save actually depends on. The
+        # BigQuery write is a side-channel analytics sink -- it must never
+        # gate how long the agent's tool call takes to return, since a slow
+        # BQ round-trip (e.g. cold-start TLS/auth on a fresh client) would
+        # otherwise blow past the tool's HTTP timeout and make the agent
+        # falsely report "temporary problem saving" and retry, creating a
+        # duplicate committed record for the same session.
+        disposition_config = db.get_agent_config(
             body.campaign_type or "standard_sales"
         )
-        try:
-            await asyncio.to_thread(
-                bigquery_sink.insert_call_record, record, disposition_config
-            )
-        except Exception:  # noqa: BLE001 - a BQ hiccup must never fail commit
-            logger.exception(
-                "BigQuery sink raised for crm_record_id=%s",
-                record.get("crm_record_id"),
-            )
+        task = asyncio.create_task(
+            _write_bigquery_row_background(record, disposition_config)
+        )
+        _bq_write_tasks.add(task)
+        task.add_done_callback(_bq_write_tasks.discard)
     return CommitResponse(**result)
 
 
 @app.get("/api/v1/notes/committed", summary="List committed CRM records (debug)")
 async def list_committed() -> dict:
     """Inspect the mock CRM table contents (handy for demos / debugging)."""
-    return {"records": mock_db.list_committed()}
+    return {"records": db.list_committed()}
+
+class ProcessRequest(BaseModel):
+    transcript: str
+    campaign_type: str = "standard_sales"
+    user_id: str
+    session_id: str
+    planned_topics: list[str] = Field(default_factory=list)
+
+class ConfirmRequest2(BaseModel):
+    session_id: str
+    action: str
+    correction: str | None = None
+
+@app.post("/api/v1/notes/process", summary="Headless API for processing transcripts")
+async def process_notes_endpoint(req: ProcessRequest) -> JSONResponse:
+    if not _SAFE_ID.match(req.user_id) or not _SAFE_ID.match(req.session_id):
+        return JSONResponse(status_code=400, content={"error": "Invalid IDs"})
+
+    try:
+        campaign_type = req.campaign_type
+        if campaign_type not in db.VALID_CAMPAIGN_TYPES:
+            campaign_type = "standard_sales"
+        from google.adk.runners import Runner
+        from google.genai import types
+        
+        text_agent = agent.clone()
+        text_agent.model = "gemini-2.5-flash"
+        
+        runner = Runner(app_name=APP_NAME, agent=text_agent, session_service=session_service)
+        
+        session = await session_service.get_session(app_name=APP_NAME, user_id=req.user_id, session_id=req.session_id)
+        if not session:
+            await session_service.create_session(
+                app_name=APP_NAME, user_id=req.user_id, session_id=req.session_id
+            )
+        
+        async for _ in runner.run_async(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            new_message=types.Content(parts=[types.Part.from_text(text=req.transcript)]),
+            state_delta={
+                STATE_CAMPAIGN_TYPE: req.campaign_type,
+                STATE_PLANNED_TOPICS: req.planned_topics,
+            }
+        ):
+            pass
+            
+        session = await session_service.get_session(app_name=APP_NAME, user_id=req.user_id, session_id=req.session_id)
+        staged_id = session.state.get("last_staged_id")
+        if not staged_id:
+            return JSONResponse(
+                status_code=400, content={"error": "Agent did not stage a record."}
+            )
+    
+        staged = db.get_staged(staged_id)
+        return JSONResponse(
+            content={
+                "session_id": staged_id,
+                "status": "staged",
+                "payload": staged.get("payload", {}),
+                "confirmation_text": staged.get("confirmation_text"),
+            }
+        )
+
+    except Exception as e:
+        logger.error("process_notes failed: %s", str(e))
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Internal server error", "detail": str(e)}
+        )
+
+@app.post("/api/v1/notes/confirm", summary="Headless API for confirming or correcting")
+async def confirm_notes_endpoint2(req: ConfirmRequest2) -> JSONResponse:
+    if req.action == "save":
+        try:
+            result = db.commit_notes(req.session_id, confirmed=True)
+            return JSONResponse(content=result)
+        except KeyError as exc:
+            return JSONResponse(status_code=404, content={"error": str(exc)})
+        except Exception as e:
+            logger.error("Commit failed: %s", e)
+            return JSONResponse(status_code=500, content={"error": str(e)})
+            
+    elif req.action == "correct":
+        if not req.correction:
+            return JSONResponse(
+                status_code=400, content={"error": "Correction text required."}
+            )
+            
+        staged = db.get_staged(req.session_id)
+        if not staged:
+            return JSONResponse(
+                status_code=404, content={"error": "Staged record not found."}
+            )
+            
+        import uuid
+        import json
+        tmp_session_id = f"corr-{uuid.uuid4().hex[:8]}"
+        
+        prompt = (
+            f"You previously staged this payload:\n{json.dumps(staged['payload'])}\n\n"
+            f"The user requested this correction: '{req.correction}'.\n"
+            f"Please call the stage_visit_notes tool with the fully corrected payload. "
+            f"Pass previous_session_id='{req.session_id}' and planned_topics={staged['planned_topics']}."
+        )
+        
+        try:
+            from google.adk.runners import Runner
+            from google.genai import types
+            
+            text_agent = agent.clone()
+            text_agent.model = "gemini-2.5-flash"
+            runner = Runner(app_name=APP_NAME, agent=text_agent, session_service=session_service)
+            
+            tmp_session = await session_service.get_session(app_name=APP_NAME, user_id="headless", session_id=tmp_session_id)
+            if not tmp_session:
+                await session_service.create_session(
+                    app_name=APP_NAME, user_id="headless", session_id=tmp_session_id
+                )
+            
+            async for _ in runner.run_async(
+                user_id="headless",
+                session_id=tmp_session_id,
+                new_message=types.Content(parts=[types.Part.from_text(text=prompt)]),
+                state_delta={
+                    STATE_CAMPAIGN_TYPE: "standard_sales",
+                    STATE_PLANNED_TOPICS: staged["planned_topics"],
+                }
+            ):
+                pass
+                
+        except Exception as e:
+            logger.error("Correction run failed: %s", e)
+            return JSONResponse(status_code=500, content={"error": str(e)})
+            
+        tmp_session = await session_service.get_session(app_name=APP_NAME, user_id="headless", session_id=tmp_session_id)
+        new_staged_id = tmp_session.state.get("last_staged_id") if tmp_session else None
+        if not new_staged_id:
+            return JSONResponse(
+                status_code=400, content={"error": "Correction failed to stage."}
+            )
+            
+        new_staged = db.get_staged(new_staged_id)
+        return JSONResponse(
+            content={
+                "session_id": new_staged_id,
+                "status": "staged",
+                "payload": new_staged.get("payload", {}),
+                "confirmation_text": new_staged.get("confirmation_text"),
+            }
+        )
+    else:
+        return JSONResponse(status_code=400, content={"error": "Invalid action"})
 
 
 @app.get("/api/v1/client-config", summary="Frontend runtime config")
@@ -368,6 +564,8 @@ def _log_event(event) -> None:
         logger.warning("Failed to log event: %s", exc)
 
 
+_SAFE_ID = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
 @app.websocket("/ws/{user_id}/{session_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -388,6 +586,14 @@ async def websocket_endpoint(
     (single Mega-Payload extraction, VAD auto-stop -- default) or "guided"
     (explicit turn-by-turn script). Unknown values fall back to "implicit".
     """
+    await websocket.accept()
+    if not _SAFE_ID.match(user_id) or not _SAFE_ID.match(session_id):
+        await websocket.close(code=1008, reason="Invalid session identifiers")
+        return
+
+    if campaign_type not in db.VALID_CAMPAIGN_TYPES:
+        campaign_type = "standard_sales"
+
     planned_topic_list = [
         t.strip() for t in planned_topics.split(",") if t.strip()
     ]
@@ -406,7 +612,6 @@ async def websocket_endpoint(
         planned_topic_list,
         agent_mode,
     )
-    await websocket.accept()
 
     model_name = runner.agent.model
     is_native_audio = "native-audio" in model_name.lower()
@@ -688,6 +893,15 @@ async def websocket_endpoint(
                 raise exc
     except WebSocketDisconnect:
         logger.info("Client disconnected")
+    except RuntimeError as exc:
+        # Starlette raises RuntimeError("Cannot call 'receive' once a disconnect
+        # message has been received.") when the browser closes the socket while
+        # upstream_task is blocked on websocket.receive(). This is a clean
+        # client-side disconnect, not a server error -- log at INFO level.
+        if "disconnect" in str(exc).lower():
+            logger.info("Client disconnected (upstream_task): %s", exc)
+        else:
+            logger.error("Streaming error: %s", exc, exc_info=True)
     except Exception as exc:  # noqa: BLE001
         logger.error("Streaming error: %s", exc, exc_info=True)
     finally:
