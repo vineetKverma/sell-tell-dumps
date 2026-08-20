@@ -537,10 +537,10 @@ async def _commit_guided_notes_locked(tool_context: ToolContext) -> dict:
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             stage_resp = await client.post(
-                            f"{_API_BASE}/api/v1/notes/stage",
-                            params={"agent_mode": "guided"},
-                            json=payload,
-                                                )
+                f"{_API_BASE}/api/v1/notes/stage",
+                params={"agent_mode": "guided"},
+                json=payload,
+            )
             # A 422 here is a campaign-rule violation, not an outage -- handled
             # below. Only genuine transport/5xx failures should reach the
             # "try again in a moment" message.

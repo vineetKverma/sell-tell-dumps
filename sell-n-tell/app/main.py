@@ -267,12 +267,14 @@ async def stage_notes(
     # so anything the global check would reject this one rejects too -- and it
     # additionally catches a type that is globally legal but illegal for the
     # campaign in scope (e.g. "On-site visit" on renewals).
-    problems = mock_db.validate_against_campaign(data, campaign_type)
+    # `config` comes back from the validator rather than being looked up again:
+    # validate_against_campaign already built it to do the checking, and the
+    # rejection body below needs the same one.
+    problems, config = mock_db.validate_against_campaign(data, campaign_type)
     if problems:
         logger.warning(
             "Staging rejected for campaign_type=%s: %s", campaign_type, problems
         )
-        config = db.get_agent_config(campaign_type)
         return JSONResponse(
             status_code=422,
             content={

@@ -1,4 +1,3 @@
-
 """Mock configuration database and CRM store for the Voice Notes Logger.
 
 This module simulates two external systems referenced by the API spec:
@@ -292,7 +291,6 @@ PLANNED_TOPIC_CATALOG: list[dict[str, str]] = [
 ]
 
 
-
 def get_planned_topic_catalog() -> list[dict[str, str]]:
     """Return the selectable pre-call planned-topic catalog (copy)."""
     return [dict(t) for t in PLANNED_TOPIC_CATALOG]
@@ -473,7 +471,7 @@ class SupersededRecordError(Exception):
 
 def validate_against_campaign(
     payload: dict[str, Any], campaign_type: str | None
-) -> list[str]:
+) -> tuple[list[str], dict[str, Any]]:
     """Check a staged payload against *this campaign's* rules.
 
     The campaign config is injected into the agent's prompt, but a prompt only
@@ -482,7 +480,11 @@ def validate_against_campaign(
     code is rejected instead of being read back to the rep as though it were
     valid.
 
-    Returns a list of human-readable problems (empty when the payload is legal).
+    Returns ``(problems, config)``: human-readable problems (empty when the
+    payload is legal), and the campaign config they were checked against. The
+    config is handed back rather than kept private because the caller needs the
+    same one to build its 422 body -- returning it here saves rebuilding it from
+    scratch on every rejection.
     """
     config = get_agent_config(campaign_type)
     allowed_events = config["allowed_event_types"]
@@ -528,7 +530,7 @@ def validate_against_campaign(
                 f"{campaign!r} registry; allowed codes are: {allowed}"
             )
 
-    return problems
+    return problems, config
 
 
 def disposition_label(code: int | None) -> str:
