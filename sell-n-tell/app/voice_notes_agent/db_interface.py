@@ -17,8 +17,24 @@ class CRMStore(Protocol):
     
     def get_agent_config(self, campaign_type: str | None) -> dict[str, Any]: ...
     def get_planned_topic_catalog(self) -> list[dict[str, str]]: ...
-    def stage_notes(self, payload: dict[str, Any], previous_session_id: str | None = None, planned_topics: list[str] | None = None, session_id: str | None = None) -> dict[str, Any]: ...
-    def commit_notes(self, session_id: str, confirmed: bool) -> dict[str, str]: ...
+    def stage_notes(
+        self,
+        payload: dict[str, Any],
+        previous_session_id: str | None = None,
+        planned_topics: list[str] | None = None,
+        campaign_type: str | None = None,
+        agent_mode: str = "implicit",
+        session_id: str | None = None,
+    ) -> dict[str, Any]: ...
+    def commit_notes(
+        self,
+        session_id: str,
+        confirmed: bool,
+        agent_mode: str = "implicit",
+        campaign_type: str | None = None,
+        ws_user_id: str | None = None,
+        ws_session_id: str | None = None,
+    ) -> dict[str, Any]: ...
     def list_committed(self) -> list[dict[str, Any]]: ...
 
 def get_db() -> CRMStore:

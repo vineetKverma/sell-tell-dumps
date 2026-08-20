@@ -27,6 +27,19 @@ const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_SAMPLES = (TARGET_SAMPLE_RATE * 20) / 1000; // 320 samples = 640 bytes
 
 export async function startAudioRecorderWorklet(audioRecorderHandler) {
+  // Backstop. app.js's ensureAudio() checks `window.isSecureContext` before
+  // calling this and gives the fuller message, because AudioWorklet is
+  // secure-context-only too and the player worklet fails first. This stays for
+  // any caller that skips that check -- getUserMedia is secure-context-only, so
+  // on plain HTTP `navigator.mediaDevices` is undefined and the call below
+  // would throw a bare TypeError.
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error(
+      "Microphone access requires HTTPS (or localhost). This page is served " +
+        "over plain HTTP, so the browser blocks it. Serve the app over HTTPS."
+    );
+  }
+
   // Ask for 16 kHz. We may not get it -- see below.
   const audioRecorderContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
   const inputRate = audioRecorderContext.sampleRate;
@@ -94,13 +107,24 @@ export async function startAudioRecorderWorklet(audioRecorderHandler) {
   audioRecorderNode.port.onmessage = (event) => {
     resampler.push(event.data);
   };
-  return [audioRecorderNode, audioRecorderContext, micStream];
+  // `flush` is returned because the caller, not this module, decides when a
+  // dictation ends -- see the note on stopMicrophone below.
+  return [audioRecorderNode, audioRecorderContext, micStream, resampler.flush];
 }
 
 /**
  * Stop the microphone.
+ *
+ * `flush` is optional but should be passed: the resampler holds up to ~20ms of
+ * samples in a partial chunk, which stopping the tracks would strand.
+ *
+ * Note this is NOT where a dictation ends in this app. The mic stays open
+ * across turns and streaming is gated by `micActive` in app.js, so the flush
+ * that actually preserves the rep's last word is the one app.js performs at
+ * each of those gate transitions.
  */
-export function stopMicrophone(micStream) {
+export function stopMicrophone(micStream, flush) {
+  if (flush) flush();
   micStream.getTracks().forEach((track) => track.stop());
   console.log("stopMicrophone(): Microphone stopped.");
 }
@@ -154,6 +178,28 @@ function createResampler(inputRate, onChunk) {
       }
       prevSample = input[n - 1];
       cursor -= n; // rebase into the next buffer's coordinates (>= -1)
+    },
+
+    // Emit whatever is sitting in the partial chunk. Without this the final
+    // 0-19ms of every dictation is never handed to the caller: the buffer only
+    // drains when it fills to CHUNK_SAMPLES, and by the time ambient audio
+    // fills it the caller has already stopped forwarding chunks -- so the
+    // trailing edge of the rep's last word is dropped, and those stale samples
+    // are then spliced onto the front of the NEXT turn.
+    //
+    // A short chunk is fine downstream: this is a raw PCM byte stream, so only
+    // the even byte count matters, not the chunk length.
+    //
+    // State is reset BEFORE onChunk, not after: the handler can re-enter this
+    // (app.js tears the session down from inside it on distortion), and a
+    // re-entrant flush must find an empty buffer rather than emit the same
+    // tail again forever.
+    flush() {
+      if (outLen === 0) return;
+      const tail = out.buffer.slice(0, outLen * Int16Array.BYTES_PER_ELEMENT);
+      out = new Int16Array(CHUNK_SAMPLES);
+      outLen = 0;
+      onChunk(tail);
     },
   };
 }

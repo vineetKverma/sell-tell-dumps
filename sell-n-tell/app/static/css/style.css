@@ -250,7 +250,7 @@ header h1 { margin: 0; font-size: 20px; }
 }
 .caption-text.placeholder { color: var(--muted); font-style: italic; font-size: 14px; }
 .caption-text.streaming::after {
-  content: "â–";
+  content: "▍";
   color: var(--accent);
   animation: blink 1s step-start infinite;
 }
@@ -272,7 +272,7 @@ header h1 { margin: 0; font-size: 20px; }
 .message.agent .bubble { background: var(--panel-2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .message.system .bubble { background: transparent; color: var(--muted); font-size: 12px; font-style: italic; }
 .bubble.interrupted { opacity: 0.6; }
-.typing-indicator::after { content: "â–"; animation: blink 1s step-start infinite; }
+.typing-indicator::after { content: "▍"; animation: blink 1s step-start infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* Payload card */
@@ -445,7 +445,7 @@ header h1 { margin: 0; font-size: 20px; }
 }
 .caption-text.placeholder { color: var(--muted); font-style: italic; font-size: 14px; }
 .caption-text.streaming::after {
-  content: "â–";
+  content: "▍";
   color: var(--accent);
   animation: blink 1s step-start infinite;
 }
@@ -467,7 +467,7 @@ header h1 { margin: 0; font-size: 20px; }
 .message.agent .bubble { background: var(--panel-2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .message.system .bubble { background: transparent; color: var(--muted); font-size: 12px; font-style: italic; }
 .bubble.interrupted { opacity: 0.6; }
-.typing-indicator::after { content: "â–"; animation: blink 1s step-start infinite; }
+.typing-indicator::after { content: "▍"; animation: blink 1s step-start infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* Payload card */

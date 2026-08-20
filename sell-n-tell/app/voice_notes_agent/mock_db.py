@@ -712,6 +712,19 @@ def stage_notes(
     previous = (
         _STAGED_NOTES.get(previous_session_id) if previous_session_id else None
     )
+    # A committed record is not a correction base. It is retained now only so
+    # commit_notes can answer an idempotent retry (see A5); before that
+    # retention it was deleted at commit and this lookup simply missed. Keep
+    # that behaviour rather than letting a correction supersede a record that
+    # is already in the CRM.
+    if previous is not None and previous.get("committed"):
+        logger.warning(
+            "stage_notes: previous_session_id=%s is already committed as %s -- "
+            "staging as a new record rather than a correction.",
+            previous_session_id,
+            previous.get("crm_record_id"),
+        )
+        previous = None
     # A "skip" (discussed=false) only counts as coverage once the rep has
     # actually been asked about the topic -- which is what a re-stage means.
     # On the first staging call the model can otherwise skip topics on the
@@ -823,6 +836,12 @@ def commit_notes(
         #
         # Safe above the coverage gate: the gate runs before the record is
         # ever marked committed, so committed=True implies it already passed.
+        #
+        # This branch is only reachable because the committed record is KEPT in
+        # _STAGED_NOTES (see the end of this function). It used to be deleted in
+        # the same call that set committed=True, so a real retry found nothing
+        # and got a KeyError/404 -- the guard described here could never
+        # actually fire.
         logger.info(
             "commit_notes: session_id=%s already committed as crm_record_id=%s "
             "-- returning original result instead of creating a duplicate",
@@ -866,6 +885,22 @@ def commit_notes(
         )
         raise IncompleteCoverageError(missing_topics)
 
+    # The campaign the record was STAGED and validated under wins over whatever
+    # the commit caller supplies. They are two independent inputs, and a client
+    # that sends a different value at commit time would otherwise have the CRM
+    # write attributed to -- and its disposition registry read from -- a
+    # campaign whose rules this record was never checked against.
+    staged_campaign_type = record.get("campaign_type")
+    if staged_campaign_type and campaign_type and staged_campaign_type != campaign_type:
+        logger.warning(
+            "commit_notes: session_id=%s was staged under campaign_type=%s but "
+            "the commit claims %s -- using the staged value.",
+            session_id,
+            staged_campaign_type,
+            campaign_type,
+        )
+    campaign_type = staged_campaign_type or campaign_type
+
     record["committed"] = True
     record["committed_at"] = datetime.now(timezone.utc).isoformat()
     crm_record_id = f"CRM-{uuid.uuid4().hex[:10].upper()}"
@@ -886,7 +921,16 @@ def commit_notes(
         "committed_at": record["committed_at"],
     }
     _COMMITTED_NOTES.append(committed)
-    del _STAGED_NOTES[session_id]
+    # Deliberately NOT deleted. The idempotent-retry branch at the top of this
+    # function replays this record's crm_record_id, and deleting here made that
+    # branch dead code: a genuine retry -- the timed-out-client case it exists
+    # for -- found no record and got a 404 instead of the original result.
+    # `committed=True` is what retires it as a commit target; the entry itself
+    # has to survive to answer the retry.
+    #
+    # This does mean _STAGED_NOTES now retains one entry per committed visit.
+    # It already leaked (B11); the eviction hook that fixes B11 must reap
+    # committed entries on WS disconnect rather than reinstating this delete.
     logger.info(
         "Committed notes session_id=%s crm_record_id=%s agent_mode=%s",
         session_id,

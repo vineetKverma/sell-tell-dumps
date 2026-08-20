@@ -21,7 +21,12 @@ if (-not $mdFiles) { throw "No markdown files found in $In" }
 
 $written = 0
 foreach ($md in $mdFiles) {
-    $lines = Get-Content -LiteralPath $md.FullName
+    # -Encoding UTF8 is NOT optional. PS 5.1's Get-Content defaults to the
+    # ANSI codepage, which decoded the UTF-8 export as Windows-1252 and turned
+    # every emoji into mojibake on the way back in (🎙️ -> ðŸŽ™ï¸). The export
+    # side already reads and writes UTF-8 explicitly; this was the one hop that
+    # didn't. Repair an affected tree with scripts/pr5/fix_mojibake.py.
+    $lines = Get-Content -LiteralPath $md.FullName -Encoding UTF8
     $i = 0
     while ($i -lt $lines.Count) {
         if ($lines[$i] -match '^<!--\s*FILE:\s*(.+?)\s*-->$') {

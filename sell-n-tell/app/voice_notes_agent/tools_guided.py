@@ -11,6 +11,7 @@ store directly, so both flows commit through the identical CRM path.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -58,12 +59,41 @@ def _campaign_rules(tool_context: ToolContext) -> tuple[list[str], set[int]]:
     return events, (codes or set(VALID_DISPOSITION_CODES))
 
 
+# One lock per live session, guarding the read-then-commit sequence in
+# commit_guided_notes. ADK's Live flow can dispatch several function calls from
+# a single model turn concurrently (asyncio.gather), and that sequence spans
+# two awaited HTTP round-trips -- long enough for a second invocation to read
+# _S_COMMIT_RESULT as unset and commit independently.
+#
+# Keyed by session id and never evicted; folds into B11's cleanup hook along
+# with turn_guard's dicts and mock_db._STAGED_NOTES.
+_COMMIT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _commit_lock(tool_context: ToolContext) -> asyncio.Lock:
+    """Return this session's commit lock, creating it if needed.
+
+    Safe without its own lock: there is no await between the lookup and the
+    insert, so no other task can run in between and create a second one.
+    """
+    key = tool_context.session.id
+    lock = _COMMIT_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _COMMIT_LOCKS[key] = lock
+    return lock
+
+
 def _reset_guided_state(tool_context: ToolContext) -> None:
     """Discard everything captured so far (a full re-record restart)."""
     tool_context.state[_S_TRANSCRIPT] = None
     tool_context.state[_S_SUMMARY] = None
     tool_context.state[_S_EVENT_TYPE] = None
     tool_context.state[_S_TOPIC_RESULTS] = []
+    # Cleared with the rest: a commit result belongs to the record that was
+    # just discarded, and leaving it set makes the next commit replay a CRM id
+    # for a record this session no longer holds.
+    tool_context.state[_S_COMMIT_RESULT] = None
     tool_context.state[_S_PENDING_TOPICS] = list(
         tool_context.state.get("planned_topics") or []
     )
@@ -106,6 +136,23 @@ async def capture_dictation(
         instruction_for_model describing what to say (including the
         summary) and the Save / Play back / Re-record menu to present next.
     """
+    # A dictation arriving when a commit result is already on the session means
+    # the rep has started their NEXT visit without the client having rotated
+    # session_id (it holds the socket open between dictations to skip Vertex's
+    # cold-start handshake). Without this reset that stale result is replayed at
+    # the next commit: the agent says "saved" and reads back the PREVIOUS
+    # visit's CRM id, while nothing for this visit was ever staged.
+    #
+    # The client also rotates session_id after a commit now, which makes this
+    # state empty by construction -- but the guarantee cannot depend on one
+    # client behaving. Any caller reusing a session gets it here.
+    if tool_context.state.get(_S_COMMIT_RESULT):
+        logger.info(
+            "capture_dictation: new dictation on a session that already "
+            "committed -- clearing guided state before capturing."
+        )
+        _reset_guided_state(tool_context)
+
     tool_context.state[_S_TRANSCRIPT] = raw_transcript
     tool_context.state[_S_SUMMARY] = executive_summary
     if not tool_context.state.get(_S_PENDING_TOPICS):
@@ -322,7 +369,12 @@ async def record_topic_disposition(
         disposition_code = None
         needs_manual_review = True
 
-    results = tool_context.state.get(_S_TOPIC_RESULTS) or []
+    # Copy-then-replace, never append in place. Mutating the list held in
+    # session state edits the stored object directly, which ADK does not
+    # necessarily see as a state delta, and it makes the sequence order-
+    # dependent if an await is ever introduced between the read and the write.
+    # `pending` below already follows this pattern.
+    results = list(tool_context.state.get(_S_TOPIC_RESULTS) or [])
     results.append(
         {
             "topic": topic,
@@ -405,6 +457,18 @@ async def commit_guided_notes(tool_context: ToolContext) -> dict:
     # still makes this call would otherwise re-stage under a NEW session_id
     # and mint a duplicate CRM record -- mock_db's own idempotency guard is
     # keyed on session_id and cannot catch that.
+    #
+    # The check has to be an atomic claim, not get-then-set. The commit below
+    # spans two awaited HTTP round-trips, and ADK's Live flow can dispatch
+    # several function calls from one model turn concurrently: both invocations
+    # would read `prior` as unset, both would stage under their own new
+    # session_id, and both would commit. Two independent stagings, so neither
+    # the supersede gate nor mock_db's session-keyed idempotency sees anything
+    # wrong -- two CRM records for one visit.
+    #
+    # The lock serializes them; the loser then finds the winner's result on the
+    # re-check inside and replays it, which is exactly the intended behaviour
+    # for a duplicate call.
     prior = tool_context.state.get(_S_COMMIT_RESULT)
     if prior:
         logger.info(
@@ -414,6 +478,21 @@ async def commit_guided_notes(tool_context: ToolContext) -> dict:
         )
         return prior
 
+    async with _commit_lock(tool_context):
+        prior = tool_context.state.get(_S_COMMIT_RESULT)
+        if prior:
+            logger.info(
+                "commit_guided_notes: a concurrent call committed this record "
+                "as crm_record_id=%s -- replaying its result instead of "
+                "staging a duplicate",
+                prior.get("crm_record_id"),
+            )
+            return prior
+        return await _commit_guided_notes_locked(tool_context)
+
+
+async def _commit_guided_notes_locked(tool_context: ToolContext) -> dict:
+    """Assemble and commit the guided record. Caller holds the commit lock."""
     event_type = tool_context.state.get(_S_EVENT_TYPE)
     topics = tool_context.state.get(_S_TOPIC_RESULTS) or []
     transcript = tool_context.state.get(_S_TRANSCRIPT) or ""

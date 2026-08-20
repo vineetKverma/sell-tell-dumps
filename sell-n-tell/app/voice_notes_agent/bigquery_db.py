@@ -1,7 +1,5 @@
 import os
-import uuid
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from google.cloud import bigquery
@@ -17,38 +15,23 @@ get_agent_config = mock_db.get_agent_config
 get_planned_topic_catalog = mock_db.get_planned_topic_catalog
 stage_notes = mock_db.stage_notes
 
-def commit_notes(session_id: str, confirmed: bool) -> dict[str, str]:
-    """Commit notes to BigQuery."""
-    record = mock_db.get_staged(session_id)
-    if record is None:
-        raise KeyError(f"No staged notes found for session_id={session_id}")
-        
-    if not confirmed:
-        # Handled by mock_db
-        return mock_db.commit_notes(session_id, confirmed)
-        
+
+def _insert_row(record: dict[str, Any]) -> None:
+    """Write one committed record to the configured BigQuery table."""
     dataset_id = os.getenv("BIGQUERY_DATASET")
     table_id = os.getenv("BIGQUERY_TABLE")
-    
-    if not dataset_id or not table_id:
-        logger.error("BigQuery is enabled but BIGQUERY_DATASET or BIGQUERY_TABLE is missing.")
-        raise ValueError("BigQuery configuration missing.")
-        
-    crm_record_id = f"CRM-{uuid.uuid4().hex[:10].upper()}"
-    committed_at = datetime.now(timezone.utc).isoformat()
-    
-    payload = record["payload"]
+
     row_to_insert = {
-        "crm_record_id": crm_record_id,
-        "session_id": session_id,
-        "event_type": payload.get("event_type"),
-        "executive_summary": payload.get("executive_summary"),
-        "raw_transcript_backup": payload.get("raw_transcript_backup"),
-        "topics": payload.get("topics", []),
+        "crm_record_id": record["crm_record_id"],
+        "session_id": record.get("staged_session_id"),
+        "event_type": record.get("event_type"),
+        "executive_summary": record.get("executive_summary"),
+        "raw_transcript_backup": record.get("raw_transcript_backup"),
+        "topics": record.get("topics", []),
         "planned_topics": record.get("planned_topics", []),
-        "committed_at": committed_at,
+        "committed_at": record.get("committed_at"),
     }
-    
+
     try:
         client = bigquery.Client()
         table_ref = f"{client.project}.{dataset_id}.{table_id}"
@@ -56,23 +39,74 @@ def commit_notes(session_id: str, confirmed: bool) -> dict[str, str]:
         if errors:
             logger.error("Failed to insert rows into BigQuery: %s", errors)
             raise RuntimeError(f"BigQuery insert failed: {errors}")
-            
-        logger.info("Successfully committed record %s to BigQuery table %s", crm_record_id, table_ref)
-    except Exception as e:
-        logger.error("BigQuery commit error: %s", e)
-        raise
-        
-    # Clean up staged note
-    del mock_db._STAGED_NOTES[session_id]
-    
-    # Optionally append to mock_db's in-memory list so the UI history still works
-    mock_db._COMMITTED_NOTES.append(row_to_insert)
 
-    return {
-        "status": "success",
-        "crm_record_id": crm_record_id,
-        "closing_statement": "Saved successfully. Have a great day!",
-    }
+        logger.info(
+            "Successfully committed record %s to BigQuery table %s",
+            record["crm_record_id"],
+            table_ref,
+        )
+    except Exception as e:
+        # The mock_db commit above already succeeded and already deleted the
+        # staged record, so this raise surfaces a *partial* commit: the CRM
+        # record exists in the API response (which is what Salesforce syncs
+        # from) but has no BigQuery row. Logged with the id so the row can be
+        # reconciled; failing loudly beats silently dropping the sink write.
+        logger.error(
+            "BigQuery commit error for crm_record_id=%s: %s",
+            record["crm_record_id"],
+            e,
+        )
+        raise
+
+
+def commit_notes(
+    session_id: str,
+    confirmed: bool,
+    agent_mode: str = "implicit",
+    campaign_type: str | None = None,
+    ws_user_id: str | None = None,
+    ws_session_id: str | None = None,
+) -> dict[str, Any]:
+    """Commit a staged payload, writing the committed row to BigQuery.
+
+    Every gate lives in ``mock_db.commit_notes`` and is inherited by delegating
+    to it rather than re-implemented here: the missing-record 404, the
+    AIML-2703 supersede check, the AIML-2698 coverage gate, and the idempotent
+    retry branch. This function owns only the BigQuery insert.
+
+    Signature must track ``mock_db.commit_notes`` -- ``main.py`` calls whichever
+    backend ``db_interface.get_db()`` returned with the same kwargs. See the
+    ``CRMStore`` Protocol in ``db_interface.py``.
+    """
+    if confirmed:
+        # Validated before delegating: mock_db.commit_notes mints the CRM
+        # record and drops the staged one, so discovering a missing table here
+        # afterwards would leave a commit that can never be re-tried.
+        if not os.getenv("BIGQUERY_DATASET") or not os.getenv("BIGQUERY_TABLE"):
+            logger.error(
+                "BigQuery is enabled but BIGQUERY_DATASET or BIGQUERY_TABLE is missing."
+            )
+            raise ValueError("BigQuery configuration missing.")
+
+    result = mock_db.commit_notes(
+        session_id,
+        confirmed,
+        agent_mode=agent_mode,
+        campaign_type=campaign_type,
+        ws_user_id=ws_user_id,
+        ws_session_id=ws_session_id,
+    )
+
+    # No ``_record`` means no new CRM record was created -- the commit was
+    # cancelled (confirmed=False), or it was an idempotent retry replaying an
+    # earlier result. Either way there is nothing to insert; inserting anyway
+    # is exactly the duplicate row the idempotency guard exists to prevent.
+    record = result.get("_record")
+    if record is not None:
+        _insert_row(record)
+
+    return result
+
 
 def list_committed() -> list[dict[str, Any]]:
     """Return committed records. For this stub, we return the local cache."""

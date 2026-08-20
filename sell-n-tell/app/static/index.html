@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Voice Notes Logger</title>
     <link rel="stylesheet" href="/static/css/style.css?v=3" />
-    <script src="/static/js/app.js?v=4" type="module"></script>
+    <script src="/static/js/app.js?v=9" type="module"></script>
   </head>
 
   <body>
     <header>
       <div class="header-left">
-        <h1>ðŸŽ™ï¸ Voice Notes Logger</h1>
+        <h1>🎙️ Voice Notes Logger</h1>
         <div class="subtitle">Agentic CRM dictation for field sales reps</div>
       </div>
       <div class="header-right">
@@ -47,18 +47,18 @@
       <div class="container">
         <!-- Phase / status banner -->
         <div id="phaseBanner" class="phase-banner phase-idle">
-          <span id="phaseIcon">ðŸŽ¤</span>
+          <span id="phaseIcon">🎤</span>
           <span id="phaseText">Plan your call, then press the mic to start dictating.</span>
         </div>
 
         <!-- Run metrics: wall-clock time + estimated token cost for this dictation run -->
         <div id="runMetrics" class="run-metrics">
           <div id="runTimerChip" class="metric-chip metric-timer">
-            <span class="metric-label">â± Time to save</span>
+            <span class="metric-label">⏱ Time to save</span>
             <span id="runTimerValue" class="metric-value">0.0s</span>
           </div>
           <div id="runCostChip" class="metric-chip metric-cost">
-            <span class="metric-label">ðŸ’° Est. cost</span>
+            <span class="metric-label">💰 Est. cost</span>
             <span id="runCostValue" class="metric-value">$0.000000</span>
           </div>
         </div>
@@ -73,13 +73,13 @@
             Select one or more topics you intend to cover. The agent will extract
             an outcome for each and remind you about any you don't mention.
           </div>
-          <div id="topicOptions" class="topic-options">Loading topicsâ€¦</div>
+          <div id="topicOptions" class="topic-options">Loading topics…</div>
         </div>
 
         <!-- Mic + silence meter -->
         <div class="mic-area">
           <button id="micButton" class="mic-button">
-            <span class="mic-glyph">ðŸŽ¤</span>
+            <span class="mic-glyph">🎤</span>
           </button>
           <div class="silence-meter">
             <div class="level-bar"><div id="levelFill" class="level-fill"></div></div>
@@ -95,11 +95,11 @@
           </div>
           <div id="userCaptionRow" class="caption-row">
             <span class="caption-speaker speaker-user">You</span>
-            <span id="userCaption" class="caption-text placeholder">Waiting for you to speakâ€¦</span>
+            <span id="userCaption" class="caption-text placeholder">Waiting for you to speak…</span>
           </div>
           <div id="agentCaptionRow" class="caption-row">
             <span class="caption-speaker speaker-agent">Agent</span>
-            <span id="agentCaption" class="caption-text placeholder">Waiting for the agentâ€¦</span>
+            <span id="agentCaption" class="caption-text placeholder">Waiting for the agent…</span>
           </div>
         </div>
 
@@ -113,22 +113,22 @@
         <div id="payloadCard" class="panel payload-card hidden">
           <div class="panel-title">Staged CRM Record <span id="payloadStatus" class="badge">staged</span></div>
           <dl class="payload-grid">
-            <dt>Event type</dt><dd id="pEventType">â€”</dd>
-            <dt>Call summary</dt><dd id="pSummary">â€”</dd>
+            <dt>Event type</dt><dd id="pEventType">—</dd>
+            <dt>Call summary</dt><dd id="pSummary">—</dd>
           </dl>
           <div class="topics-label">Planned-topic coverage</div>
           <div id="pCoverage" class="coverage"></div>
           <div class="topics-label">Discussion topics</div>
           <div id="pTopics" class="topics"></div>
           <dl class="payload-grid">
-            <dt>Raw transcript</dt><dd id="pTranscript" class="muted">â€”</dd>
-            <dt>CRM record id</dt><dd id="pCrmId" class="muted">â€”</dd>
+            <dt>Raw transcript</dt><dd id="pTranscript" class="muted">—</dd>
+            <dt>CRM record id</dt><dd id="pCrmId" class="muted">—</dd>
             <dt>Audio playback</dt><dd><audio id="playbackAudio" controls style="height: 30px;"></audio></dd>
           </dl>
           <div class="confirm-actions">
-            <button id="saveButton" class="btn-primary" disabled>âœ” Save</button>
-            <button id="changeButton" class="btn-secondary" disabled>âœŽ Change</button>
-            <span class="hint">â€¦or just say â€œSaveâ€ / â€œChange the event type to a phone callâ€.</span>
+            <button id="saveButton" class="btn-primary" disabled>✔ Save</button>
+            <button id="changeButton" class="btn-secondary" disabled>✎ Change</button>
+            <span class="hint">…or just say “Save” / “Change the event type to a phone call”.</span>
           </div>
           <div id="correctionUi" class="correction-ui hidden">
             <input type="text" id="correctionInput" placeholder="What should I change? (e.g. 'change the event type to a phone call')" />

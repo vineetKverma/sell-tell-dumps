@@ -316,6 +316,47 @@ async def _write_bigquery_row_background(
         )
 
 
+def _commit_failure_response(exc: Exception) -> JSONResponse | None:
+    """Map a commit failure onto the structured error contract.
+
+    Shared by every endpoint that commits, so they cannot drift. That drift was
+    exactly the A4 defect: /notes/confirm wrapped its commit in a catch-all that
+    turned the 409 + missing_topics coverage contract into an opaque 500, since
+    IncompleteCoverageError is just an Exception subclass.
+
+    Returns None for anything that is genuinely unexpected -- the caller decides
+    whether that is a 500.
+    """
+    if isinstance(exc, KeyError):
+        return JSONResponse(
+            status_code=404, content={"detail": str(exc), "error": str(exc)}
+        )
+    if isinstance(exc, mock_db.SupersededRecordError):
+        # A later correction replaced this draft. Hand back the id that
+        # replaced it so a caller holding a stale id can retry against the
+        # right record rather than guessing.
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "error": "superseded_record",
+                "superseded_by": exc.superseded_by,
+            },
+        )
+    if isinstance(exc, mock_db.IncompleteCoverageError):
+        # The rep planned topics that still have no outcome. Refuse the write
+        # and hand back exactly which ones, so the caller can collect them.
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "error": "incomplete_coverage",
+                "missing_topics": exc.missing_topics,
+            },
+        )
+    return None
+
+
 @app.post(
     "/api/v1/notes/commit",
     response_model=CommitResponse,
@@ -332,31 +373,12 @@ async def commit_notes(body: CommitRequest) -> CommitResponse | JSONResponse:
             ws_user_id=body.ws_user_id,
             ws_session_id=body.ws_session_id,
         )
-    except KeyError as exc:
-        return JSONResponse(status_code=404, content={"detail": str(exc)})
-    except mock_db.SupersededRecordError as exc:
-        # A later correction replaced this draft. Hand back the id that
-        # replaced it so a caller holding a stale id can retry against the
-        # right record rather than guessing.
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(exc),
-                "error": "superseded_record",
-                "superseded_by": exc.superseded_by,
-            },
-        )
-    except mock_db.IncompleteCoverageError as exc:
-        # The rep planned topics that still have no outcome. Refuse the write
-        # and hand back exactly which ones, so the caller can collect them.
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(exc),
-                "error": "incomplete_coverage",
-                "missing_topics": exc.missing_topics,
-            },
-        )
+    except (
+        KeyError,
+        mock_db.SupersededRecordError,
+        mock_db.IncompleteCoverageError,
+    ) as exc:
+        return _commit_failure_response(exc)
 
     record = result.pop("_record", None)
     if record is not None:
@@ -368,8 +390,14 @@ async def commit_notes(body: CommitRequest) -> CommitResponse | JSONResponse:
         # otherwise blow past the tool's HTTP timeout and make the agent
         # falsely report "temporary problem saving" and retry, creating a
         # duplicate committed record for the same session.
+        # Read the campaign off the RECORD, not off the request. `record`
+        # carries the value the payload was staged and validated under
+        # (mock_db.commit_notes prefers the staged value over the caller's), so
+        # a client that sends a different campaign_type at commit time than at
+        # stage time can no longer steer the sink to another campaign's
+        # disposition registry.
         disposition_config = db.get_agent_config(
-            body.campaign_type or "standard_sales"
+            record.get("campaign_type") or "standard_sales"
         )
         task = asyncio.create_task(
             _write_bigquery_row_background(record, disposition_config)
@@ -459,12 +487,22 @@ async def confirm_notes_endpoint2(req: ConfirmRequest2) -> JSONResponse:
     if req.action == "save":
         try:
             result = db.commit_notes(req.session_id, confirmed=True)
-            return JSONResponse(content=result)
-        except KeyError as exc:
-            return JSONResponse(status_code=404, content={"error": str(exc)})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - re-raised below if unmapped
+            # Structured failures (404 / 409 coverage / 409 superseded) must
+            # keep their contract here exactly as on /notes/commit. The old
+            # catch-all collapsed them into a 500, so a caller of this endpoint
+            # could not tell "incomplete record, here are the missing topics"
+            # from "the server broke".
+            mapped = _commit_failure_response(e)
+            if mapped is not None:
+                return mapped
             logger.error("Commit failed: %s", e)
             return JSONResponse(status_code=500, content={"error": str(e)})
+
+        # Internal-only key consumed by /notes/commit to feed the BigQuery
+        # sink; it is not part of any response contract.
+        result.pop("_record", None)
+        return JSONResponse(content=result)
             
     elif req.action == "correct":
         if not req.correction:
@@ -765,10 +803,24 @@ async def websocket_endpoint(
                     # record_topic_disposition, choose_post_dictation_action)
                     # is permanently blocked with "no_reply_heard" in text
                     # mode, which is what scripts/ws_smoke_test.py uses.
+                    #
+                    # The guard and the send have to agree. Previously only the
+                    # counter was gated on strip(), so a blank-but-non-empty
+                    # message was still forwarded to the model as a real turn --
+                    # the model took its turn, but every turn_guard-gated tool
+                    # afterwards reported `no_reply_heard` for a turn that
+                    # genuinely happened, and the agent re-asked a question the
+                    # rep had already been asked.
                     if text.strip():
                         turn_guard.record_user_turn(session_id)
-                    content = types.Content(parts=[types.Part(text=text)])
-                    live_request_queue.send_content(content)
+                        content = types.Content(parts=[types.Part(text=text)])
+                        live_request_queue.send_content(content)
+                    else:
+                        logger.info(
+                            "Dropping blank text message (session_id=%s) -- "
+                            "not a turn, not forwarded to the model.",
+                            session_id,
+                        )
 
     async def downstream_task() -> None:
         """ADK events -> browser."""

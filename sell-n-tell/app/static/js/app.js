@@ -6,23 +6,76 @@
  * confirmation that the agent produces via tool calls.
  */
 
-import { startAudioPlayerWorklet } from "./audio-player.js";
-import { startAudioRecorderWorklet } from "./audio-recorder.js";
+// Version the imported modules too, not just app.js.
+//
+// index.html loads `app.js?v=N`, but that query covers ONLY app.js -- the
+// modules it imports were requested at their bare URL and could be served from
+// disk cache indefinitely, so a change to audio-recorder.js could be invisible
+// while app.js itself was demonstrably fresh. Observed in the browser: app.js
+// fetched 200/65kB, audio-recorder.js "0 B (disk cache)" in the same load.
+//
+// Keep N in step with the value in index.html whenever either file changes.
+// (`new URL("./pcm-recorder-processor.js", import.meta.url)` inside
+// audio-recorder.js resolves against the query-stripped path, so the worklet
+// module is unaffected.)
+import { startAudioPlayerWorklet } from "./audio-player.js?v=9";
+import { startAudioRecorderWorklet } from "./audio-recorder.js?v=9";
 
 // ---------------------------------------------------------------------------
 // Config / constants
 // ---------------------------------------------------------------------------
+/**
+ * RFC 4122 v4 UUID, with a fallback for non-secure contexts.
+ *
+ * `crypto.randomUUID` exists ONLY in a secure context -- HTTPS, or localhost.
+ * Served over plain HTTP (an internal LAN deployment without a cert, which is
+ * plausible for an internal sales tool) it is `undefined`, and calling it here
+ * throws at module load, taking the whole frontend down before anything
+ * renders. `crypto.getRandomValues` has no such restriction, so it carries the
+ * fallback; `Math.random` is the last resort and is only ever reached in an
+ * environment where Web Crypto is absent entirely.
+ *
+ * These ids only have to be unique, not unguessable -- they key an in-memory
+ * session store, so a weaker source in the fallback path costs nothing.
+ */
+function uuid() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+  return (
+    hex.slice(0, 4).join("") +
+    "-" +
+    hex.slice(4, 6).join("") +
+    "-" +
+    hex.slice(6, 8).join("") +
+    "-" +
+    hex.slice(8, 10).join("") +
+    "-" +
+    hex.slice(10, 16).join("")
+  );
+}
+
 let userId = localStorage.getItem("sellntell_rep_id");
 if (!userId) {
-  userId = "rep-" + crypto.randomUUID();
+  userId = "rep-" + uuid();
   localStorage.setItem("sellntell_rep_id", userId);
 }
 // Regenerated whenever the campaign or planned topics change so the backend
 // seeds a fresh session with the new selection (in-memory sessions are keyed
 // by id and their seeded state is otherwise sticky).
-let sessionId = "sess-" + crypto.randomUUID();
+let sessionId = "sess-" + uuid();
 function newSessionId() {
-  sessionId = "sess-" + crypto.randomUUID();
+  sessionId = "sess-" + uuid();
 }
 
 // Client-side VAD tuning. The browser's VAD is the authoritative stop-trigger
@@ -40,6 +93,7 @@ let websocket = null;
 let audioPlayerNode = null;
 let audioRecorderNode = null;
 let micStream = null;
+let audioRecorderFlush = null; // drains the resampler's partial chunk; see stopMicStreaming
 let audioStarted = false;
 
 let micActive = false;       // are we streaming mic audio right now?
@@ -119,7 +173,7 @@ function renderRunTimer() {
 }
 
 function startRunTimer() {
-  logEvent("incoming", "Run timer started", null, "â±ï¸");
+  logEvent("incoming", "Run timer started", null, "⏱️");
   runTimerStartTs = performance.now();
   latestUsageMetadata = null;
   runTimerValue.textContent = "0.0s";
@@ -160,7 +214,7 @@ function markRunMetricsDone() {
     "incoming",
     `Run timer stopped: ${runTimerValue.textContent} / ${runCostValue.textContent}`,
     { usage: latestUsageMetadata },
-    "â±ï¸"
+    "⏱️"
   );
 }
 
@@ -215,7 +269,7 @@ function applyUsageMetadata(usage) {
   latestUsageMetadata = usage;
   const cost = estimateCostUsd(usage);
   runCostValue.textContent = `$${cost.toFixed(6)}`;
-  logEvent("incoming", `Usage metadata: ${cost.toFixed(6)} so far`, usage, "ðŸ’°");
+  logEvent("incoming", `Usage metadata: ${cost.toFixed(6)} so far`, usage, "💰");
 }
 
 // ---------------------------------------------------------------------------
@@ -328,16 +382,16 @@ if (historyButton) {
       const records = data.records || [];
       records.reverse().forEach(record => {
         const tr = document.createElement("tr");
-        const dateStr = record.staged_at ? new Date(record.staged_at).toLocaleString() : "â€”";
-        const crmId = record.crm_record_id || "â€”";
+        const dateStr = record.staged_at ? new Date(record.staged_at).toLocaleString() : "—";
+        const crmId = record.crm_record_id || "—";
         const payload = record.payload || {};
 
         tr.innerHTML = `
           <td>${dateStr}</td>
           <td>${crmId}</td>
           <td>${record.session_id}</td>
-          <td>${payload.event_type || "â€”"}</td>
-          <td>${payload.executive_summary || "â€”"}</td>
+          <td>${payload.event_type || "—"}</td>
+          <td>${payload.executive_summary || "—"}</td>
         `;
         historyTableBody.appendChild(tr);
       });
@@ -376,12 +430,12 @@ if (closeHistoryBtn) {
 // Phase / UI helpers
 // ---------------------------------------------------------------------------
 const PHASES = {
-  idle: { cls: "phase-idle", icon: "ðŸŽ¤", text: "Press the mic and start dictating your visit notes." },
-  listening: { cls: "phase-listening", icon: "ðŸ”´", text: "Listeningâ€¦ speak your notes. I'll stop automatically when you pause." },
-  processing: { cls: "phase-processing", icon: "âš™ï¸", text: "Got it â€” extracting the structured recordâ€¦" },
-  confirm: { cls: "phase-confirm", icon: "ðŸŸ¢", text: "Review below. Say â€œSaveâ€ or tell me what to change." },
-  saved: { cls: "phase-saved", icon: "âœ…", text: "Saved to CRM. Session complete." },
-  error: { cls: "phase-error", icon: "âš ï¸", text: "Something went wrong." },
+  idle: { cls: "phase-idle", icon: "🎤", text: "Press the mic and start dictating your visit notes." },
+  listening: { cls: "phase-listening", icon: "🔴", text: "Listening… speak your notes. I'll stop automatically when you pause." },
+  processing: { cls: "phase-processing", icon: "⚙️", text: "Got it — extracting the structured record…" },
+  confirm: { cls: "phase-confirm", icon: "🟢", text: "Review below. Say “Save” or tell me what to change." },
+  saved: { cls: "phase-saved", icon: "✅", text: "Saved to CRM. Session complete." },
+  error: { cls: "phase-error", icon: "⚠️", text: "Something went wrong." },
 };
 
 function setPhase(name, customText) {
@@ -453,7 +507,7 @@ function finalizeUserCaption() {
   // Reset the live strip to its placeholder so the committed line isn't shown
   // twice (once in the caption strip and once in the conversation history).
   userCaption.className = "caption-text placeholder";
-  userCaption.textContent = "Waiting for you to speakâ€¦";
+  userCaption.textContent = "Waiting for you to speak…";
 }
 
 function updateAgentCaption(text, finished) {
@@ -478,7 +532,7 @@ function finalizeAgentCaption() {
   // Reset the live strip to its placeholder so the committed line isn't shown
   // twice (once in the caption strip and once in the conversation history).
   agentCaption.className = "caption-text placeholder";
-  agentCaption.textContent = "Waiting for the agentâ€¦";
+  agentCaption.textContent = "Waiting for the agent…";
 }
 
 function finalizeAllCaptions() {
@@ -492,8 +546,8 @@ function resetCaptions() {
   liveAgentText = "";
   userCaption.className = "caption-text placeholder";
   agentCaption.className = "caption-text placeholder";
-  userCaption.textContent = "Waiting for you to speakâ€¦";
-  agentCaption.textContent = "Waiting for the agentâ€¦";
+  userCaption.textContent = "Waiting for you to speak…";
+  agentCaption.textContent = "Waiting for the agent…";
   userCaptionRow.classList.remove("speaking");
   agentCaptionRow.classList.remove("speaking");
   setLiveDot(false);
@@ -540,7 +594,7 @@ function startSpeechRecognition() {
     rec.onerror = (e) => {
       // "no-speech"/"aborted" are routine; only surface real failures.
       if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
-        logEvent("error", `Speech recognition: ${e.error}`, null, "âš ï¸");
+        logEvent("error", `Speech recognition: ${e.error}`, null, "⚠️");
       }
     };
 
@@ -579,7 +633,7 @@ function logEvent(type, summary, data, emoji) {
   const header = document.createElement("div");
   header.className = "console-entry-header";
   const left = document.createElement("span");
-  left.textContent = (emoji || "") + " " + (type === "outgoing" ? "â†‘" : type === "incoming" ? "â†“" : "âš ");
+  left.textContent = (emoji || "") + " " + (type === "outgoing" ? "↑" : type === "incoming" ? "↓" : "⚠");
   const ts = document.createElement("span");
   ts.textContent = new Date().toLocaleTimeString("en-US", { hour12: false });
   header.appendChild(left);
@@ -614,9 +668,9 @@ async function fetchConfig() {
     const cfg = await resp.json();
     dispositionLabels = {};
     (cfg.disposition_registry || []).forEach((r) => (dispositionLabels[r.code] = r.label));
-    logEvent("incoming", `Loaded agent config for "${campaign}"`, cfg, "ðŸ§©");
+    logEvent("incoming", `Loaded agent config for "${campaign}"`, cfg, "🧩");
   } catch (e) {
-    logEvent("error", "Failed to load agent config", { error: String(e) }, "âš ï¸");
+    logEvent("error", "Failed to load agent config", { error: String(e) }, "⚠️");
   }
 }
 campaignSelect.addEventListener("change", () => {
@@ -631,7 +685,7 @@ agentModeSelect.addEventListener("change", () => {
   // A new session id ensures the backend picks a fresh Runner/agent state.
   newSessionId();
   resetSession();
-  logEvent("incoming", `Switched solution to "${agentModeSelect.value}"`, {}, "ðŸ”");
+  logEvent("incoming", `Switched solution to "${agentModeSelect.value}"`, {}, "🔁");
 });
 
 // ---------------------------------------------------------------------------
@@ -643,10 +697,10 @@ async function fetchPlannedTopics() {
     const data = await resp.json();
     plannedTopicCatalog = data.topics || [];
     renderTopicOptions();
-    logEvent("incoming", `Loaded ${plannedTopicCatalog.length} planned topics`, data, "ðŸ—‚ï¸");
+    logEvent("incoming", `Loaded ${plannedTopicCatalog.length} planned topics`, data, "🗂️");
   } catch (e) {
     topicOptions.textContent = "Failed to load topics.";
-    logEvent("error", "Failed to load planned topics", { error: String(e) }, "âš ï¸");
+    logEvent("error", "Failed to load planned topics", { error: String(e) }, "⚠️");
   }
 }
 
@@ -727,7 +781,7 @@ function connectWebsocket() {
       "incoming",
       "WebSocket connected",
       { userId, sessionId, campaign: campaignSelect.value, agentMode: agentModeSelect.value },
-      "ðŸ”Œ",
+      "🔌",
     );
   };
 
@@ -759,7 +813,7 @@ function connectWebsocket() {
     // Ignore close events for sockets we've already replaced (reconnects).
     if (websocket !== ws) return;
     setConnected(false);
-    logEvent("error", "WebSocket closed", null, "ðŸ”Œ");
+    logEvent("error", "WebSocket closed", null, "🔌");
 
     // Attempt WebSocket reconnection with exponential backoff.
     // IMPORTANT: we generate a NEW sessionId on each attempt so the backend
@@ -776,10 +830,10 @@ function connectWebsocket() {
       return;
     }
 
-    // Don't leave the UI stuck on "agent respondingâ€¦" if the stream dropped
+    // Don't leave the UI stuck on "agent responding…" if the stream dropped
     // mid-turn. Recover to a usable state (unless we already finished).
     stopSpeechRecognition();
-    micActive = false;
+    stopMicStreaming();
     agentTurnActive = false;
     if (phase !== "saved" && phase !== "processing") {
       setPhase("error", "Connection dropped. Press the mic to start again.");
@@ -789,7 +843,7 @@ function connectWebsocket() {
   ws.onerror = (e) => {
     if (websocket !== ws) return;
     setConnected(false);
-    logEvent("error", "WebSocket error", { type: e.type }, "âš ï¸");
+    logEvent("error", "WebSocket error", { type: e.type }, "⚠️");
   };
 }
 
@@ -803,17 +857,17 @@ function handleAdkEvent(ev) {
 
   // Console summary
   let summary = "event";
-  let emoji = "ðŸ“¨";
-  if (ev.turnComplete) { summary = "Turn complete"; emoji = "âœ…"; }
-  else if (ev.interrupted) { summary = "Interrupted"; emoji = "â¸ï¸"; }
-  else if (ev.inputTranscription) { summary = `Input: "${ev.inputTranscription.text || ""}"`; emoji = "ðŸ“"; }
-  else if (ev.outputTranscription) { summary = `Output: "${ev.outputTranscription.text || ""}"`; emoji = "ðŸ—£ï¸"; }
+  let emoji = "📨";
+  if (ev.turnComplete) { summary = "Turn complete"; emoji = "✅"; }
+  else if (ev.interrupted) { summary = "Interrupted"; emoji = "⏸️"; }
+  else if (ev.inputTranscription) { summary = `Input: "${ev.inputTranscription.text || ""}"`; emoji = "📝"; }
+  else if (ev.outputTranscription) { summary = `Output: "${ev.outputTranscription.text || ""}"`; emoji = "🗣️"; }
   else if (ev.content && ev.content.parts) {
     const p = ev.content.parts;
-    if (p.some((x) => x.functionCall)) { const fc = p.find((x) => x.functionCall).functionCall; summary = `Tool call: ${fc.name}`; emoji = "ðŸ› ï¸"; }
-    else if (p.some((x) => x.functionResponse)) { const fr = p.find((x) => x.functionResponse).functionResponse; summary = `Tool result: ${fr.name}`; emoji = "ðŸ“¦"; }
-    else if (p.some((x) => x.inlineData)) { summary = "Audio chunk"; emoji = "ðŸ”Š"; }
-    else if (p.some((x) => x.text)) { summary = `Text: "${(p.find((x) => x.text).text || "").slice(0, 60)}"`; emoji = "ðŸ’­"; }
+    if (p.some((x) => x.functionCall)) { const fc = p.find((x) => x.functionCall).functionCall; summary = `Tool call: ${fc.name}`; emoji = "🛠️"; }
+    else if (p.some((x) => x.functionResponse)) { const fr = p.find((x) => x.functionResponse).functionResponse; summary = `Tool result: ${fr.name}`; emoji = "📦"; }
+    else if (p.some((x) => x.inlineData)) { summary = "Audio chunk"; emoji = "🔊"; }
+    else if (p.some((x) => x.text)) { summary = `Text: "${(p.find((x) => x.text).text || "").slice(0, 60)}"`; emoji = "💭"; }
   }
   // Don't spam the console with every audio chunk.
   const isAudioOnly = ev.content && ev.content.parts &&
@@ -936,10 +990,13 @@ function handleAdkEvent(ev) {
 
 function beginAgentResponse() {
   agentTurnActive = true;
-  micActive = false; // stop streaming while the agent speaks
+  // Stop streaming while the agent speaks. This is the turn boundary that
+  // matters most for the tail flush -- the rep just stopped talking, so the end
+  // of their last word is exactly what is sitting in the resampler's buffer.
+  stopMicStreaming();
   stopSpeechRecognition(); // don't transcribe the agent's own playback
   levelFill.style.width = "0%";
-  silenceCountdown.textContent = "agent respondingâ€¦";
+  silenceCountdown.textContent = "agent responding…";
   silenceCountdown.classList.remove("counting");
   // The "extracting the structured record" wording only makes sense for the
   // implicit flow's post-dictation moment -- the guided flow's very first
@@ -947,7 +1004,7 @@ function beginAgentResponse() {
   // mode-neutral label there instead so the banner doesn't imply something
   // is being extracted when the agent is just talking/asking a question.
   const text =
-    agentModeSelect.value === "guided" ? "Agent is respondingâ€¦" : undefined;
+    agentModeSelect.value === "guided" ? "Agent is responding…" : undefined;
   setPhase("processing", text);
 }
 
@@ -958,7 +1015,7 @@ function handleFunctionCall(fc) {
     payloadStatus.textContent = "staged";
     payloadStatus.className = "badge";
   } else if (fc.name === "commit_visit_notes" || fc.name === "commit_guided_notes") {
-    payloadStatus.textContent = "committingâ€¦";
+    payloadStatus.textContent = "committing…";
   } else if (fc.name === "capture_dictation") {
     // Guided flow builds its record incrementally across several small tool
     // calls (no single Mega-Payload). Accumulate the pieces client-side as
@@ -1001,7 +1058,7 @@ function handleFunctionResponse(fr) {
   if (fr.name === "stage_visit_notes") {
     // Confirmation text is spoken by the model; surface it in the log too.
     if (resp.confirmation_text) {
-      logEvent("incoming", `Confirmation: ${resp.confirmation_text}`, resp, "ðŸ—£ï¸");
+      logEvent("incoming", `Confirmation: ${resp.confirmation_text}`, resp, "🗣️");
     }
     // The actual phase switch to "confirm" happens on turnComplete (after the
     // model has finished speaking the confirmation aloud).
@@ -1030,7 +1087,7 @@ function handleFunctionResponse(fr) {
       const detail = missing.length
         ? `${why} (still needed: ${missing.join(", ")})`
         : why;
-      logEvent("incoming", `Commit refused: ${detail}`, resp, "ðŸš«");
+      logEvent("incoming", `Commit refused: ${detail}`, resp, "🚫");
       // Nothing was saved: keep the record staged and leave the rep in the
       // confirm phase so they can answer the agent and try again.
       payloadStatus.textContent = "staged";
@@ -1061,7 +1118,7 @@ function handleFunctionResponse(fr) {
     saveButton.disabled = true;
     changeButton.disabled = true;
     if (resp.closing_statement) {
-      logEvent("incoming", `Closing: ${resp.closing_statement}`, resp, "ðŸ—£ï¸");
+      logEvent("incoming", `Closing: ${resp.closing_statement}`, resp, "🗣️");
     }
   }
 }
@@ -1089,7 +1146,7 @@ function renderCoverage(topics) {
     let state = "pending";
     if (match) state = match.discussed === false ? "skipped" : "covered";
     chip.classList.add("cov-" + state);
-    const icon = state === "covered" ? "âœ“" : state === "skipped" ? "â€”" : "â€¦";
+    const icon = state === "covered" ? "✓" : state === "skipped" ? "—" : "…";
     chip.textContent = `${icon} ${label}`;
     pCoverage.appendChild(chip);
   });
@@ -1100,10 +1157,10 @@ function renderPayload(args) {
   // A newly staged record has not been written to the CRM, so it has no record
   // id. Clear any id left over from a previous commit in this page session --
   // otherwise the card shows a "staged" badge next to a real CRM id.
-  pCrmId.textContent = "â€”";
+  pCrmId.textContent = "—";
 
-  pEventType.textContent = args.event_type || "â€”";
-  pSummary.textContent = args.executive_summary || "â€”";
+  pEventType.textContent = args.event_type || "—";
+  pSummary.textContent = args.executive_summary || "—";
 
   const topics = Array.isArray(args.topics) ? args.topics : [];
   renderCoverage(topics);
@@ -1127,7 +1184,7 @@ function renderPayload(args) {
       disp.textContent = "not discussed";
     } else {
       disp.textContent =
-        code != null ? `${code}${label ? " â€” " + label : ""}` : "â€”";
+        code != null ? `${code}${label ? " — " + label : ""}` : "—";
     }
     head.appendChild(title);
     head.appendChild(disp);
@@ -1141,7 +1198,7 @@ function renderPayload(args) {
     pTopics.appendChild(item);
   });
 
-  const transcript = args.raw_transcript_backup || "â€”";
+  const transcript = args.raw_transcript_backup || "—";
   pTranscript.innerHTML = transcript
     .replace(/\[inaudible\]/gi, '<span class="uncertainty-tag">$&</span>')
     .replace(/\[unclear\]/gi, '<span class="uncertainty-tag">$&</span>');
@@ -1163,12 +1220,41 @@ function enterConfirmPhase() {
 
 function finishSession() {
   setPhase("saved");
-  micActive = false;
+  stopMicStreaming();
   stopSpeechRecognition();
   silenceCountdown.textContent = "done";
   silenceCountdown.classList.remove("counting");
   levelFill.style.width = "0%";
   markRunMetricsDone(); // "CRM saved successfully" moment -> stop the run timer
+
+  // Unlock the topic list for the rep's NEXT visit.
+  //
+  // startDictation locks it and only endSession unlocked it again, so after a
+  // successful save the checkboxes stayed disabled and the rep had to reload
+  // the page to plan a different call. That was survivable while a second
+  // dictation in the same page wasn't really a supported flow -- but rotating
+  // session_id below is precisely what makes it one, so the lock has to lift
+  // here too.
+  setPlanningEnabled(true);
+
+  // Retire this dictation's session id now that the record is committed.
+  //
+  // Server-side guided state is keyed by session id, and the commit result in
+  // particular is sticky: reusing the id for the rep's next visit of the shift
+  // makes the next commit replay THIS visit's result, so the agent says "saved"
+  // and reads back this CRM id while nothing for the new visit was staged.
+  // A fresh id makes that state empty by construction.
+  //
+  // The campaign-change, mode-change and reconnect paths already do exactly
+  // this. Cost: the next dictation pays Vertex's cold-start handshake again,
+  // which is why the socket was being held open between dictations -- worth it
+  // against silently losing a visit. (tools_guided.capture_dictation also
+  // clears the state server-side, so the guarantee does not rest on this
+  // client alone.)
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    closeWebsocketIntentionally();
+  }
+  newSessionId();
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,12 +1262,50 @@ function finishSession() {
 // ---------------------------------------------------------------------------
 async function ensureAudio() {
   if (audioStarted) return;
+
+  // Check the context ONCE, before touching any audio API.
+  //
+  // Three separate things this app needs are secure-context-only: getUserMedia,
+  // AudioWorklet, and crypto.randomUUID. Guarding only the mic was not enough --
+  // the PLAYER worklet is constructed first, so on plain HTTP the rep got
+  // "Cannot read properties of undefined (reading 'addModule')" from
+  // audioContext.audioWorklet before the mic guard was ever reached. Observed
+  // over http://<lan-ip>:8000, 2026-08-20.
+  //
+  // Deliberately NOT at module load: the page must still render over plain HTTP
+  // (that is the A7 fix), and this is the first point where the missing
+  // capability actually matters.
+  if (!window.isSecureContext) {
+    throw new Error(
+      "Microphone and audio playback require HTTPS (or localhost). This page " +
+        "is served over plain HTTP, so the browser blocks both. Serve the app " +
+        "over HTTPS."
+    );
+  }
+
   const [pNode] = await startAudioPlayerWorklet();
   audioPlayerNode = pNode;
-  const [rNode, , stream] = await startAudioRecorderWorklet(audioRecorderHandler);
+  const [rNode, , stream, flush] = await startAudioRecorderWorklet(
+    audioRecorderHandler
+  );
   audioRecorderNode = rNode;
   micStream = stream;
+  audioRecorderFlush = flush;
   audioStarted = true;
+}
+
+// Stop streaming mic audio to the server. Always use this instead of assigning
+// `micActive = false` directly.
+//
+// The resampler batches ~20ms of samples before emitting a chunk, so when the
+// rep stops talking the trailing edge of their last word is still sitting in
+// that partial buffer. Clearing the gate first would make audioRecorderHandler
+// drop it -- the model never hears the end of the sentence, and those stale
+// samples get spliced onto the front of the next turn. So flush while the gate
+// is still open, then close it.
+function stopMicStreaming() {
+  if (micActive && audioRecorderFlush) audioRecorderFlush();
+  micActive = false;
 }
 
 function armVad() {
@@ -1216,14 +1340,18 @@ function audioRecorderHandler(pcmData) {
     if (highEnergyStreak >= HIGH_ENERGY_STREAK_MAX) {
       closeWebsocketIntentionally();
       stopSpeechRecognition();
-      micActive = false;
-      agentTurnActive = false;
+      // Reset the streak BEFORE stopping: stopMicStreaming flushes the
+      // resampler, which re-enters this handler with the tail chunk. Clearing
+      // first means that chunk starts a fresh streak instead of tripping this
+      // same branch a second time.
       highEnergyStreak = 0;
+      stopMicStreaming();
+      agentTurnActive = false;
       setPhase("error", "Audio distortion detected. Please check your microphone and try again.");
       return;
     }
   } else {
-    // Reset on any chunk that falls below the threshold â€” normal speech has
+    // Reset on any chunk that falls below the threshold — normal speech has
     // natural dynamic range and will break the streak between words.
     highEnergyStreak = 0;
   }
@@ -1264,16 +1392,16 @@ function audioRecorderHandler(pcmData) {
     if (!hadSpeech) speechStartTs = now;
     hadSpeech = true;
     lastVoiceTs = now;
-    silenceCountdown.textContent = "ðŸŽ™ï¸ speakingâ€¦";
+    silenceCountdown.textContent = "🎙️ speaking…";
     silenceCountdown.classList.remove("counting");
   } else if (hadSpeech && now - speechStartTs > MIN_SPEECH_MS) {
     const silentFor = now - lastVoiceTs;
     if (silentFor >= SILENCE_MS) {
-      silenceCountdown.textContent = "pause detected â€” wrapping upâ€¦";
+      silenceCountdown.textContent = "pause detected — wrapping up…";
       silenceCountdown.classList.remove("counting");
     } else {
       const remaining = Math.max(0, SILENCE_MS - silentFor);
-      silenceCountdown.textContent = `pausingâ€¦ ${(remaining / 1000).toFixed(1)}s`;
+      silenceCountdown.textContent = `pausing… ${(remaining / 1000).toFixed(1)}s`;
       silenceCountdown.classList.add("counting");
     }
   }
@@ -1282,7 +1410,7 @@ function audioRecorderHandler(pcmData) {
 
 function endSession() {
   // Stop streaming and tear down the live session.
-  micActive = false;
+  stopMicStreaming();
   agentTurnActive = false;
   stopSpeechRecognition();
   if (websocket && websocket.readyState === WebSocket.OPEN) closeWebsocketIntentionally();
@@ -1307,12 +1435,23 @@ async function startDictation() {
   resetForNewDictation();
   setPlanningEnabled(false);
   startRunTimer(); // rep clicked the mic to start speaking -- start the clock
-  await ensureAudio();
+  try {
+    await ensureAudio();
+  } catch (err) {
+    // Unhandled, this left the UI frozen with planning disabled and the run
+    // timer running, and no visible reason. The realistic cause is a denied
+    // mic permission or a non-HTTPS deployment (see startAudioRecorderWorklet).
+    console.error("Audio init failed:", err);
+    stopRunTimer();
+    setPlanningEnabled(true);
+    setPhase("error", err.message || "Could not start the microphone.");
+    return;
+  }
   if (!websocket || websocket.readyState !== WebSocket.OPEN) {
     // Drop any stale (closing/closed) socket before reconnecting so we never
     // wait on a dead connection.
     closeWebsocketIntentionally();
-    setPhase("processing", "Connectingâ€¦");
+    setPhase("processing", "Connecting…");
     connectWebsocket();
     const opened = await waitForOpen(8000);
     if (!opened) {
@@ -1349,7 +1488,7 @@ function waitForOpen(timeoutMs = 8000) {
 
 micButton.addEventListener("click", () => {
   if (phase === "listening") {
-    // "Done dictating" â€” stop sending mic audio but keep the WebSocket OPEN
+    // "Done dictating" — stop sending mic audio but keep the WebSocket OPEN
     // so the model can process the buffered audio in the server's
     // LiveRequestQueue. DO NOT call endSession() here: closing the socket
     // kills the Vertex AI Live session before it can respond.
@@ -1357,17 +1496,17 @@ micButton.addEventListener("click", () => {
     // WHY THIS MATTERS: Vertex AI's cold-start handshake takes 6-10 seconds.
     // During that time, audio chunks are buffered server-side. Closing the
     // socket immediately (old behaviour) always raced against the handshake
-    // and killed the session before the model saw the audio â€” producing the
+    // and killed the session before the model saw the audio — producing the
     // "1000 None / client disconnected" error observed in logs.
     //
     // New behaviour: silence the mic, show "processing", and let the 30-second
     // watchdog close the connection only if the model genuinely stalls.
-    micActive = false;
+    stopMicStreaming();
     stopSpeechRecognition();
     levelFill.style.width = "0%";
     silenceCountdown.classList.remove("counting");
-    silenceCountdown.textContent = "processingâ€¦";
-    setPhase("processing", "Processing your notes â€” please waitâ€¦");
+    silenceCountdown.textContent = "processing…";
+    setPhase("processing", "Processing your notes — please wait…");
     if (!agentResponseWatchdog) {
       agentResponseWatchdog = setTimeout(() => {
         if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -1426,8 +1565,8 @@ function sendText(text) {
   if (websocket && websocket.readyState === WebSocket.OPEN) {
     addMessage(text, "user");
     websocket.send(JSON.stringify({ type: "text", text }));
-    logEvent("outgoing", `Text: ${text}`, null, "ðŸ’¬");
-    setPhase("processing", "Processing your responseâ€¦");
+    logEvent("outgoing", `Text: ${text}`, null, "💬");
+    setPhase("processing", "Processing your response…");
   }
 }
 
@@ -1438,7 +1577,7 @@ function resetForNewDictation() {
 }
 
 function resetSession() {
-  micActive = false;
+  stopMicStreaming();
   committed = false;
   suppressAgentSpeech = false;
   guidedPayload = null;
@@ -1488,9 +1627,9 @@ async function fetchClientConfig() {
     const resp = await fetch("/api/v1/client-config");
     const cfg = await resp.json();
     if (cfg.vad_silence_ms) SILENCE_MS = cfg.vad_silence_ms;
-    logEvent("incoming", `Client VAD threshold: ${SILENCE_MS}ms`, cfg, "â±ï¸");
+    logEvent("incoming", `Client VAD threshold: ${SILENCE_MS}ms`, cfg, "⏱️");
   } catch (e) {
-    logEvent("error", "Failed to load client config", { error: String(e) }, "âš ï¸");
+    logEvent("error", "Failed to load client config", { error: String(e) }, "⚠️");
   }
 }
 
@@ -1500,14 +1639,14 @@ fetchConfig();
 fetchPlannedTopics();
 
 // ---------------------------------------------------------------------------
-// Dev/test hook â€” exposes key internal functions on window.__snTest so they
+// Dev/test hook — exposes key internal functions on window.__snTest so they
 // can be called from the browser DevTools console even though this file runs
 // as an ES module (module scope is private and unreachable from the console).
 //
 // Usage (DevTools console):
-//   window.__snTest.simulateAgentStall()   â†’ triggers watchdog test (Test 3)
-//   window.__snTest.simulateToolError()    â†’ injects a tool-error banner (Test 4)
-//   window.__snTest.getPhase()             â†’ returns current phase string
+//   window.__snTest.simulateAgentStall()   → triggers watchdog test (Test 3)
+//   window.__snTest.simulateToolError()    → injects a tool-error banner (Test 4)
+//   window.__snTest.getPhase()             → returns current phase string
 // ---------------------------------------------------------------------------
 window.__snTest = {
   /** Simulate a Gemini Live API stall: enters "agent responding..." and starts

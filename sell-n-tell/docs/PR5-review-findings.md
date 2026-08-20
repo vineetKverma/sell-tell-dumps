@@ -9,8 +9,19 @@
 
 ## A. Correctness — fix before merge
 
+**All 10 are now fixed.** Verified by three suites that need no mic, model,
+BigQuery or running server — 49 assertions, all passing. A9 is the one item with
+no automated check: it lives in the WebSocket upstream loop, which needs the
+full ADK stack.
+
+Four of the fixes went further or differently than the comment asked; each is
+marked in place below. In short: A1 was missing three gates rather than one; A6's
+suggested call site is never reached in this app; A8 needed fixing a level
+deeper than `main.py`; and A10's stated race cannot occur under asyncio, though
+the in-place state mutation underneath it is a real defect.
+
 ### A1. BigQuery backend commit is broken *and* bypasses the coverage gate
-`main.py` — commit endpoint
+`main.py` — commit endpoint · **FIXED**
 
 `db.commit_notes(session_id, confirmed, agent_mode=…, campaign_type=…, ws_user_id=…, ws_session_id=…)`
 is now called unconditionally, but `bigquery_db.commit_notes(session_id, confirmed)`
@@ -27,8 +38,37 @@ backend.**
 > This is the most serious finding. The headline feature of the ticket is
 > silently absent on one of two backends.
 
+**Worse than the comment says.** `bigquery_db.commit_notes` also skipped the
+`superseded_by` check and had no idempotency guard, so AIML-2703's fix was
+absent on that backend too and a retry minted a duplicate CRM record. Three
+gates missing, not one.
+
+**Fix (`bigquery_db.py`):** `commit_notes` now takes the full kwarg set and
+delegates the whole commit to `mock_db.commit_notes`, owning only the BigQuery
+insert. Every gate — 404, supersede, coverage, idempotent replay — is inherited
+rather than re-implemented, so the two backends cannot drift again. The insert
+is keyed off `_record` being present in the result: absent on a cancel and on an
+idempotent replay, which is precisely when a row must *not* be written.
+`BIGQUERY_DATASET`/`TABLE` are now validated *before* delegating, since
+`mock_db` mints the CRM record and drops the staged one — discovering a missing
+table afterwards would strand a commit that can never be retried. `_record` is
+still returned, so `main.py`'s background analytics sink behaves identically on
+both backends.
+
+Also fixed the half of **B1** that made this invisible: `CRMStore.commit_notes`
+and `stage_notes` in `db_interface.py` now carry the real signatures. (The
+`self`-on-a-module mismatch is left to B1's ticket.)
+
+Verified with a stubbed BigQuery client, 13 assertions: full-kwarg commit no
+longer raises `TypeError`; happy path writes exactly one row carrying
+`crm_record_id`/`session_id`/`committed_at`; coverage-blocked, superseded,
+cancelled and replayed commits each write zero rows; unknown session still
+raises `KeyError` for the 404. Residual: a BigQuery insert failure now raises
+*after* the CRM record exists — logged with the id, flagged in-code as a partial
+commit.
+
 ### A2. Race on `_S_COMMIT_RESULT` → two CRM records for one visit
-`tools_guided.py` ~L405
+`tools_guided.py` ~L405 · **FIXED**
 
 ADK's Live flow can dispatch multiple function calls from one turn concurrently
 (`asyncio.gather`). Two invocations can both read `prior` as unset before either
@@ -41,8 +81,24 @@ Needs an **atomic claim** on `_S_COMMIT_RESULT`, not get-then-set.
 > Our supersede gate does not catch it: these are two independent stage calls,
 > neither superseding the other.
 
+**Confirmed, and reproduced.** A per-session `asyncio.Lock` (`_COMMIT_LOCKS`)
+now wraps the read-then-commit sequence, with the `_S_COMMIT_RESULT` check
+repeated inside it — the standard double-check. The commit body moved to
+`_commit_guided_notes_locked`. The loser of the race finds the winner's result
+on the re-check and replays it, which is the intended behaviour for a duplicate
+call anyway. Lock creation needs no lock of its own: there is no await between
+the lookup and the insert.
+
+Reproduced in-process by calling the inner (unlocked) function twice under
+`asyncio.gather` against a stubbed HTTP layer driving the real `mock_db`:
+**2 CRM records, peak concurrent stagings 2**. Through the locked entry point:
+**1 record, peak concurrency 1, both callers returning the same id.**
+
+`_COMMIT_LOCKS` is keyed by session and never evicted — it joins B11's cleanup
+list rather than adding a new leak class.
+
 ### A3. Stale commit result reused across back-to-back dictations
-`tools_guided.py` ~L572
+`tools_guided.py` ~L572 · **FIXED**
 
 `_S_COMMIT_RESULT` is never cleared when a rep starts a new dictation in the
 same app session. The client keeps the WebSocket open between dictations to
@@ -59,8 +115,25 @@ His recommended fix: close the socket and rotate `sessionId` in `finishSession()
 right after a confirmed commit — a fresh `session_id` makes this state empty by
 construction, with no server-side reset needed.
 
+**Fixed on both sides, deliberately.** His client fix is in: `finishSession()`
+now closes the socket and calls `newSessionId()`, matching what the
+campaign-change, mode-change and reconnect paths already did.
+
+But the guarantee should not rest on one client behaving, and `ws_smoke_test.py`
+reuses a session freely. So `capture_dictation` also resets guided state
+server-side when a dictation arrives on a session that already committed, and
+`_reset_guided_state` now clears `_S_COMMIT_RESULT` along with everything else
+(it was leaking through the re-record path too).
+
+**Cost, worth stating in the PR:** rotating the id means the next dictation pays
+Vertex's 6-10s cold-start handshake again. Holding the socket open across
+dictations is what avoided that. Silently losing a visit is worse.
+
+Verified: two dictations on one session now produce two distinct CRM records
+holding their own topics, rather than the second replaying the first's id.
+
 ### A4. `/api/v1/notes/confirm` downgrades 409 to a generic 500
-`main.py` — `confirm_notes_endpoint2`
+`main.py` — `confirm_notes_endpoint2` · **FIXED**
 
 Wraps its `db.commit_notes(...)` in `except KeyError`, then a catch-all
 `except Exception as e: return 500`. `IncompleteCoverageError` subclasses
@@ -68,8 +141,17 @@ Wraps its `db.commit_notes(...)` in `except KeyError`, then a catch-all
 `{"error": "Internal server error"}` instead of the structured **409 +
 `missing_topics`** contract every other commit path now returns.
 
+**Fix:** the mapping moved into one `_commit_failure_response(exc)` helper that
+both commit endpoints share, so they cannot drift apart again — the drift *was*
+the defect. `/notes/confirm` now consults it first and falls through to 500 only
+for genuinely unmapped errors. It was also leaking the internal `_record` key
+into its response body; that is now stripped as on `/notes/commit`.
+
+Verified against all four cases: 409 + `missing_topics`, 409 + `superseded_by`,
+404, and an unmapped error left for the 500 path.
+
 ### A5. Idempotency safety claim doesn't hold
-`mock_db.py` ~L822
+`mock_db.py` ~L822 · **FIXED**
 
 The comment says `committed=True` implies the coverage gate already passed —
 true — but the cached-success branch **can never be reached for a real retry**:
@@ -80,8 +162,28 @@ record and gets `KeyError`/404 instead of the cached response.
 Either the delete or the cache branch is wrong. The comment describes behaviour
 that cannot occur.
 
+**Fix: the delete was wrong.** The committed record now stays in
+`_STAGED_NOTES`; `committed=True` is what retires it as a commit target, and the
+entry has to survive to answer the retry it exists for. Removing the cache
+branch instead would have deleted a guard that a genuinely slow sink still
+needs.
+
+One consequence had to be closed with it: a committed record is now findable by
+`stage_notes(previous_session_id=…)`, which would let a correction supersede a
+record already in the CRM. `stage_notes` now refuses a committed record as a
+correction base and stages a new one — exactly what happened before, when the
+lookup simply missed.
+
+`_STAGED_NOTES` now retains one entry per committed visit. It already leaked
+(B11); the eviction hook that fixes B11 must reap committed entries rather than
+reinstate this delete.
+
+Verified: three commits of one `session_id` return the same `crm_record_id` and
+leave exactly one committed record; only the first carries `_record`, so the
+sink is not written twice.
+
 ### A6. Resampler never flushes its tail buffer
-`audio-recorder.js` ~L120
+`audio-recorder.js` ~L120 · **FIXED**
 
 `emit()` batches ~20 ms of samples in `out` before sending, but nothing flushes
 the partial buffer when the mic stops — **the last syllable of every dictation
@@ -89,8 +191,34 @@ is silently dropped.** Needs a `flush()` called from `stopMicrophone`.
 
 > Ours, introduced with the resampler. Real user-visible data loss.
 
+**Correction to the diagnosis:** `stopMicrophone` is never called by `app.js`.
+The mic stays open across turns and streaming is gated by the `micActive` flag,
+so a flush hung off `stopMicrophone` would never have fired. The end-of-stream
+points are the seven places that set `micActive = false`.
+
+Also a second symptom he didn't name: the stranded samples aren't just lost,
+they stay in the buffer and get **spliced onto the front of the next turn**.
+Measured at 48 kHz: 14 stale samples carried into turn 2 before the fix, 1
+after (that one is the resampler's deliberate `prevSample` interpolation carry,
+which is correct — the mic is one continuous stream).
+
+**Fix:** `createResampler` gains `flush()`, returned as a 4th element from
+`startAudioRecorderWorklet`. `app.js` gains `stopMicStreaming()`, which flushes
+*then* clears `micActive` — that order matters, since `audioRecorderHandler`
+drops everything once the gate is closed. All seven `micActive = false` sites
+now go through it. `flush()` resets its state *before* calling `onChunk`,
+because the distortion-teardown path re-enters the handler from inside it and a
+reset-after would recurse forever; the distortion branch also clears
+`highEnergyStreak` before stopping so the flushed tail can't re-trip it.
+`stopMicrophone` takes an optional `flush` too, for correctness if it's ever
+used.
+
+Verified: 10 assertions covering tail emission, even byte count, the 3:1 ratio,
+flush idempotency, the cross-turn splice, re-entrancy termination, and the
+native-16 kHz pass-through path.
+
 ### A7. `crypto.randomUUID()` requires a secure context
-`app.js` L23, L25
+`app.js` L23, L25 · **FIXED**
 
 On a plain-HTTP internal/LAN deployment — plausible for an internal sales tool
 without a local TLS cert — `crypto.randomUUID` does not exist and **throws at
@@ -101,8 +229,34 @@ Needs a fallback, or written confirmation this is only ever served over HTTPS.
 > Ours. We chose this to fix ID collisions; it trades one failure for a worse one
 > if the deployment isn't HTTPS.
 
+**Fix:** a `uuid()` helper with a three-tier fallback — `crypto.randomUUID`,
+then `crypto.getRandomValues` (which has *no* secure-context restriction, so it
+covers the plain-HTTP case), then `Math.random` if Web Crypto is absent
+entirely. Output is RFC 4122 v4 in all three. These ids only need to be unique,
+not unguessable — they key an in-memory session store.
+
+**But note the fix is not sufficient on its own.** `getUserMedia` is *also*
+secure-context-only, so on plain HTTP the page now loads and then the mic fails
+anyway. Two things follow from that:
+
+- `startAudioRecorderWorklet` now throws a message naming the actual cause
+  ("Microphone access requires HTTPS (or localhost)") instead of a bare
+  `TypeError` on `navigator.mediaDevices`.
+- `startDictation` had an unguarded `await ensureAudio()`. Any failure there —
+  including a plain denied mic permission, which has nothing to do with HTTPS —
+  left the UI frozen with planning disabled and the run timer running, with no
+  visible reason. Now caught, surfaced via `setPhase("error", …)`, and the
+  controls are re-enabled.
+
+So the honest answer to his question is still **"this needs to be served over
+HTTPS"** — the fallback just means a misconfigured deployment says so instead of
+rendering a blank page.
+
+Verified: 7 assertions across all three tiers, 500 ids per tier, checked for v4
+conformance and uniqueness.
+
 ### A8. Two sources of truth for `campaign_type` at commit
-`main.py` ~L340
+`main.py` ~L340 · **FIXED**
 
 Reads `body.campaign_type` (client-supplied at commit time) to build the BigQuery
 sink config, instead of `record["campaign_type"]` (`mock_db.py` ~L734 — the value
@@ -112,8 +266,19 @@ campaign's disposition registry.
 
 Fix: always read `record["campaign_type"]`.
 
+**Fixed one level deeper than suggested.** Reading `record["campaign_type"]` in
+`main.py` alone would not have been enough — that field was itself populated
+from the caller's value. `mock_db.commit_notes` now prefers the campaign the
+record was *staged and validated under* and logs a warning when the commit
+claims a different one; `main.py` then reads the campaign off the record. Both
+the sink config and the committed record are now attributed to the campaign
+whose rules the payload actually passed.
+
+Verified: staged under `standard_sales`, committed claiming `enterprise_field`,
+record keeps `standard_sales`.
+
 ### A9. Whitespace-only text bypasses `turn_guard` but still reaches the model
-`main.py` ~L768
+`main.py` ~L768 · **FIXED**
 
 `turn_guard.record_user_turn(session_id)` is gated on `text.strip()`, but
 `live_request_queue.send_content(content)` runs unconditionally. A
@@ -121,14 +286,38 @@ non-empty-but-blank message is processed by the model as a real turn, yet every
 `turn_guard`-gated tool afterwards reports `no_reply_heard` for a turn that
 genuinely happened.
 
+**Fix:** the guard and the send are now under the same condition — a blank
+message is dropped and logged rather than forwarded. Gating the send (not
+ungating the counter) is the right direction: a whitespace-only message carries
+no rep input, so counting it as a turn would defeat the backstop
+`turn_guard` exists to be.
+
+Not covered by an automated check — it sits in the WebSocket upstream loop,
+which needs the full ADK stack to exercise. The change is a two-line
+restructure of an `if`.
+
 ### A10. Unguarded read-modify-write on guided topic state
-`tools_guided.py` ~L317
+`tools_guided.py` ~L317 · **FIXED**
 
 `results = …; results.append(…); state[…] = results`, and the equivalent
 `pending` pattern below. Same concurrency exposure as A2 — if two topics are
 dispositioned in one concurrent batch, one call's read can be stale relative to
 the other's write, silently dropping a topic result or resurrecting an
 already-removed pending topic.
+
+**Fixed, but the stated mechanism doesn't apply here.** Unlike A2, this sequence
+contains **no `await`**, so under asyncio two invocations cannot interleave
+across it — the lost-update race as described cannot occur today.
+
+The real defect is different and worth fixing anyway: `results` was the *same
+list object* held in session state, so `.append()` mutated it in place, which
+ADK does not necessarily observe as a state delta. It now copies before
+appending (`list(...)`, matching what `pending` below already did), which both
+guarantees a real delta and makes the sequence await-safe if one is ever
+introduced between the read and the write.
+
+Verified: the previously-stored list is left untouched and state holds a new
+object after a disposition.
 
 ---
 
@@ -258,9 +447,17 @@ hook on WS disconnect. Not blocking.
 
 ## Suggested response
 
-**Fix in this PR (A1–A10)** — all are correctness. A1, A2, A3 and A6 are
-user-visible data loss or wrong data; the rest are contract violations that make
-the guarantees this ticket claims untrue in some path.
+**A1–A10 are all fixed.** A1, A2, A3 and A6 were user-visible data loss or wrong
+data; the rest were contract violations that made the guarantees this ticket
+claims untrue in some path.
+
+Two trade-offs to raise explicitly when responding:
+
+1. **A3 costs the warm socket.** Rotating `session_id` after each commit means
+   the next dictation pays Vertex's 6-10s cold-start handshake.
+2. **A5 keeps committed records in `_STAGED_NOTES`.** Required for the retry
+   guard to be reachable at all; it makes B11's eviction hook more valuable, not
+   less.
 
 **Raise a follow-up ticket for B** — B1 first, since a correct Protocol is what
 would have caught A1 automatically. B2–B5 are one theme: campaign rules and
@@ -273,3 +470,26 @@ Two of his findings (A6, A7) are defects we introduced in this PR, and both are
 real. A6 drops the last word of every dictation; A7 breaks the whole frontend on
 plain HTTP. Neither would have surfaced in our testing because we only ever ran
 over `localhost`, which counts as a secure context.
+
+---
+
+## Verification suites
+
+Three standalone scripts, 49 assertions, no mic / model / BigQuery / server.
+Currently in scratch; **worth promoting into `scripts/`** — a stale `CRMStore`
+Protocol and a second backend with no gates are exactly what regresses silently.
+
+| Suite | Covers | Assertions |
+|---|---|---|
+| `a1_check.py` | A1 — every gate inherited by the BigQuery backend, stubbed BQ client | 13 |
+| `groupA_check.py` | A2, A3, A4, A5, A8, A10 — stubbed `google.adk`/`httpx` driving the real `mock_db` | 19 |
+| `a6_a7_check.mjs` | A6, A7 — resampler flush and the UUID fallback tiers | 17 |
+
+`groupA_check.py` reproduces A2 before asserting the fix: calling the inner
+unlocked function twice concurrently yields **2 CRM records**, the locked entry
+point yields **1**.
+
+**What none of them cover:** anything needing a real browser on a non-localhost
+origin (A6/A7 integration), the WebSocket upstream loop (A9), and real ADK
+concurrency — the A2 test simulates ADK's `asyncio.gather` dispatch rather than
+using it.

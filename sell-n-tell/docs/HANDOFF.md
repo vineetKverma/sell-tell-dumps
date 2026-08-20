@@ -21,37 +21,59 @@ They are catalogued in **`docs/PR5-review-findings.md`**, grouped:
 
 | Group | Count | Action |
 |---|---|---|
-| **A — correctness** | 10 | **Fix in this PR.** A1–A3 and A6 are data loss or wrong data. |
+| **A — correctness** | 10 | **All 10 fixed.** Not yet on the app machine. |
 | **B — design / duplication** | 11 | Raise one follow-up ticket. B1 first. |
 | **C — cosmetic** | 4 | Formatter pass. |
 | **D — positive** | 1 | No action. |
 
-### The work queue, in order
+### Where things stand
 
-1. **A1 — BigQuery backend is broken and bypasses every gate.** Highest
-   priority. `bigquery_db.commit_notes(session_id, confirmed)` takes none of the
-   kwargs `main.py` now passes, so **every commit under `BIGQUERY_ENABLED=true`
-   raises `TypeError`**. And it never calls `compute_missing_topics`, never
-   checks `superseded_by`, and has no idempotency guard — so the coverage gate
-   (AIML-2698) *and* the supersede gate (AIML-2703) are both absent on that
-   backend, and a retry mints a duplicate CRM record. Since Salesforce syncs
-   from this API's response, not from BigQuery, the headline guarantees of two
-   tickets are silently untrue there.
-   **Fix shape:** have `bigquery_db.commit_notes` delegate all gating to
-   `mock_db.commit_notes` and only own the BigQuery insert.
-2. **A2, A3 — duplicate CRM records in guided**, by two routes neither the 2703
-   fix nor the idempotency guard catches. A2 is a check-then-act race on
-   `_S_COMMIT_RESULT`; A3 is that same key never being cleared between
-   dictations, so the rep's *second* visit of a shift gets told "saved" while
-   nothing was staged.
-3. **A6, A7 — defects we introduced in this PR.** A6: the resampler never
-   flushes its tail buffer, so the last syllable of every dictation is dropped.
-   A7: `crypto.randomUUID()` throws at module load on plain HTTP, breaking the
-   whole frontend. Neither showed up in testing because we only ever ran on
-   `localhost`, which counts as a secure context.
-4. **A4, A5, A8, A9, A10** — contract violations. See the findings doc.
-5. **B** — one follow-up ticket. Lead with **B1**: the stale `CRMStore` Protocol
-   is *why* A1 was invisible to type-checking.
+**Group A is done.** All ten fixes are in the local copy, verified by three
+scripts totalling 49 assertions that need no mic, model, BigQuery or running
+server. Per-item rationale is in `PR5-review-findings.md`; each fixed item is
+marked there.
+
+**Nothing has been carried to the app machine yet.** That is step one for the next
+session — see §4 for the export/import round trip — followed by re-running the
+smoke suite there and responding on the PR.
+
+Four fixes diverged from what the comment asked, and each needs saying in the PR
+response rather than being silently different:
+
+- **A1** was missing *three* gates (coverage, supersede, idempotency), not the
+  one flagged. Also fixed the signature half of **B1**, since a stale Protocol
+  is what let the mismatch pass type-checking.
+- **A6**'s suggested call site (`stopMicrophone`) is never reached in this app.
+  The fix hangs off `micActive` transitions instead. The stranded samples were
+  also being spliced onto the *next* turn, not merely dropped.
+- **A8** needed fixing inside `mock_db.commit_notes`, not just at the `main.py`
+  read site — the field `main.py` was told to trust was itself populated from
+  the caller.
+- **A10**'s stated race cannot occur (no `await` in that sequence under
+  asyncio). The in-place state mutation underneath it is real and is fixed.
+
+Two trade-offs the PR response should own outright:
+
+- **A3 gives up the warm socket.** Rotating `session_id` after each commit means
+  the next dictation pays Vertex's 6-10s cold-start handshake again.
+- **A5 keeps committed records in `_STAGED_NOTES`.** Without that the
+  idempotent-retry branch is unreachable. It makes **B11**'s eviction hook more
+  valuable, not less.
+
+**Still not covered by any test:** anything needing a real browser on a
+non-localhost origin (A6/A7 integration), the WebSocket upstream loop (A9), and
+real ADK concurrency — the A2 test simulates `asyncio.gather` dispatch rather
+than driving ADK itself.
+
+### Next
+
+1. **Carry the changes to the app machine**, re-run `ws_smoke_test.py` for both modes
+   there, then respond on the PR.
+2. **Promote the three verification scripts into `scripts/`.** A second backend
+   with no gates and a stale Protocol are exactly what regress silently.
+3. **B** — one follow-up ticket. Lead with **B1**: the rest of it (the Protocol
+   declares `self` on methods a *module* has to satisfy) still stands.
+4. **C** — formatter pass.
 
 ### Also still open
 
@@ -119,9 +141,12 @@ calls, no mic and no model.
 **Storage indirection (new, from `development`):**
 
 - `db_interface.py` — `get_db()` returns `bigquery_db` when `BIGQUERY_ENABLED=true`,
-  else `mock_db`. Exposes it as `db`. **Its `CRMStore` Protocol is stale (B1).**
-- `bigquery_db.py` — delegates config/staging to `mock_db`, owns only the
-  committed sink. **Currently missing every guard (A1).**
+  else `mock_db`. Exposes it as `db`. `CRMStore`'s signatures are now correct;
+  the rest of B1 (it declares `self` on methods a *module* has to satisfy)
+  stands.
+- `bigquery_db.py` — delegates config/staging **and all commit gating** to
+  `mock_db`, owns only the BigQuery insert (A1 fix). Gates are inherited by
+  delegation; don't re-implement one here.
 - `config.py` — just `API_BASE`.
 - **Two BigQuery flags:** `db_interface` reads `BIGQUERY_ENABLED`,
   `bigquery_sink` reads `VOICE_NOTES_BQ_ENABLED`. One feature, two switches.
@@ -146,7 +171,7 @@ a reconstructed copy for reading/editing is at
 about files that don't exist:
 
 ```powershell
-# on the VDI, from the repo root (copy tools/export-repo-md.ps1 there first)
+# on the app machine, from the repo root (copy tools/export-repo-md.ps1 there first)
 .\export-repo-md.ps1
 # copy export\ back, then locally:
 .\tools\import-repo-md.ps1 -In .\export -Dest .\sell-n-tell
@@ -171,8 +196,16 @@ every live WebSocket, and wipes the session store and staged records.
 
 This cost an hour. Three mechanisms were half-wired at once:
 
-1. `index.html` loads `app.js?v=N`. **Bump N** when you change the file — the
-   browser caches by full URL, so a new file at the same URL is invisible.
+1. `index.html` loads `app.js?v=N`, **and `app.js` now imports
+   `audio-player.js?v=N` / `audio-recorder.js?v=N`**. **Bump N in both files**
+   when you change any of the three — the browser caches by full URL, so a new
+   file at the same URL is invisible. Currently `v=7`.
+
+   The imports were versioned on 2026-08-20 after the app machine served `app.js` fresh
+   (200, 65 kB) and `audio-recorder.js` from disk cache (0 B) in the same page
+   load, despite the `no-store` middleware below. The version query had only
+   ever covered `app.js`, so a change to an imported module could be invisible
+   while `app.js` was demonstrably current.
 2. A **service worker** (`sw.js`) was cache-first with no revalidation. It had
    already been unregistered in `app.js` but the file was left in the repo, and
    an installed copy kept serving stale assets. **Deleted.** Note that deleting
@@ -200,9 +233,28 @@ uv run python scripts/ws_smoke_test.py guided --scenario clean_save
 ```
 
 Bar: every scenario commits, one CRM record each, no duplicates.
-**`guided/ambiguous_disposition` is intermittent (~2 in 3)** — it exercises the
-deliberately confusing 3-strikes path. Re-run before calling a failure a
-regression.
+
+**Two guided scenarios are intermittent — re-run before calling a failure a
+regression:**
+
+- `ambiguous_disposition` (~2 in 3) — exercises the deliberately confusing
+  3-strikes path.
+- `rerecord` — observed failing to commit once on 2026-08-19, then passing on an
+  immediate re-run with no code change in between. Model non-determinism in the
+  guided flow, same family as Gap 6/F5.
+
+**Counting the result is the real check**, not the transcript — the harness
+prints a live log and no pass/fail summary:
+
+```powershell
+$r = (Invoke-RestMethod -Uri "http://localhost:8000/api/v1/notes/committed").records
+"TOTAL: $($r.Count)"                                    # expect 10
+$r | Group-Object agent_mode | Select-Object Name, Count # implicit 6, guided 4
+$r | Group-Object ws_session_id | Where-Object Count -gt 1   # must print nothing
+```
+
+The third line is the duplicate check: each scenario opens its own
+`ws_session_id`, so any group above 1 is two CRM records for one visit.
 
 **No automated coverage for the AIML-2703 supersede gate.** A repro script was
 written to prove the orphan bug (stage → correct → commit the *old* id, expect
@@ -264,7 +316,9 @@ concurrency races (A2, A10) were invisible.
 | File | Contents |
 |---|---|
 | `HANDOFF.md` | this file |
-| `PR5-review-findings.md` | **the current work queue** — 25 review comments, triaged |
+| `PR5-review-findings.md` | 25 review comments, triaged, with the fix for each |
+| `PR5-response.md` | cause → fix → evidence per finding, plus the four root-cause themes |
+| `PR5-comment-replies.md` | **paste-able inline reply text** for all 25 comments, per section |
 | `change-log.md` | every change, why, verification status |
 | `AIML-2698-gap-findings.md` | 18 gaps, repro method, priorities |
 | `AIML-2698-experiments.md` | reproductions, findings F1–F5, the 9-case REST suite |
