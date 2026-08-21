@@ -1,241 +1,183 @@
-# PR #5 — Section B follow-up stories
+# PR #5 — follow-up stories
 
-11 design/duplication comments from Suresh's review of PR #5. None block the
-merge; all are debt the review made visible.
+Design and duplication findings from Suresh's review of
+[PR #5](https://bitbucket.org/fm_ebiz/sell-n-tell/pull-requests/5), 2026-08-19.
+None blocked the merge.
 
-**Recommendation: four stories, plus one item done in PR #5 itself.**
+**Parent epic:** AIML-1537 (EPP-84 Post Call Automation)
 
-The grouping is by *cause*, not by file — three of these are the same defect
-(one rule expressed in several places) showing up in different layers, and
-splitting them per-file would mean three half-fixes that still leave the
-sources of truth divergent.
-
-| Story | Covers | Size |
+| # | Story | Points |
 |---|---|---|
-| 1. Single source of truth for campaign rules and error shaping | B2, B3, B4, B5, B10 | L |
-| 2. Disposition registry and topic-state model | B6, B7, B8 | M |
-| 3. Storage backend contract | B1 | S |
-| 4. Session-state eviction | B11 | S |
-| *(done in PR #5)* | B9 | XS |
+| 1 | Single source of truth for campaign rules and error shaping | 8 |
+| 2 | Disposition registry and topic-state model | 5 |
+| 3 | Enforce the storage backend contract | 2 |
+| 4 | Session-state eviction | 3 |
+
+Total 18, sized against AIML-2698 (3). Order: **3 → 1 → 2 → 4**.
 
 ---
 
-## Story 1 — Single source of truth for campaign rules and error shaping
+# Story 1 — Single source of truth for campaign rules and error shaping
 
-**Covers B2, B3, B4, B5, B10.**
+**Points: 8**
 
-### Context
+## Description
 
-"What is legal for this campaign" is currently implemented three independent
-times — `tools.py::_allowed_codes`, `tools_guided.py::_campaign_rules`, and the
-server's own `mock_db.validate_against_campaign` — and they do not read the same
-data. The tool layers read a cached copy of the config out of ADK session state;
-the server does a fresh lookup. A rule change applied to one and not the others
-produces different rejection behaviour between implicit mode, guided mode, and
-the REST 422, with nothing to flag the divergence.
+The same rule is written in several places, and they can drift apart.
 
-The same shape repeats in how *rejections* are turned back into instructions for
-the model. Both tool modules independently parse the 409 coverage-gate body and
-build near-identical refusal dicts (B3), and both independently shape an
-`instruction_for_model` from the 422 body's
-`problems`/`allowed_event_types`/`allowed_disposition_codes` (B4). A field
-rename in `main.py` requires updating both in lockstep, with no failing test if
-one is missed.
+**Campaign rules — 3 copies.** `tools.py::_allowed_codes` (~L44) and
+`tools_guided.py::_campaign_rules` (~L45) read a cached config from session
+state. `mock_db.validate_against_campaign` (~L474) does a fresh lookup. Change a
+rule in one and implicit mode, guided mode and the REST 422 start disagreeing,
+with nothing to flag it.
 
-B5 is the quiet one and arguably the most dangerous. The state keys the tool
-layers read (`agent_config`, `campaign_type`) are hardcoded string literals in
-two files, duplicating constants `agent.py` already defines. There is a genuine
-circular-import reason not to import from `agent.py` — but `db_interface.py`
-already demonstrates the pattern for a small shared leaf module. If a key is
-renamed and one copy is missed, `tool_context.state.get(...)` returns `None`,
-validation silently falls back to the *unrestricted global registry*, and
-nothing is logged. That is a campaign-rule bypass that looks like normal
-operation.
+**Error shaping — 2 copies each.** Both tool modules parse the 409 body and
+build their own refusal dict (`tools.py` ~L462, `tools_guided.py` ~L520-527),
+and both shape their own 422 message (`tools.py` ~L264, `tools_guided.py` ~L482).
+A field rename in `main.py` needs both updated, and nothing fails if one is
+missed.
 
-B10 is the client-side member of the same family: `app.js`'s commit-response
-handling funnels three tool names into one conditional, then early-return status
-checks, then a `!resp.crm_record_id` refusal path, then unconditional success
-rendering. A fourth tool name or a new refusal status added later falls through
-to "success" silently. Suresh's suggestion — `isMidFlowContinue(resp)` /
-`isRefusal(resp)` helpers — makes it read as guard clauses. It belongs here
-because it is the same question ("how is a refusal recognised?") answered in a
-fourth place.
+**State keys — 2 copies, and this one is the risk.** `agent_config` and
+`campaign_type` are hardcoded strings in two files, duplicating constants
+`agent.py` already defines. If a key is renamed and one copy is missed,
+`state.get(...)` returns `None`, validation falls back to the **unrestricted
+global registry**, and nothing is logged. A campaign-rule bypass that looks
+normal.
 
-### Why it's worth doing
+**Client — the 4th place.** `app.js` ~L1077 funnels three tool names into one
+conditional, then status checks, then a refusal path, then unconditional
+success rendering. A new tool name or refusal status falls through to "success".
 
-The server already went this way during PR #5: both commit endpoints now share
-one `_commit_failure_response` helper, because the drift between them *was* the
-A4 defect. This story applies the same treatment to the tool and client layers
-before they drift the same way.
+The server already fixed its half in PR #5 — both commit endpoints now share one
+error-shaping helper, because the drift between them was a real bug (an
+incomplete record got a generic 500 instead of the 409 + `missing_topics`
+contract). This does the same for the tool and client layers.
 
-### Scope
+Consolidation only — no rule, code or contract should change.
 
-- One shared source for campaign allow-lists, consumed by implicit, guided and
-  the server validator
-- One shared 409 and 422 response-shaping path for the tool layers
-- Shared state-key constants in a leaf module, no circular import
-- `isMidFlowContinue` / `isRefusal` guard clauses in `app.js`
+## Acceptance criteria
 
-### Out of scope
-
-Changing any campaign rule, disposition code or error contract. This is
-consolidation only — behaviour before and after should be identical, which is
-also how it should be tested.
+1. Adding a disposition code to a campaign means editing one place; implicit,
+   guided and the REST 422 all reflect it.
+2. A renamed state key cannot silently fall back to the global registry — it
+   either can't be missed, or it logs a warning.
+3. One code path per status produces the 409 and 422 refusal messages.
+4. `app.js` does not render success for an unknown tool name or refusal status.
+5. Both smoke suites and the 9-case REST suite behave identically to before.
 
 ---
 
-## Story 2 — Disposition registry and topic-state model
+# Story 2 — Disposition registry and topic-state model
 
-**Covers B6, B7, B8.**
+**Points: 5**
 
-### Context
+## Description
 
-Three related problems in `mock_db`'s domain model.
+Three related problems in `mock_db`.
 
-**B6 — `needs_manual_review` is set in three places.** `tools.py`,
-`tools_guided.py` and `mock_db` each set the flag through their own checks, then
-`mock_db` sets it again unconditionally for code 99. The pattern is
-monotonic-OR, so the tool-layer computations are redundant work — and the
-surrounding comment in `mock_db` openly admits it does not fully trust them,
-which is why it re-sets the flag anyway. A check that does not trust an upstream
-check belongs upstream, not duplicated. Make `mock_db` the single source of
-truth and let the tool layers just null the code.
+**`needs_manual_review` is set in three places** — `tools.py`,
+`tools_guided.py` (~L323) and `mock_db` (~L708). Each has its own checks, then
+`mock_db` sets it again anyway for code 99. Its comment admits it doesn't fully
+trust the others, which is why. Make `mock_db` the only writer.
 
-**B7 — code 99 is spliced in but excluded from the registries it's spliced
-into.** `_NOT_COVERED_RULE` is deliberately kept out of
-`_FULL_DISPOSITION_REGISTRY` and each campaign's `disposition_registry`, then
-added back only in `get_agent_config` and `_DISPOSITION_BY_CODE`. The trap is
-the combination: code 99 remains globally *valid* via
-`VALID_DISPOSITION_CODES`, so nothing rejects it — it simply has no label or
-keywords anywhere that iterates the registry for metadata. Valid-but-invisible
-is worse than absent, because absent would fail loudly.
+**Code 99 is valid but invisible.** `_NOT_COVERED_RULE` (~L238) is kept out of
+`_FULL_DISPOSITION_REGISTRY` and each campaign's registry, then added back only
+in two read sites (~L428). It stays valid via `VALID_DISPOSITION_CODES`, so
+nothing rejects it — it just has no label or keywords for anything iterating the
+registry. Absent would fail loudly; this doesn't.
 
-**B8 — `allow_skips` is an ad hoc boolean, not a state model.** It is derived
-per call site, then threaded through `compute_missing_topics`,
-`build_confirmation_text` and `commit_notes`. It already needed one bespoke
-exemption for guided mode to avoid a deadlock — visible today as
-`previous is not None or agent_mode == "guided"`, which needed a five-line
-comment to justify. A third calling pattern means a third clause in that
-expression plus re-checking four functions for consistency. Suresh's suggestion
-is a topic-status enum — *unaddressed / skipped-unconfirmed / skipped-confirmed
-/ discussed* — which makes new caller semantics a matter of state rather than a
-shared boolean's truth table.
+**`allow_skips` should be a state, not a boolean.** Derived per call site
+(~L741), then threaded through `compute_missing_topics`,
+`build_confirmation_text` and `commit_notes`. It already needed a carve-out for
+guided mode (`previous is not None or agent_mode == "guided"`) with a five-line
+comment to justify it. A third caller means a third clause plus re-checking four
+functions. Replace with a topic-status enum: unaddressed / skipped-unconfirmed /
+skipped-confirmed / discussed.
 
-### Why it's worth doing
+`allow_skips` is load-bearing — the AIML-2698 coverage gate reads it, so it
+decides whether a record can commit at all. The carve-out exists because getting
+it wrong once deadlocked the guided flow (seen live 2026-08-11).
 
-B8 in particular is load-bearing: the coverage gate (AIML-2698) and the
-confirmation text both read `allow_skips`, so its truth table is what decides
-whether a record can be committed. That is too much weight for a boolean that is
-re-derived at each call site.
+This story changes behaviour, unlike the other three. Needs both smoke suites
+and the REST coverage cases re-run.
 
-### Scope
+## Acceptance criteria
 
-- `mock_db` as the single writer of `needs_manual_review`
-- Code 99 present in the registries it is currently spliced around, or a single
-  accessor that guarantees it
-- Topic-status enum replacing `allow_skips` across all four consumers
-
-### Note
-
-Behaviour-affecting. Needs the REST coverage-gate cases and both smoke suites
-re-run, not just a review.
+1. `needs_manual_review` is set in one module only; tool layers just null the
+   code.
+2. Iterating any disposition registry includes code 99 with its label and
+   keywords.
+3. `allow_skips` is gone; all four consumers read a topic status.
+4. A new calling pattern can be added without editing a shared boolean.
+5. Guided mode doesn't deadlock on a rep-confirmed skip.
+6. Both smoke suites and the REST coverage cases pass.
 
 ---
 
-## Story 3 — Storage backend contract
+# Story 3 — Enforce the storage backend contract
 
-**Covers B1.**
+**Points: 2**
 
-### Context
+## Description
 
-`db_interface.CRMStore` exists to keep `mock_db` and `bigquery_db` in sync. It
-did not: it declared `stage_notes` without `campaign_type`/`agent_mode` and
-`commit_notes` without the kwargs `main.py` passes. **That is why the BigQuery
-signature mismatch (A1) reached review** — the Protocol meant to catch it
-documented the wrong contract, so type-checking had nothing to complain about.
+`db_interface.CRMStore` is meant to keep `mock_db` and `bigquery_db` in sync. It
+wasn't — it declared the old signatures for both `stage_notes` and
+`commit_notes`.
 
-The signatures were corrected in PR #5 as part of the A1 fix, because shipping
-that fix without them would have left the same hole open. What remains is the
-structural half: the Protocol declares `self` on its methods, but the things
-that have to satisfy it are *modules*, not instances. A module never structurally
-matches such a Protocol, so it was never enforcing anything even when the
-signatures were right.
+That's why the BigQuery mismatch reached review: the Protocol documented the
+wrong contract, so type-checking had nothing to complain about. The finding
+turned out to be a commit path missing three gates (AIML-2698 coverage,
+AIML-2703 supersede, and idempotency), with every commit under
+`BIGQUERY_ENABLED=true` raising `TypeError`.
 
-### Why it's worth doing
+The signatures were fixed in PR #5. What's left is structural: `CRMStore`
+declares `self` on its methods, but the things that must satisfy it are
+**modules**, not instances — so it never enforced anything even when the
+signatures were right. Fix by dropping `self` or adding a thin adapter class,
+then wire it into CI.
 
-Small, but it is the guard that stops A1 from happening again. Two backends and
-no enforced contract between them is exactly the setup that produced a commit
-path with three missing gates.
+Small, but it's the guard that stops this recurring.
 
-### Scope
+## Acceptance criteria
 
-- Make `CRMStore` actually satisfiable by the module objects `get_db()` returns
-  (drop `self`, or switch to a small adapter class)
-- Wire it into whatever type-checking runs in CI, so a mismatch fails a build
-  rather than a review
-
-### Note
-
-Worth doing first, or at least before Story 1, since Story 1 moves shared code
-between these same layers.
+1. Removing a kwarg from `bigquery_db.commit_notes` fails type-checking.
+2. That check runs in CI, not just locally.
 
 ---
 
-## Story 4 — Session-state eviction
+# Story 4 — Session-state eviction
 
-**Covers B11.**
+**Points: 3**
 
-### Context
+## Description
 
-Several module-level dicts accumulate one entry per session and are never
-cleaned up: `turn_guard`'s `_TURN_COUNTS`, `_BASELINES`, `_AWAITING_READBACK`
-and `_NUDGE_SENT`, plus `mock_db._STAGED_NOTES`, and now
-`tools_guided._COMMIT_LOCKS`. A long-running process grows indefinitely.
+Six module-level dicts grow by one entry per session and are never cleaned up:
+`turn_guard._TURN_COUNTS`, `_BASELINES`, `_AWAITING_READBACK`, `_NUDGE_SENT`,
+`mock_db._STAGED_NOTES` and `tools_guided._COMMIT_LOCKS`.
 
-Suresh flagged this as non-blocking, and predicted it would matter more once
-session-id-per-dictation landed. It did land (A3), so it does. Two changes in
-PR #5 push more state through these dicts:
+Flagged as non-blocking, with the prediction it would matter more once
+session-id-per-dictation landed. It landed. Two PR #5 changes make it worse:
+`session_id` now rotates after every commit (many more sessions per shift), and
+committed records are now **kept** in `_STAGED_NOTES` rather than deleted —
+the delete was what made the idempotent-retry branch unreachable, so a real
+retry got a 404 instead of the cached result.
 
-- **A3** rotates `session_id` after every commit, so a shift now produces many
-  more distinct sessions than it used to.
-- **A5** *keeps* committed records in `_STAGED_NOTES` rather than deleting them.
-  The delete was what made the idempotent-retry branch unreachable, so it had to
-  go — but it means the store now retains one entry per committed visit.
+**Don't reinstate the delete at commit time** — that brings the 404 back. Reap
+committed entries on WebSocket disconnect or a TTL, with a window long enough
+that a genuine retry still finds its record.
 
-So the cleanup hook must reap **committed** entries specifically, not only
-abandoned ones. Reinstating the old delete is not an option; it would restore
-the A5 defect.
+## Acceptance criteria
 
-### Scope
-
-- A cleanup hook on WebSocket disconnect covering all six dicts
-- Committed `_STAGED_NOTES` entries reaped on a TTL or at disconnect, not at
-  commit
-- A retention window long enough that a genuine client retry still finds its
-  record
+1. After N connect/disconnect cycles, none of the six dicts has grown with N.
+2. A commit retry inside the retention window still replays the original
+   `crm_record_id`.
+3. The AIML-2703 supersede gate still fires for a draft not yet evicted.
 
 ---
 
-## Done in PR #5 — B9
+# Delivered in PR #5
 
-**Guided-flow state machine split across three files.**
-
-`agent.py`'s prompt tells the model to call `commit_guided_notes`;
-`record_topic_disposition` now commits inline instead, working around a
-documented model-behaviour gap (the model ends its turn rather than making the
-second call). A future prompt change around the commit step would be silently
-short-circuited, since the tool has already run before the model gets a turn.
-
-Suresh asked for a cross-reference comment naming the real commit trigger.
-That is a comment, not a refactor, and the person it protects is whoever next
-edits that prompt — so it belongs in the PR that created the situation rather
-than a follow-up.
-
----
-
-## Suggested sequencing
-
-1. **Story 3** (contract) — small, and it is the guard for everything else
-2. **Story 1** (deduplication) — largest, benefits from 3 being in place
-3. **Story 2** (domain model) — behaviour-affecting, wants a quiet window
-4. **Story 4** (eviction) — independent, can run in parallel with any of them
+The review also asked for a comment naming the guided flow's real commit
+trigger — Stage 5 of the prompt says to call `commit_guided_notes`, but
+`record_topic_disposition` commits inline, so a future prompt change there would
+be silently ignored. That's a comment, not a refactor, so it shipped in PR #5.

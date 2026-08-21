@@ -97,9 +97,10 @@ the model."**
 
 ---
 
-## Section B — design / duplication → follow-up ticket
+## Section B — design / duplication
 
-Swap `AIML-XXXX` for the real id.
+B9 landed in PR #5. The other ten split into four stories — see
+`PR5-followup-stories.md`. Swap `AIML-XXXX` for the real ids.
 
 ### B1 ⬜ · `db_interface.py`
 **"`CRMStore` Protocol in `db_interface.py` is stale."**
@@ -177,13 +178,23 @@ than from an explicit topic-state model."**
 > pattern means a third clause in that expression plus re-checking four
 > functions for consistency, where a state model would just be a new state.
 
-### B9 ⬜ · `tools_guided.py` ~L408
+### B9 ✅ · `tools_guided.py` ~L408 — **done in this PR, not the follow-up**
 **"Guided-flow state machine is now split across three files."**
 
-> Agreed, AIML-XXXX. The inline commit is deliberate — it works around the
-> documented model-behaviour gap where the model ends its turn instead of
-> calling `commit_guided_notes` — but nothing at the prompt end says so. Adding
-> the cross-reference comment you suggest.
+> Done here rather than in the follow-up ticket — the ask is a comment, and the
+> person it protects is whoever next edits that prompt, so it belongs in the PR
+> that created the situation.
+>
+> Cross-references at both ends: a note above `_GUIDED_SCRIPT` in
+> `agent_guided.py` explaining that Stage 5's instruction is usually not the
+> real trigger and why (Gap 6/F5 — asked to make a second call with nothing left
+> to say, the model ends its turn instead), and a matching note at the inline
+> commit in `record_topic_disposition` pointing back.
+>
+> Both spell out the consequence you identified: a prompt change around the
+> commit step is silently short-circuited unless the tool changes too. Also
+> added a line to Stage 5 itself so the model handles the already-committed case
+> cleanly.
 
 ### B10 ⬜ · `app.js` ~L1077 (he refers to ~L1010-1013)
 **"Combined conditional is getting hard to extend."**

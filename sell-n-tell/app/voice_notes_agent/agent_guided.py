@@ -31,6 +31,23 @@ from .tools_guided import (
 logger = logging.getLogger(__name__)
 
 
+# WHERE THE COMMIT ACTUALLY HAPPENS -- read before editing Stage 5 below.
+#
+# Stage 5 of this script tells the model to call `commit_guided_notes`. In
+# practice it usually does not need to: `tools_guided.record_topic_disposition`
+# commits inline once the last topic is dispositioned, and hands the model only
+# the closing statement to read.
+#
+# That is deliberate (Gap 6 / F5): asked to make a second tool call when it has
+# nothing left to say, the model reliably ends its turn instead -- the record is
+# complete and nothing is saved, with no signal that the save didn't happen.
+# Committing directly removes the hop.
+#
+# The consequence for anyone editing Stage 5: a prompt change around the commit
+# step -- e.g. asking for a spoken confirmation before saving -- will be
+# SILENTLY SHORT-CIRCUITED, because the tool has already committed before the
+# model gets a turn to act on the new instruction. Change
+# `record_topic_disposition` too, or the prompt edit will appear to do nothing.
 _GUIDED_SCRIPT = """
 # Your job
 You are a hands-free, EXPLICIT-script voice dictation assistant for a field
@@ -162,7 +179,9 @@ For the topic set_event_type (or record_topic_disposition) names as next:
 Once every topic is recorded (record_topic_disposition tells you when all
 are done), call commit_guided_notes, then speak its closing_statement
 verbatim and end the session. Do not say anything after the closing
-statement.
+statement. If record_topic_disposition already returned a closing_statement,
+the record is saved -- just read it; calling commit_guided_notes again is
+safe and will replay the same result.
 
 # Speaking style
 Speak every question and confirmation at a measured, unhurried pace -- not

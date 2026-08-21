@@ -422,6 +422,14 @@ async def record_topic_disposition(
     # Every topic is dispositioned. Commit HERE rather than instructing the
     # model to make a second tool call.
     #
+    # THIS IS THE REAL COMMIT TRIGGER for the guided flow -- not Stage 5 of the
+    # prompt in agent_guided.py, which still tells the model to call
+    # commit_guided_notes. A matching note sits above _GUIDED_SCRIPT there.
+    # Anyone changing the prompt around the commit step (e.g. requiring a spoken
+    # confirmation first) has to change this call too, or the prompt edit is
+    # silently short-circuited: the record is already saved by the time the
+    # model gets a turn.
+    #
     # Gap 6 / F5: asking for that second call is where guided mode stalls --
     # the model emits `OUT_TX text='' finished=True`, closes its turn and
     # never calls commit_guided_notes. The rep has answered everything, the
