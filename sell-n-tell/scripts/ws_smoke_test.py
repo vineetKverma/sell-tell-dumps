@@ -44,10 +44,22 @@ IMPLICIT_SCENARIOS: dict[str, list[str]] = {
         "Actually change that to a meeting.",
         "Save.",
     ],
-    # AIML-2703 AC#3. The three correction shapes the ticket names, one per
-    # scenario, because they exercise different paths through stage_notes:
-    # `correction` above changes a top-level field (event_type), the two below
-    # change a topic's disposition and add a topic that was never staged.
+    # AIML-2703 AC#3. The correction shapes the ticket names, one per scenario,
+    # because they exercise different paths through stage_notes: `correction`
+    # above changes a top-level field (event_type), and the three below change a
+    # topic's disposition, restate the summary, and add a topic that was never
+    # staged.
+    #
+    # None of these can exercise the supersede gate -- the model always commits
+    # the record it just staged, never the one it replaced. That gate is covered
+    # by scripts/test_correction_reliability.py.
+    "correction_summary": [
+        "Met on site to talk about pricing. They said it was too expensive. "
+        "End of notes.",
+        "That summary isn't right -- say they're reviewing it with their "
+        "finance team before deciding.",
+        "Save it.",
+    ],
     "correction_disposition": [
         "Met on site and went through pricing. They placed an order for it. "
         "End of notes.",
@@ -133,6 +145,7 @@ GUIDED_SCENARIOS: dict[str, list[str]] = {
 PLANNED_TOPICS_IMPLICIT = {
     "clean_save": "Pricing discussion",
     "correction": "Pricing discussion",
+    "correction_summary": "Pricing discussion",
     "correction_disposition": "Pricing discussion",
     # Contract renewal is planned but deliberately not mentioned on the first
     # pass -- the correction turn is what adds it, so this also proves the

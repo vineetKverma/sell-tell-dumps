@@ -6,83 +6,74 @@ current work queue), `change-log.md` (what we changed and why), and
 
 ---
 
-## ✅ START HERE — PR #5 is open with changes requested
+## ✅ START HERE — PR #5 review is answered
 
 **Branch: `feature/AIML-2698-on-2130`** → `development`, PR
-[#5](https://bitbucket.org/fm_ebiz/sell-n-tell/pull-requests/5), tip `e67fc9c`.
-Working tree clean, everything pushed.
+[#5](https://bitbucket.org/fm_ebiz/sell-n-tell/pull-requests/5).
 
-`development` has been merged into the branch; the four conflicts
-(`main.py`, `app.js`, `mock_db.py`, plus a silently-dropped `db_interface`
-import) are resolved and verified.
+Suresh reviewed it on 2026-08-19 — 25 comments. **All answered.**
 
-**Suresh reviewed it on 2026-08-19 and requested changes — 25 comments.**
-They are catalogued in **`docs/PR5-review-findings.md`**, grouped:
-
-| Group | Count | Action |
+| Group | Count | State |
 |---|---|---|
-| **A — correctness** | 10 | **All 10 fixed.** Not yet on the app machine. |
-| **B — design / duplication** | 11 | Raise one follow-up ticket. B1 first. |
-| **C — cosmetic** | 4 | Formatter pass. |
-| **D — positive** | 1 | No action. |
+| **A — correctness** | 10 | Fixed, tested, replied. 9 resolved; the read-modify-write one left open deliberately |
+| **B — design / duplication** | 11 | 1 delivered here; the other 10 are four stories in `PR5-followup-stories.md` |
+| **C — cosmetic** | 4 | Done |
+| **D — positive** | 1 | No action |
 
-### Where things stand
+Per-thread status and reply text: `PR5-comment-replies.md`.
+Cause → fix → evidence per finding: `PR5-response.md`.
+Test method and results: `PR5-test-plan.md`, `PR5-test-results.md`.
 
-**Group A is done.** All ten fixes are in the local copy, verified by three
-scripts totalling 49 assertions that need no mic, model, BigQuery or running
-server. Per-item rationale is in `PR5-review-findings.md`; each fixed item is
-marked there.
+### What still needs doing
 
-**Nothing has been carried to the app machine yet.** That is step one for the next
-session — see §4 for the export/import round trip — followed by re-running the
-smoke suite there and responding on the PR.
+1. **Post the top-level summary comment and re-request review.** Four replies say
+   something the reviewer didn't, and those threads are now collapsed — the
+   summary is the only place they stay visible. Text is at the bottom of
+   `PR5-comment-replies.md`.
+2. **Raise the four follow-up stories** in `PR5-followup-stories.md` (18 points,
+   suggested order 3 → 1 → 2 → 4), then swap the real ids into the B replies and
+   post them.
+3. **Tell Sainitheesh** about the rebase, that his `c6860bd` closed Gap 18, and
+   that our Gap 6 fix touches his guided flow.
 
-Four fixes diverged from what the comment asked, and each needs saying in the PR
-response rather than being silently different:
+### Worth carrying forward
 
-- **A1** was missing *three* gates (coverage, supersede, idempotency), not the
-  one flagged. Also fixed the signature half of **B1**, since a stale Protocol
-  is what let the mismatch pass type-checking.
-- **A6**'s suggested call site (`stopMicrophone`) is never reached in this app.
-  The fix hangs off `micActive` transitions instead. The stranded samples were
-  also being spliced onto the *next* turn, not merely dropped.
-- **A8** needed fixing inside `mock_db.commit_notes`, not just at the `main.py`
-  read site — the field `main.py` was told to trust was itself populated from
+Four fixes diverged from what the comment asked — say so rather than being
+silently different:
+
+- The BigQuery backend was missing **three** gates (coverage, supersede,
+  idempotency), not the one flagged. Fixing it also required correcting the
+  `CRMStore` signatures, since a stale Protocol is what let the mismatch pass
+  type-checking.
+- The resampler flush belongs at the `micActive` transitions; `stopMicrophone`
+  is never called by `app.js`. The stranded samples were also being spliced onto
+  the *next* turn, not merely dropped.
+- `campaign_type` needed fixing inside `mock_db.commit_notes`, not at the
+  `main.py` read site — the field it was told to trust was itself populated from
   the caller.
-- **A10**'s stated race cannot occur (no `await` in that sequence under
-  asyncio). The in-place state mutation underneath it is real and is fixed.
+- The guided read-modify-write race cannot occur as described (no `await` in
+  that sequence under asyncio). The in-place state mutation underneath it is
+  real and is fixed.
 
-Two trade-offs the PR response should own outright:
+Two deliberate trade-offs:
 
-- **A3 gives up the warm socket.** Rotating `session_id` after each commit means
-  the next dictation pays Vertex's 6-10s cold-start handshake again.
-- **A5 keeps committed records in `_STAGED_NOTES`.** Without that the
-  idempotent-retry branch is unreachable. It makes **B11**'s eviction hook more
-  valuable, not less.
+- **Rotating `session_id` per dictation gives up the warm socket.** Measured
+  45.6s / 59.2s / 36.6s across three consecutive dictations, so no consistent
+  cold-start penalty in practice.
+- **Committed records now stay in `_STAGED_NOTES`.** Deleting them was what made
+  the idempotent-retry branch unreachable. This makes the session-state eviction
+  story more valuable, not less.
 
-**Still not covered by any test:** anything needing a real browser on a
-non-localhost origin (A6/A7 integration), the WebSocket upstream loop (A9), and
-real ADK concurrency — the A2 test simulates `asyncio.gather` dispatch rather
-than driving ADK itself.
-
-### Next
-
-1. **Carry the changes to the app machine**, re-run `ws_smoke_test.py` for both modes
-   there, then respond on the PR.
-2. **Promote the three verification scripts into `scripts/`.** A second backend
-   with no gates and a stale Protocol are exactly what regress silently.
-3. **B** — one follow-up ticket. Lead with **B1**: the rest of it (the Protocol
-   declares `self` on methods a *module* has to satisfy) still stands.
-4. **C** — formatter pass.
+Found during testing, not in the review: the planning panel stayed locked after
+a save; the `?v=` cache-buster never covered `app.js`'s imported modules; and the
+secure-context guard was on the wrong call (`AudioWorklet` fails before
+`getUserMedia`). All three fixed.
 
 ### Also still open
 
-- **Tell Sainitheesh** about the rebase, that his `c6860bd` closed one of our
-  documented gaps (Gap 18), and that our Gap 6 fix touches his guided flow.
 - **F7** — `_topic_matches` uses substring containment, so an inflected label
   ("Appliance Contract Renewal" vs planned "Appliances") reports the topic
-  uncovered and can produce two rows for one discussion. Open; demo mitigation
-  is phrasing discipline.
+  uncovered and can produce two rows for one discussion.
 - **Invented skip reasons** — the agent still writes "due to time constraints"
   when the rep gave no reason, despite a prompt rule naming that exact phrase.
   Needs a server-side fix; prompt text has been measured not to work.
@@ -95,7 +86,7 @@ than driving ADK itself.
 |---|---|---|
 | **AIML-2698** | Disposition + State Correctness | **Closed.** Delivered in PR #5 |
 | **AIML-2705** | Disposition Quality Guardrails | **Closed.** ACs 1/2/5 delivered; AC4 took its "documents residual risk" clause; AC3 met with 3 cases |
-| **AIML-2703** | Correction & Re-stage Reliability | **Done, in PR #5.** Orphan bug reproduced, fixed, regression-tested |
+| **AIML-2703** | Correction & Re-stage Reliability | **Closed.** All 5 ACs met; supersede gate now regression-tested in `scripts/test_correction_reliability.py` |
 | **AIML-2702** | Eval Harness (faithfulness / factualness / contextualness) | Not started. Q3-S3 |
 | **AIML-2697** | FAR Demo Hardening: Mode UX + Demo Script | Partly in flight — the audio fixes are tagged to it |
 | **AIML-2651** | Error Handling & Resilience | Not started. No retry/backoff anywhere; timeouts hardcoded |
@@ -242,6 +233,11 @@ regression:**
 - `rerecord` — observed failing to commit once on 2026-08-19, then passing on an
   immediate re-run with no code change in between. Model non-determinism in the
   guided flow, same family as Gap 6/F5.
+- `implicit/correction_summary` — same pattern on 2026-08-21: missed once in a
+  full run, committed on its own re-run.
+
+The committed-record count is in-memory, so **a server restart resets it to 0**.
+Always note the baseline before reading a count as a failure.
 
 **Counting the result is the real check**, not the transcript — the harness
 prints a live log and no pass/fail summary:

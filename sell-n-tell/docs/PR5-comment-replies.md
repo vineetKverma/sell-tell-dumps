@@ -261,6 +261,60 @@ wanted it belongs with the other structural cleanups in the B ticket.
 
 ---
 
+## Section E — architecture (added 2026-08-19, after the first pass)
+
+Three later comments, all explicitly not blockers for this PR. They are platform
+concerns rather than defects, and two of them interact with changes PR #5 made.
+
+### E1 ⬜ · `main.py`
+**"Migrate off InMemorySessionService"**
+
+> Agreed, and it belongs with the session-state story as you suggest.
+>
+> One constraint worth capturing in that ticket: `turn_guard`'s dicts were
+> deliberately moved *out* of ADK session state, because `ToolContext.state`
+> does not observe mutations made to the `Session` object from `main.py`'s
+> downstream loop — every commit read a stale baseline and was permanently
+> blocked. So `VertexAISessionService` fixes ADK session state but not those
+> dicts, nor `mock_db._STAGED_NOTES` or `tools_guided._COMMIT_LOCKS`, which
+> aren't ADK state either. The migration and the eviction hooks are
+> complementary, not alternatives.
+
+### E2 ⬜ · `main.py` — `websocket_endpoint`
+**"No defined behavior for reconnecting to the same session_id — the WS layer's
+connectivity resilience relies on the client always avoiding it"**
+
+> Agreed, and the framing is right: it's a client-side dodge, not a service
+> guarantee.
+>
+> Worth flagging that **this PR increased the reliance on it**. Fixing the stale
+> commit result meant `finishSession()` now rotates `sessionId` after every
+> commit, so the reference client mints new ids more often than before — which
+> makes the race even less likely to be hit locally, and the gap correspondingly
+> easier to miss.
+>
+> Taking your recommendation as written: an in-flight connection registry keyed
+> by `session_id`, with either a wait-for-teardown or an explicit "session busy"
+> signal, published as part of the API contract rather than living in one
+> client's backoff logic.
+
+### E3 ⬜ · `db_interface.py` / `bigquery_sink.py`
+**"No durable CRM storage today, and confusing BigQuery flag naming"**
+
+> Agreed, and this needs deciding before the storage-contract work, not after.
+>
+> PR #5 sharpened your option (b): `bigquery_db.commit_notes` now delegates the
+> entire commit — coverage gate, supersede check, idempotency — to `mock_db` and
+> owns only the insert. It was doing none of that before, which is what made it
+> look like an independent backend while silently bypassing every gate. It is
+> now unambiguously an insert wrapper, so "drop the pretense" is a small change
+> rather than a rewrite.
+>
+> The two-flag confusion is real and we hit it ourselves: BigQuery rows appearing
+> with `BIGQUERY_ENABLED=false` reads as though the CRM backend is BigQuery when
+> it is still `mock_db` in memory. Whichever option is chosen, the flags should
+> stop looking like the same switch.
+
 ## Section D — **COMPLETE**
 
 ### D ✅ · `app.js` ~L1206
