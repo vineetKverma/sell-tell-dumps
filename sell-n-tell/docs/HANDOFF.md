@@ -6,119 +6,190 @@ why. Then `plan-after-implicit-decision.md` for the current piece of work, and
 
 ---
 
-## ✅ START HERE — next task is removing the guided flow
+## ✅ START HERE — AIML-2751, remove the guided flow
 
-**PR #5 is merged into `development`.** The review is fully answered: all 10
-correctness findings fixed and verified, cosmetics done, and the remaining
-design findings scoped into six follow-up stories.
+Everything below is current as of 2026-08-26. No other document is needed to
+begin; the rest of this file is background.
 
-The FAR research group has chosen **the implicit model** (Jeremy, 2026-08-18),
-so guided mode is out of scope. Removing it is the next piece of work, and it
-makes several of the follow-up stories smaller — do it before them, not after.
+### Where things stand
 
-### The plan
+- **PR #5 is merged into `development`** (merge commit `9433908`). Its review is
+  fully answered — 10 correctness fixes verified, cosmetics done, remaining
+  findings scoped into six follow-up stories.
+- **The FAR research group chose the implicit model** (Jeremy, 2026-08-18), so
+  guided mode is out of scope.
+- **Guided is preserved at git tag `archive/guided-flow`**, pushed to origin,
+  verified to sit on `9433908` with both guided files in its tree. Recover any
+  file with:
+  `git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py`
+- **Branch `feature/AIML-2751-remove-guided` is created** from `development`.
+  Nothing has been deleted yet.
 
-1. **Pull `development`** and tag the current tip *before* deleting anything —
-   that tag is how guided comes back if it is ever needed. See
-   "Preserving guided" below.
-2. **Branch from `development`**:
-   `feature/AIML-2751-remove-guided`
-3. **Delete guided** — scope and acceptance criteria are in
-   `plan-after-implicit-decision.md` §5 (AIML-2751).
-4. **Test** — implicit smoke suite, the correction suite, and one browser
-   dictation end to end.
-5. **Raise the PR** into `development`.
+**Ticket: AIML-2751 — "Remove the guided flow".** 3 points, Sprint
+AIML-2026-Q3-S3, In Development, parent AIML-1537.
 
-### Preserving guided so it can come back
+### The task
 
-**Use an annotated git tag, not a branch and not a feature flag.**
+Delete the guided flow. Below is every file that references it — the grep has
+already been done, so this list is complete.
 
-Before the removal branch is cut, from an up-to-date `development`:
+**1. Delete outright**
 
-```powershell
-git checkout development
-git pull
-git tag -a archive/guided-flow -m "Last commit containing the guided flow (tools_guided.py, agent_guided.py). Removed because the FAR research group selected the implicit model, 2026-08-18. See docs/plan-after-implicit-decision.md."
-git push origin archive/guided-flow
+```
+app/voice_notes_agent/tools_guided.py     (660 lines)
+app/voice_notes_agent/agent_guided.py     (261 lines)
 ```
 
-Recovering a file later is then one command:
+**2. `app/main.py`**
 
-```powershell
-git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
-```
+- the `from .voice_notes_agent import agent_guided` import (has a `# noqa: E402`)
+- the `"guided": Runner(agent=agent_guided, session_service=session_service)`
+  entry in the runners dict, and the `agent_mode == "guided"` selection around it
+- `"commit_guided_notes"` in the `_READBACK_OWED_TOOLS` set
+- the guided-specific wording in the "agent is responding" banner text
+- a comment referencing "guided Stage 1 not calling capture_dictation" — keep or
+  reword, it documents a real model behaviour
 
-**Why a tag rather than the alternatives:**
+**3. `app/voice_notes_agent/mock_db.py`**
 
-- *A long-lived branch* looks maintained. Someone will eventually merge
-  `development` into it, or wonder why it is behind.
-- *Keeping the files behind a flag* is exactly what `bigquery_db.py` was: dead
-  code that read as a working alternative, shipped with three missing gates, and
-  cost a review cycle to find. Do not repeat it.
-- *A tag* costs nothing, cannot drift, and is unambiguous about being an
-  archive.
+- **~L741** — the whole point of the story:
+  `allow_skips = previous is not None or agent_mode == "guided"`
+  becomes `allow_skips = previous is not None`, and the five-line comment above
+  it explaining the guided exemption goes with it
+- comments referring to `tools_guided.record_topic_disposition` and "guided
+  deadlocks" — reword, do not silently drop (see *Rescue the lessons* below)
+- `agent_mode` stays as a parameter and on the committed record; only the
+  guided *branching* goes
 
-**What is actually worth preserving is not the code.** If guided ever returns it
-will be rewritten against whatever the code looks like then. What must not be
-lost is what building it taught us, and that lives in docs, not in
-`tools_guided.py`:
+**4. `app/static/index.html`**
+
+- the `<option value="guided">Guided (explicit script)</option>` line, and
+  probably the whole Solution selector if implicit is the only mode left
+
+**5. `app/static/js/app.js`**
+
+- `agentModeSelect` and its change listener
+- `guidedPayload` and everything that builds it (`resetGuidedPayload`, the
+  `capture_dictation` / `set_event_type` / `record_topic_disposition` handlers
+  that populate it)
+- `commit_guided_notes` and `record_topic_disposition` from the tool-name
+  conditionals at ~L1017 and ~L1066 — this collapses three names to one, which
+  is most of the "hard to extend" review finding
+- the `agentMode === "guided"` banner-text branch
+- **bump the version** in `index.html` and in `app.js`'s module imports
+  (currently `v=9`, both must match)
+
+**6. `scripts/ws_smoke_test.py`**
+
+- `GUIDED_SCENARIOS`, `PLANNED_TOPICS_GUIDED`
+- the `guided` choice in the argparse `agent_mode` argument
+- the docstring usage examples and the long comment about
+  `commit_guided_notes now`
+
+**7. Leave alone**
+
+- `app/voice_notes_agent/bigquery_sink.py` — it writes to
+  `implicit_flow_calls` / `guided_flow_calls` tables keyed by `agent_mode`. That
+  is historical comparison data. Keep the table mapping.
+
+### Rescue the lessons first
+
+`tools_guided.py` and `agent_guided.py` carry explanations that exist nowhere
+else. Move these into `docs/change-log.md` (or `mock_db.py` comments) **before**
+deleting the files:
 
 - **Gap 6 / F5** — asked to make a second tool call when it has nothing left to
-  say, the model ends its turn instead. The record is complete and nothing is
-  saved, with no signal. This is why the last disposition commits inline.
+  say, the model ends its turn instead. Record complete, nothing saved, no
+  signal. This is why the last disposition commits inline. Currently in the
+  `_GUIDED_SCRIPT` header comment and at the inline commit in
+  `record_topic_disposition`.
 - **The `allow_skips` deadlock** (observed live 2026-08-11) — guided asks about
-  a topic, the rep says they skipped it, and the first staging call then reports
-  that same topic as uncovered, so the commit 409s and the agent asks again.
+  a topic, the rep says they skipped it, the first staging call reports that
+  same topic as uncovered, the commit 409s, and the agent asks again. Currently
+  in the `mock_db.stage_notes` comment you are about to delete.
 - **The 3-strikes disposition path** — after three failed confirm attempts,
-  record `needs_manual_review` rather than guessing a code.
+  record `needs_manual_review` rather than guess a code.
 - **Two flag shapes for manual review** — guided used a null code plus
-  `needs_manual_review`; implicit uses code 99. Worth knowing if a second flow
-  is ever added.
+  `needs_manual_review`; implicit uses code 99.
 
-These are already written down in `change-log.md`, `AIML-2698-gap-findings.md`
-and the comments in `mock_db.py`. Check they survive the deletion — the ones
-living in `tools_guided.py` comments will not.
+A tag preserves the code, but nobody goes looking in an archive tag for a lesson
+they do not know exists.
 
-### After guided is removed
+### Testing
 
-Suggested order, from `stories-after-guided-removal.md`:
+The local copy at `c:\Personal Storage\poc\sellNtell\sell-n-tell` is for
+reading and editing only. Changes must be carried to the app machine
+(`C:\Personal Storage\developer\sell-n-tell`) before anything can run — see
+§4 for the export/import round trip, and run
+`python tools/fix_mojibake.py --check` after importing.
 
-1. **Story 6** — decide where CRM records actually live. May delete Story 3.
-2. **Story 1** — consolidate campaign rules, *before* vertical-market context
-   adds a second config dimension.
-3. **Event type interpretation** — Jeremy's first refinement. Small and
-   directly asked for. See `plan-after-implicit-decision.md` §2.
+On the app machine, with the server up (`uv run uvicorn app.main:app --host
+0.0.0.0 --port 8000`, **no `--reload`**):
+
+```powershell
+uv run python scripts/ws_smoke_test.py implicit          # 7 scenarios
+uv run python scripts/test_correction_reliability.py     # expect 16/16
+```
+
+Then one browser dictation end to end at `http://localhost:8000`, hard-reloaded,
+producing exactly one CRM record.
+
+Counting the committed records is the real check — the smoke harness prints a
+transcript and no pass/fail summary:
+
+```powershell
+$r = (Invoke-RestMethod -Uri "http://localhost:8000/api/v1/notes/committed").records
+"TOTAL: $($r.Count)"
+$r | Group-Object ws_session_id | Where-Object Count -gt 1   # must print nothing
+```
+
+**`implicit/correction_summary` is intermittent** — it missed once on
+2026-08-21 and passed on an immediate re-run with no code change. Re-run a single
+scenario with `--scenario correction_summary` before calling it a regression.
+The record store is in-memory, so **a restart resets the count to 0** — note the
+baseline before reading a count as a failure.
+
+### Acceptance criteria (from the ticket)
+
+1. No file references `tools_guided` or `agent_guided`.
+2. `allow_skips` has no `agent_mode` term.
+3. The implicit smoke suite passes with the same scenario count as before (7).
+4. `scripts/test_correction_reliability.py` passes unchanged.
+5. A dictation completes end to end in the browser and produces one CRM record.
+
+### Then
+
+Raise the PR into `development`. Put the archive-tag recovery command in the PR
+description — the tag is only useful if it is findable.
+
+### After AIML-2751
+
+Order from `stories-after-guided-removal.md` (the six follow-up stories,
+re-scoped from 33 to 20 points now that guided is going):
+
+1. **Decide where CRM records actually live** — today no configuration persists
+   a committed record across a restart. May delete the storage-contract story.
+2. **Consolidate campaign rules** — before vertical-market context adds a second
+   config dimension.
+3. **Event type interpretation** — Jeremy's first refinement.
+   `plan-after-implicit-decision.md` §2 has the root cause: event types carry no
+   mapping keywords while disposition codes do.
 4. **AIML-2702 + AIML-2733** — eval harness and golden set. These gate the
-   vertical-market work, since "recognises vertical-specific patterns" cannot be
-   checked by the smoke suite.
+   vertical-market work.
 5. **Vertical market context** — Jeremy's second refinement.
-6. Stories 2, 4, 5 as capacity allows.
 
-### Still open, not yet ticketed
+### Still open, not ticketed
 
 - **F7** — `_topic_matches` uses substring containment, so an inflected label
   ("Appliance Contract Renewal" vs planned "Appliances") reports the topic
   uncovered and can produce two rows for one discussion.
 - **Invented skip reasons** — the agent still writes "due to time constraints"
-  when the rep gave no reason. Prompt wording was measured over six runs and
-  made no difference; needs a server-side fix.
-- **Registry content gap** — no code expresses "renewal agreed", "quote
-  created", or "no contact made"; roughly a quarter of real visits. Product
-  decision, in `note-disposition-registry-gap.md`.
-- **Tell Sainitheesh** about the rebase, that his `c6860bd` closed Gap 18, and
-  that our Gap 6 fix touches the guided flow — now moot if guided is deleted,
-  but the rebase note still stands.
-
-### Documents from the review round
-
-| File | What it is |
-|---|---|
-| `PR5-comment-replies.md` | all 28 review comments, matched to their thread, with reply text |
-| `PR5-response.md` | cause → fix → evidence per finding |
-| `PR5-test-plan.md` / `PR5-test-results.md` | how it was tested and what passed |
-| `architecture-notes.md` | why so much surfaced late; what the Live API does vs what we built; what BigQuery is actually for |
-| `plan-after-implicit-decision.md` | the guided-removal story, Jeremy's two requirements, and further candidate stories |
-| `stories-after-guided-removal.md` | the six follow-up stories, re-scoped |
+  when the rep gave no reason. Prompt wording was measured over six runs and made
+  no difference; needs a server-side fix.
+- **Registry content gap** — no code expresses "renewal agreed", "quote created"
+  or "no contact made"; roughly a quarter of real visits. Product decision, in
+  `note-disposition-registry-gap.md`.
+- **Tell Sainitheesh** about the rebase and that his `c6860bd` closed Gap 18.
 
 ---
 
@@ -126,6 +197,7 @@ Suggested order, from `stories-after-guided-removal.md`:
 
 | Ticket | Title | Status |
 |---|---|---|
+| **AIML-2751** | Remove the guided flow | **In development.** Branch `feature/AIML-2751-remove-guided` cut, nothing deleted yet — see START HERE |
 | **AIML-2698** | Disposition + State Correctness | **Closed.** Delivered in PR #5 |
 | **AIML-2705** | Disposition Quality Guardrails | **Closed.** ACs 1/2/5 delivered; AC4 took its "documents residual risk" clause; AC3 met with 3 cases |
 | **AIML-2703** | Correction & Re-stage Reliability | **Closed.** All 5 ACs met; supersede gate now regression-tested in `scripts/test_correction_reliability.py` |
