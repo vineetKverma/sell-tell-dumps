@@ -149,7 +149,7 @@ Assuming guided is dropped and both requirements land.
 
 | # | Item | Points | Change from before |
 |---|---|---|---|
-| 0 | **Delete the guided flow** | 2 | new — unlocks the rest |
+| 0 | **AIML-2751 — Delete the guided flow** | 3 | new — unlocks the rest |
 | 1 | Single source of truth for rules + error shaping | 8 → **3** | most duplication disappears with guided |
 | 2 | Disposition registry + topic model | 5 → **3** | `allow_skips` carve-out disappears |
 | 3 | Enforce the storage backend contract | 2 | unchanged, or dropped if Story 6 deletes `bigquery_db` |
@@ -164,7 +164,7 @@ than debt, and the debt half shrank from 33 to 21.
 
 ### Suggested order
 
-1. **Story 0** — delete guided. Everything downstream gets smaller.
+1. **AIML-2751** — delete guided. Everything downstream gets smaller.
 2. **Story 6** — decide what the CRM is. May delete Story 3.
 3. **Story 1** — consolidate, *before* vertical adds a second config dimension.
 4. **Story 7** — event type. Small, visible, directly asked for.
@@ -174,9 +174,10 @@ than debt, and the debt half shrank from 33 to 21.
 
 ---
 
-## 5. Story 0 — Remove the guided flow
+## 5. AIML-2751 — Remove the guided flow
 
-**Points: 2**
+**3 points · Sprint AIML-2026-Q3-S3**
+
 
 ### Description
 

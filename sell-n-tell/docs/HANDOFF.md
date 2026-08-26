@@ -1,82 +1,124 @@
 # SellNTell — session handoff
 
-Resume with no prior context. Read this, then `PR5-review-findings.md` (the
-current work queue), `change-log.md` (what we changed and why), and
-`AIML-2698-gap-findings.md` (the 18-gap analysis).
+Resume with no prior context. Read this first — it says what to do next and
+why. Then `plan-after-implicit-decision.md` for the current piece of work, and
+`change-log.md` for what changed and why.
 
 ---
 
-## ✅ START HERE — PR #5 review is answered
+## ✅ START HERE — next task is removing the guided flow
 
-**Branch: `feature/AIML-2698-on-2130`** → `development`, PR
-[#5](https://bitbucket.org/fm_ebiz/sell-n-tell/pull-requests/5).
+**PR #5 is merged into `development`.** The review is fully answered: all 10
+correctness findings fixed and verified, cosmetics done, and the remaining
+design findings scoped into six follow-up stories.
 
-Suresh reviewed it on 2026-08-19 — 25 comments. **All answered.**
+The FAR research group has chosen **the implicit model** (Jeremy, 2026-08-18),
+so guided mode is out of scope. Removing it is the next piece of work, and it
+makes several of the follow-up stories smaller — do it before them, not after.
 
-| Group | Count | State |
-|---|---|---|
-| **A — correctness** | 10 | Fixed, tested, replied. 9 resolved; the read-modify-write one left open deliberately |
-| **B — design / duplication** | 11 | 1 delivered here; the other 10 are four stories in `PR5-followup-stories.md` |
-| **C — cosmetic** | 4 | Done |
-| **D — positive** | 1 | No action |
+### The plan
 
-Per-thread status and reply text: `PR5-comment-replies.md`.
-Cause → fix → evidence per finding: `PR5-response.md`.
-Test method and results: `PR5-test-plan.md`, `PR5-test-results.md`.
+1. **Pull `development`** and tag the current tip *before* deleting anything —
+   that tag is how guided comes back if it is ever needed. See
+   "Preserving guided" below.
+2. **Branch from `development`**:
+   `feature/AIML-2751-remove-guided`
+3. **Delete guided** — scope and acceptance criteria are in
+   `plan-after-implicit-decision.md` §5 (AIML-2751).
+4. **Test** — implicit smoke suite, the correction suite, and one browser
+   dictation end to end.
+5. **Raise the PR** into `development`.
 
-### What still needs doing
+### Preserving guided so it can come back
 
-1. **Post the top-level summary comment and re-request review.** Four replies say
-   something the reviewer didn't, and those threads are now collapsed — the
-   summary is the only place they stay visible. Text is at the bottom of
-   `PR5-comment-replies.md`.
-2. **Raise the four follow-up stories** in `PR5-followup-stories.md` (18 points,
-   suggested order 3 → 1 → 2 → 4), then swap the real ids into the B replies and
-   post them.
-3. **Tell Sainitheesh** about the rebase, that his `c6860bd` closed Gap 18, and
-   that our Gap 6 fix touches his guided flow.
+**Use an annotated git tag, not a branch and not a feature flag.**
 
-### Worth carrying forward
+Before the removal branch is cut, from an up-to-date `development`:
 
-Four fixes diverged from what the comment asked — say so rather than being
-silently different:
+```powershell
+git checkout development
+git pull
+git tag -a archive/guided-flow -m "Last commit containing the guided flow (tools_guided.py, agent_guided.py). Removed because the FAR research group selected the implicit model, 2026-08-18. See docs/plan-after-implicit-decision.md."
+git push origin archive/guided-flow
+```
 
-- The BigQuery backend was missing **three** gates (coverage, supersede,
-  idempotency), not the one flagged. Fixing it also required correcting the
-  `CRMStore` signatures, since a stale Protocol is what let the mismatch pass
-  type-checking.
-- The resampler flush belongs at the `micActive` transitions; `stopMicrophone`
-  is never called by `app.js`. The stranded samples were also being spliced onto
-  the *next* turn, not merely dropped.
-- `campaign_type` needed fixing inside `mock_db.commit_notes`, not at the
-  `main.py` read site — the field it was told to trust was itself populated from
-  the caller.
-- The guided read-modify-write race cannot occur as described (no `await` in
-  that sequence under asyncio). The in-place state mutation underneath it is
-  real and is fixed.
+Recovering a file later is then one command:
 
-Two deliberate trade-offs:
+```powershell
+git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
+```
 
-- **Rotating `session_id` per dictation gives up the warm socket.** Measured
-  45.6s / 59.2s / 36.6s across three consecutive dictations, so no consistent
-  cold-start penalty in practice.
-- **Committed records now stay in `_STAGED_NOTES`.** Deleting them was what made
-  the idempotent-retry branch unreachable. This makes the session-state eviction
-  story more valuable, not less.
+**Why a tag rather than the alternatives:**
 
-Found during testing, not in the review: the planning panel stayed locked after
-a save; the `?v=` cache-buster never covered `app.js`'s imported modules; and the
-secure-context guard was on the wrong call (`AudioWorklet` fails before
-`getUserMedia`). All three fixed.
+- *A long-lived branch* looks maintained. Someone will eventually merge
+  `development` into it, or wonder why it is behind.
+- *Keeping the files behind a flag* is exactly what `bigquery_db.py` was: dead
+  code that read as a working alternative, shipped with three missing gates, and
+  cost a review cycle to find. Do not repeat it.
+- *A tag* costs nothing, cannot drift, and is unambiguous about being an
+  archive.
 
-### Also still open
+**What is actually worth preserving is not the code.** If guided ever returns it
+will be rewritten against whatever the code looks like then. What must not be
+lost is what building it taught us, and that lives in docs, not in
+`tools_guided.py`:
+
+- **Gap 6 / F5** — asked to make a second tool call when it has nothing left to
+  say, the model ends its turn instead. The record is complete and nothing is
+  saved, with no signal. This is why the last disposition commits inline.
+- **The `allow_skips` deadlock** (observed live 2026-08-11) — guided asks about
+  a topic, the rep says they skipped it, and the first staging call then reports
+  that same topic as uncovered, so the commit 409s and the agent asks again.
+- **The 3-strikes disposition path** — after three failed confirm attempts,
+  record `needs_manual_review` rather than guessing a code.
+- **Two flag shapes for manual review** — guided used a null code plus
+  `needs_manual_review`; implicit uses code 99. Worth knowing if a second flow
+  is ever added.
+
+These are already written down in `change-log.md`, `AIML-2698-gap-findings.md`
+and the comments in `mock_db.py`. Check they survive the deletion — the ones
+living in `tools_guided.py` comments will not.
+
+### After guided is removed
+
+Suggested order, from `stories-after-guided-removal.md`:
+
+1. **Story 6** — decide where CRM records actually live. May delete Story 3.
+2. **Story 1** — consolidate campaign rules, *before* vertical-market context
+   adds a second config dimension.
+3. **Event type interpretation** — Jeremy's first refinement. Small and
+   directly asked for. See `plan-after-implicit-decision.md` §2.
+4. **AIML-2702 + AIML-2733** — eval harness and golden set. These gate the
+   vertical-market work, since "recognises vertical-specific patterns" cannot be
+   checked by the smoke suite.
+5. **Vertical market context** — Jeremy's second refinement.
+6. Stories 2, 4, 5 as capacity allows.
+
+### Still open, not yet ticketed
 
 - **F7** — `_topic_matches` uses substring containment, so an inflected label
   ("Appliance Contract Renewal" vs planned "Appliances") reports the topic
   uncovered and can produce two rows for one discussion.
 - **Invented skip reasons** — the agent still writes "due to time constraints"
-  when the rep gave no reason, despite a prompt rule naming that exact phrase.
-  Needs a server-side fix; prompt text has been measured not to work.
+  when the rep gave no reason. Prompt wording was measured over six runs and
+  made no difference; needs a server-side fix.
+- **Registry content gap** — no code expresses "renewal agreed", "quote
+  created", or "no contact made"; roughly a quarter of real visits. Product
+  decision, in `note-disposition-registry-gap.md`.
+- **Tell Sainitheesh** about the rebase, that his `c6860bd` closed Gap 18, and
+  that our Gap 6 fix touches the guided flow — now moot if guided is deleted,
+  but the rebase note still stands.
+
+### Documents from the review round
+
+| File | What it is |
+|---|---|
+| `PR5-comment-replies.md` | all 28 review comments, matched to their thread, with reply text |
+| `PR5-response.md` | cause → fix → evidence per finding |
+| `PR5-test-plan.md` / `PR5-test-results.md` | how it was tested and what passed |
+| `architecture-notes.md` | why so much surfaced late; what the Live API does vs what we built; what BigQuery is actually for |
+| `plan-after-implicit-decision.md` | the guided-removal story, Jeremy's two requirements, and further candidate stories |
+| `stories-after-guided-removal.md` | the six follow-up stories, re-scoped |
 
 ---
 
@@ -311,15 +353,17 @@ concurrency races (A2, A10) were invisible.
 
 | File | Contents |
 |---|---|
-| `HANDOFF.md` | this file |
-| `PR5-review-findings.md` | 25 review comments, triaged, with the fix for each |
-| `PR5-response.md` | cause → fix → evidence per finding, plus the four root-cause themes |
-| `PR5-comment-replies.md` | **paste-able inline reply text** for all 25 comments, per section |
+| `HANDOFF.md` | this file — start here |
+| `plan-after-implicit-decision.md` | **current work**: remove guided, then Jeremy's two requirements |
+| `stories-after-guided-removal.md` | the six follow-up stories, re-scoped |
+| `architecture-notes.md` | why the review found so much; Live API vs our layers; what BigQuery is for |
+| `PR5-comment-replies.md` | every review comment, matched to its thread, with reply text |
+| `PR5-response.md` | cause → fix → evidence per finding |
+| `PR5-review-findings.md` | the original triage of the 25 comments |
+| `PR5-test-plan.md` / `PR5-test-results.md` | how PR #5 was tested, and what passed |
 | `change-log.md` | every change, why, verification status |
 | `AIML-2698-gap-findings.md` | 18 gaps, repro method, priorities |
-| `AIML-2698-experiments.md` | reproductions, findings F1–F5, the 9-case REST suite |
-| `demo-golden-path.md` | scripted demo scenarios per mode and campaign |
-| `demo-runbook-failure-modes.md` | failure modes & recovery for the demo driver |
+| `AIML-2698-experiments.md` | reproductions, findings F1-F5, the 9-case REST suite |
 | `far-notes-dataset-analysis.md` | real FAR notes: what they break |
 | `status-updates.md` | ticket portfolio + day-by-day log |
 | `note-disposition-registry-gap.md` | draft to the lead re the registry |
