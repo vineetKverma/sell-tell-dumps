@@ -30,8 +30,8 @@ zero conversational runs:
 
 **Lesson:** the model is the *slowest and least reliable* way to test a rule.
 The design already says "all enforcement belongs in the REST layer" — so test
-the REST layer directly. `scripts/test_correction_reliability.py` is the shape:
-16 assertions, ~10 seconds, no model.
+the REST layer directly. `scripts/repro_orphan_restage.py` is the shape: a
+single gate, exercised over plain HTTP, in seconds, with no model.
 
 ### b. One environment: localhost, one tab, one user, never restarted
 

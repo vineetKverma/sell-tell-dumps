@@ -50,7 +50,6 @@ from voice_notes_agent.agent import (  # noqa: E402
     STATE_PLANNED_TOPICS,
     agent,
 )
-from voice_notes_agent.agent_guided import agent_guided  # noqa: E402
 from voice_notes_agent.mock_db import DiscussionTopic  # noqa: E402
 from voice_notes_agent import turn_guard  # noqa: E402
 
@@ -113,15 +112,13 @@ async def _no_store_static(request, call_next):
 # KNOWN LIMITATION: All ADK sessions live in process memory. A server restart drops all
 # sessions. For production, replace this with a DatabaseSessionService (e.g. SQLite, Redis).
 session_service = InMemorySessionService()
-# One Runner per solution so both flows can be compared side by side behind
-# the `agent_mode` toggle: "implicit" (single Mega-Payload extraction, VAD
-# auto-stop) vs. "guided" (explicit turn-by-turn script).
+# One Runner per solution. "implicit" (single Mega-Payload extraction, VAD
+# auto-stop) is the only mode; the guided explicit-script flow was removed in
+# AIML-2751 after the FAR research group chose the implicit model. The dict is
+# kept so `agent_mode` still selects a runner if a second flow is ever added.
 RUNNERS = {
     "implicit": Runner(
         app_name=APP_NAME, agent=agent, session_service=session_service
-    ),
-    "guided": Runner(
-        app_name=APP_NAME, agent=agent_guided, session_service=session_service
     ),
 }
 
@@ -654,9 +651,10 @@ async def websocket_endpoint(
     agent can extract a disposition for each and remind the rep about any it
     never heard.
 
-    ``agent_mode`` selects which solution handles this session: "implicit"
-    (single Mega-Payload extraction, VAD auto-stop -- default) or "guided"
-    (explicit turn-by-turn script). Unknown values fall back to "implicit".
+    ``agent_mode`` selects which solution handles this session. "implicit"
+    (single Mega-Payload extraction, VAD auto-stop) is currently the only one;
+    unknown values fall back to it. It is still recorded on the committed
+    record and in the BigQuery sink.
     """
     await websocket.accept()
     if not _SAFE_ID.match(user_id) or not _SAFE_ID.match(session_id):
@@ -830,10 +828,10 @@ async def websocket_endpoint(
         # called a tool) since the rep's last genuine turn. Native-audio Live
         # models sometimes go silently inert -- no speech, no tool call --
         # after hearing the rep, apparently waiting for "something more"
-        # that never comes (e.g. guided Stage 1 not calling capture_dictation
-        # after a dictation pause with no explicit end phrase). If a turn
-        # closes having done neither, nudge instead of leaving dead air until
-        # the rep happens to say something else to unstick it.
+        # that never comes -- observed when a dictation pause carries no
+        # explicit end phrase, so the model neither speaks nor stages. If a
+        # turn closes having done neither, nudge instead of leaving dead air
+        # until the rep happens to say something else to unstick it.
         responded_since_user_turn = True
         tool_called_since_user_turn = True
         nudge_sent_this_cycle = False
@@ -852,11 +850,6 @@ async def websocket_endpoint(
         # turn_guard.needs_readback_nudge.
         _READBACK_OWED_TOOLS = {
             "stage_visit_notes",
-            "capture_dictation",
-            "choose_post_dictation_action",
-            "set_event_type",
-            "record_topic_disposition",
-            "commit_guided_notes",
         }
 
         async def _send_nudge(text: str) -> None:

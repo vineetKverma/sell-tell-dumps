@@ -54,7 +54,7 @@ helpers so a response that isn't recognised doesn't fall through to "saved".
    silently allowing everything.
 3. `app.js` does not show success for a tool name or status it doesn't
    recognise.
-4. The smoke suite and `scripts/test_correction_reliability.py` pass unchanged.
+4. The smoke suite passes unchanged and `scripts/repro_orphan_restage.py` exits 0.
 
 ---
 
@@ -148,7 +148,7 @@ entry per session and are never emptied: `turn_guard`'s four
    holding an entry for each one.
 3. A commit retry shortly after committing still returns the original
    `crm_record_id`, not a 404.
-4. `scripts/test_correction_reliability.py` passes unchanged.
+4. `scripts/repro_orphan_restage.py` still exits 0 (the supersede gate holds).
 
 ---
 

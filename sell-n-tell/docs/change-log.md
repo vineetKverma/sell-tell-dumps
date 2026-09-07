@@ -465,3 +465,93 @@ Jeremy's 13 product categories. Scripts naming "Contract/agreement renewal" or
 
 **Status:** `verified-live`. Campaign scoping itself is working correctly in
 guided -- this is a registry-content question, not a defect.
+
+---
+
+## Batch N — AIML-2751: remove the guided flow
+
+Ticket: AIML-2751 · Branch: `feature/AIML-2751-remove-guided`
+
+The FAR research group chose the implicit model (Jeremy, 2026-08-18), so guided
+mode is out of scope. `tools_guided.py` and `agent_guided.py` are deleted, along
+with every branch that selected them.
+
+**Recovering the deleted code:**
+
+```
+git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
+git checkout archive/guided-flow -- app/voice_notes_agent/agent_guided.py
+```
+
+The tag `archive/guided-flow` sits on merge commit `9433908` and has both files
+in its tree.
+
+| File | Change | Why |
+|---|---|---|
+| `tools_guided.py`, `agent_guided.py` | deleted | guided mode is out of scope |
+| `main.py` | drop the `agent_guided` import, the `"guided"` runner, the `agent_mode == "guided"` selection, `"commit_guided_notes"` from `_READBACK_OWED_TOOLS`, the guided banner wording | nothing left to select |
+| `mock_db.py` | `allow_skips = previous is not None` — the `or agent_mode == "guided"` term goes | the exemption existed only for guided; see the deadlock lesson below |
+| `mock_db.py` | comments naming `tools_guided.record_topic_disposition` reworded, not dropped | they document real model behaviour that outlives the file |
+| `index.html`, `app.js` | Solution/mode selector, `guidedPayload` and its builders, `commit_guided_notes` / `record_topic_disposition` tool-name conditionals, the guided banner branch; asset version bumped | three tool names collapse to one — this is most of the "hard to extend" review finding |
+| `ws_smoke_test.py` | `GUIDED_SCENARIOS`, `PLANNED_TOPICS_GUIDED`, the `guided` argparse choice, guided docstring examples | no guided runner to drive |
+| `bigquery_sink.py` | **left alone** | it maps `agent_mode` to `implicit_flow_calls` / `guided_flow_calls`; the guided rows are historical comparison data |
+
+`agent_mode` itself stays — as a parameter, on the committed record, and in the
+BigQuery sink. Only the guided *branching* goes.
+
+**Status:** see the AC checklist on the PR.
+
+### Lessons rescued from the deleted files
+
+These were only ever written down inside `tools_guided.py` / `agent_guided.py`.
+A tag preserves the code, but nobody goes looking in an archive tag for a lesson
+they do not know exists.
+
+**Gap 6 / F5 — a model asked to act when it has nothing left to say ends its
+turn instead.** The guided prompt's Stage 5 told the model to call
+`commit_guided_notes` after the last topic was dispositioned. It reliably did
+not: it emitted `OUT_TX text='' finished=True`, closed its turn, and never made
+the call. Every topic answered, the record complete, nothing saved, and no
+signal that the save did not happen. Reproduced on demand via `ws_smoke_test`.
+The fix was structural, not prompt-level — `record_topic_disposition` committed
+inline once the last topic was done and handed the model only the words to say.
+No further rep input was needed at that point, so the extra hop bought nothing.
+
+The trap this created is worth remembering on its own: because the tool
+committed before the model got a turn, any *prompt* change around the commit
+step (e.g. "ask for a spoken confirmation before saving") was **silently
+short-circuited** — the record was already in the CRM. A prompt edit that
+appears to do nothing is the symptom.
+
+**The `allow_skips` deadlock (observed live 2026-08-11).** A `discussed=false`
+entry only counts as coverage once the rep has actually been asked about the
+topic — otherwise the model skips topics on the rep's behalf and bypasses the
+coverage reminder. A re-stage is what proves the rep was asked, so `allow_skips`
+keys off `previous is not None`.
+
+Guided needed an exemption because it never re-staged. It asked about the topic,
+the rep said they skipped it, and the first *and only* staging call then
+reported that same topic as uncovered: the commit 409'd and the agent asked
+again, forever. The exemption was safe there only because a guided
+`discussed=false` could ONLY come from `record_topic_disposition`, which was
+gated by `turn_guard.has_new_reply` — the provenance the re-stage rule infers
+was already guaranteed at the tool level.
+
+Implicit has no such tool-level guarantee, which is why the term is removed
+rather than generalised. Anyone adding a second flow must supply that guarantee
+before asking for the exemption back.
+
+**The 3-strikes disposition path.** After three failed attempts to get the rep
+to confirm a deduced disposition, guided recorded `needs_manual_review` and left
+`disposition_code` null rather than guessing a code the rep never confirmed. The
+same rule applied when a confirmed code was not in the campaign's registry
+subset: flag it, do not record an invalid code.
+
+**Two flag shapes for manual review.** Guided used a null code plus
+`needs_manual_review=True`; implicit uses code 99
+(`DispositionCode.OUTCOME_NOT_COVERED`), and `stage_notes` sets
+`needs_manual_review` itself whenever it sees 99. Both shapes still validate —
+`validate_against_campaign` accepts a null code on a discussed topic when
+`needs_manual_review` is set. With guided gone, implicit's code-99 shape is the
+only one produced, but the null-code branch is still live for plain REST
+callers. Unifying them is what remains of AIML-2705.

@@ -18,12 +18,18 @@
 // (`new URL("./pcm-recorder-processor.js", import.meta.url)` inside
 // audio-recorder.js resolves against the query-stripped path, so the worklet
 // module is unaffected.)
-import { startAudioPlayerWorklet } from "./audio-player.js?v=9";
-import { startAudioRecorderWorklet } from "./audio-recorder.js?v=9";
+import { startAudioPlayerWorklet } from "./audio-player.js?v=10";
+import { startAudioRecorderWorklet } from "./audio-recorder.js?v=10";
 
 // ---------------------------------------------------------------------------
 // Config / constants
 // ---------------------------------------------------------------------------
+
+// The only solution the server offers. The guided explicit-script flow and its
+// picker were removed in AIML-2751. Still sent on the WS URL because the value
+// is recorded on the committed record and routes the BigQuery analytics sink.
+const AGENT_MODE = "implicit";
+
 /**
  * RFC 4122 v4 UUID, with a fallback for non-secure contexts.
  *
@@ -276,7 +282,6 @@ function applyUsageMetadata(usage) {
 // DOM
 // ---------------------------------------------------------------------------
 const campaignSelect = document.getElementById("campaignSelect");
-const agentModeSelect = document.getElementById("agentModeSelect");
 const statusIndicator = document.getElementById("statusIndicator");
 const statusText = document.getElementById("statusText");
 const phaseBanner = document.getElementById("phaseBanner");
@@ -680,14 +685,6 @@ campaignSelect.addEventListener("change", () => {
   resetSession();
   fetchConfig();
 });
-agentModeSelect.addEventListener("change", () => {
-  if (websocket && websocket.readyState === WebSocket.OPEN) websocket.close();
-  // A new session id ensures the backend picks a fresh Runner/agent state.
-  newSessionId();
-  resetSession();
-  logEvent("incoming", `Switched solution to "${agentModeSelect.value}"`, {}, "🔁");
-});
-
 // ---------------------------------------------------------------------------
 // Pre-call planning (selectable planned topics)
 // ---------------------------------------------------------------------------
@@ -766,8 +763,7 @@ function wsUrl() {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const campaign = encodeURIComponent(campaignSelect.value);
   const planned = encodeURIComponent(selectedTopics.join(","));
-  const agentMode = encodeURIComponent(agentModeSelect.value);
-  return `${proto}//${window.location.host}/ws/${userId}/${sessionId}?campaign_type=${campaign}&planned_topics=${planned}&agent_mode=${agentMode}`;
+  return `${proto}//${window.location.host}/ws/${userId}/${sessionId}?campaign_type=${campaign}&planned_topics=${planned}&agent_mode=${AGENT_MODE}`;
 }
 
 function connectWebsocket() {
@@ -780,7 +776,7 @@ function connectWebsocket() {
     logEvent(
       "incoming",
       "WebSocket connected",
-      { userId, sessionId, campaign: campaignSelect.value, agentMode: agentModeSelect.value },
+      { userId, sessionId, campaign: campaignSelect.value, agentMode: AGENT_MODE },
       "🔌",
     );
   };
@@ -906,15 +902,13 @@ function handleAdkEvent(ev) {
     // agent says next is suppressed until a real tool call proves it's done
     // guessing (see the `suppressAgentSpeech` declaration above).
     //
-    // IMPLICIT MODE ONLY: the pre-tool-call guess bug this gate hides is
-    // specific to the implicit flow's stage_visit_notes turn. The guided
-    // flow has many legitimate turns that are pure speech with NO tool call
-    // at all (e.g. "I think you mean X -- is that correct?", the numbered
-    // disposition retry list) -- if armed there, the gate would never lift
-    // (nothing to lift it on) and that speech/caption would be silently
-    // dropped forever, even though it's the real, correct thing to say.
+    // The pre-tool-call guess bug this gate hides is specific to the implicit
+    // flow's stage_visit_notes turn, and implicit is the only flow left. Do
+    // not arm this for a mode whose turns can be pure speech with NO tool
+    // call (e.g. a scripted "I think you mean X -- is that correct?"): the
+    // gate would never lift, because nothing would lift it, and that speech
+    // and its caption would be dropped forever.
     if (
-      agentModeSelect.value === "implicit" &&
       ev.inputTranscription.finished &&
       (ev.inputTranscription.text || "").trim()
     ) {
@@ -998,14 +992,7 @@ function beginAgentResponse() {
   levelFill.style.width = "0%";
   silenceCountdown.textContent = "agent responding…";
   silenceCountdown.classList.remove("counting");
-  // The "extracting the structured record" wording only makes sense for the
-  // implicit flow's post-dictation moment -- the guided flow's very first
-  // agent turn is just the Stage 0 greeting, not an extraction. Use a
-  // mode-neutral label there instead so the banner doesn't imply something
-  // is being extracted when the agent is just talking/asking a question.
-  const text =
-    agentModeSelect.value === "guided" ? "Agent is responding…" : undefined;
-  setPhase("processing", text);
+  setPhase("processing");
 }
 
 function handleFunctionCall(fc) {
@@ -1014,43 +1001,9 @@ function handleFunctionCall(fc) {
     renderPayload(args);
     payloadStatus.textContent = "staged";
     payloadStatus.className = "badge";
-  } else if (fc.name === "commit_visit_notes" || fc.name === "commit_guided_notes") {
+  } else if (fc.name === "commit_visit_notes") {
     payloadStatus.textContent = "committing…";
-  } else if (fc.name === "capture_dictation") {
-    // Guided flow builds its record incrementally across several small tool
-    // calls (no single Mega-Payload). Accumulate the pieces client-side as
-    // they stream by so the Staged CRM Record card can show the full record
-    // once it's revealed at commit -- same reveal moment as before, just
-    // populated now. Purely a display accumulator; doesn't affect the flow.
-    const args = fc.args || {};
-    resetGuidedPayload();
-    guidedPayload.raw_transcript_backup = args.raw_transcript || "";
-    guidedPayload.executive_summary = args.executive_summary || "";
-  } else if (fc.name === "set_event_type") {
-    const args = fc.args || {};
-    if (!guidedPayload) resetGuidedPayload();
-    guidedPayload.event_type = args.event_type || "";
-  } else if (fc.name === "record_topic_disposition") {
-    const args = fc.args || {};
-    if (!guidedPayload) resetGuidedPayload();
-    guidedPayload.topics.push({
-      topic: args.topic,
-      disposition_code: args.disposition_code,
-      executive_summary: args.executive_summary,
-      discussed: args.discussed,
-    });
   }
-}
-
-let guidedPayload = null;
-
-function resetGuidedPayload() {
-  guidedPayload = {
-    event_type: "",
-    executive_summary: "",
-    raw_transcript_backup: "",
-    topics: [],
-  };
 }
 
 function handleFunctionResponse(fr) {
@@ -1062,22 +1015,14 @@ function handleFunctionResponse(fr) {
     }
     // The actual phase switch to "confirm" happens on turnComplete (after the
     // model has finished speaking the confirmation aloud).
-  } else if (
-    fr.name === "commit_visit_notes" ||
-    fr.name === "commit_guided_notes" ||
-    fr.name === "record_topic_disposition"
-  ) {
-
+  } else if (fr.name === "commit_visit_notes") {
     // A commit can be refused for several reasons, each with its own status:
     // turn_guard ("error"), planned-topic coverage ("blocked"), campaign-rule
     // violation ("rejected") -- and more may be added. Matching status strings
     // means a new refusal silently falls through to the saved state and the UI
     // claims "Saved to CRM" for a record that was never written. Test for the
     // only thing that actually proves a CRM write instead: a record id.
-    // record_topic_disposition returns a commit result ONLY on the final
-    // topic (it commits directly -- see tools_guided). Its mid-flow
-    // responses are not commit attempts and must not be read as refusals.
-    if (resp.status === "next_topic" || resp.error === "no_reply_heard") return;
+    if (resp.error === "no_reply_heard") return;
 
     if (!resp.crm_record_id) {
       const why = resp.error || resp.status || "unknown";
@@ -1094,19 +1039,6 @@ function handleFunctionResponse(fr) {
       payloadStatus.className = "badge";
       return;
     }
-    // Guided flow has no single mega-payload staging step -- render the
-    // record we accumulated client-side from its incremental tool calls
-    // (capture_dictation / set_event_type / record_topic_disposition) at
-    // the same moment the card is revealed, otherwise it stays blank.
-    //
-    // Deliberately no tool-name check: the commit result now arrives under
-    // whichever tool performed it, and the last record_topic_disposition
-    // commits directly (see tools_guided). guidedPayload is only ever set in
-    // guided mode, so its presence is the reliable signal.
-    if (guidedPayload) {
-      renderPayload(guidedPayload);
-    }
-
     // Setting committed here also matters for the mic: otherwise
     // turnComplete's fallback branch would just re-arm it forever.
 
@@ -1239,18 +1171,16 @@ function finishSession() {
 
   // Retire this dictation's session id now that the record is committed.
   //
-  // Server-side guided state is keyed by session id, and the commit result in
+  // Server-side session state is keyed by session id, and the commit result in
   // particular is sticky: reusing the id for the rep's next visit of the shift
   // makes the next commit replay THIS visit's result, so the agent says "saved"
   // and reads back this CRM id while nothing for the new visit was staged.
   // A fresh id makes that state empty by construction.
   //
-  // The campaign-change, mode-change and reconnect paths already do exactly
-  // this. Cost: the next dictation pays Vertex's cold-start handshake again,
-  // which is why the socket was being held open between dictations -- worth it
-  // against silently losing a visit. (tools_guided.capture_dictation also
-  // clears the state server-side, so the guarantee does not rest on this
-  // client alone.)
+  // The campaign-change and reconnect paths already do exactly this. Cost: the
+  // next dictation pays Vertex's cold-start handshake again, which is why the
+  // socket was being held open between dictations -- worth it against silently
+  // losing a visit.
   if (websocket && websocket.readyState === WebSocket.OPEN) {
     closeWebsocketIntentionally();
   }
@@ -1580,7 +1510,6 @@ function resetSession() {
   stopMicStreaming();
   committed = false;
   suppressAgentSpeech = false;
-  guidedPayload = null;
   stopSpeechRecognition();
   payloadCard.classList.add("hidden");
   saveButton.disabled = true;

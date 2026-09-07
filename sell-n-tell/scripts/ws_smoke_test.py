@@ -1,15 +1,14 @@
 """Manual dev smoke-test client for the voice-notes WebSocket, text-mode.
 
 Drives a scripted conversation through /ws/{user}/{session} using TEXT turns
-(bypassing the mic/audio pipeline entirely) so both the implicit and guided
-agents can be exercised quickly from the terminal. The native-audio model
-still replies with audio, but `output_audio_transcription` is enabled server
-side, so we can read back what it *said* as text.
+(bypassing the mic/audio pipeline entirely) so the implicit agent can be
+exercised quickly from the terminal. The native-audio model still replies with
+audio, but `output_audio_transcription` is enabled server side, so we can read
+back what it *said* as text.
 
 Usage:
     uv run python scripts/ws_smoke_test.py implicit
-    uv run python scripts/ws_smoke_test.py guided
-    uv run python scripts/ws_smoke_test.py guided --scenario missing_topic
+    uv run python scripts/ws_smoke_test.py implicit --scenario missing_topic
 
 Requires the app to already be running locally (uvicorn app.main:app).
 """
@@ -86,62 +85,6 @@ IMPLICIT_SCENARIOS: dict[str, list[str]] = {
     ],
 }
 
-# These scenarios end at the rep's last real utterance -- no trailing nudge.
-#
-# They used to carry a trailing "Okay." turn, because after the final topic was
-# dispositioned the model reliably did NOT act on "call commit_guided_notes
-# now": it emitted an empty output turn, closed the turn, and waited. In a real
-# session that is dead air at the worst moment -- every question answered, the
-# record complete, and nothing saved.
-#
-# Fixed 2026-08-11: record_topic_disposition now commits directly at
-# all_topics_done rather than asking for a second tool call. The nudge turns
-# were removed with it, deliberately -- keeping them would let the stall come
-# back without any scenario failing.
-GUIDED_SCENARIOS: dict[str, list[str]] = {
-    "clean_save": [
-        "Yes let's begin.",
-        "I met with the customer today, we talked about pricing and a "
-        "contract renewal. End notes.",
-        "Save.",
-        "On-site visit.",
-        "They said it was too expensive, pricing was a big concern.",
-        "Yes that's right.",
-        "They already placed an order for the renewal.",
-        "Yes correct.",
-    ],
-    "playback_then_save": [
-        "Start.",
-        "Quick call about pricing concerns. End notes.",
-        "Play back.",
-        "Save.",
-        "Phone call.",
-        "Too expensive for their budget.",
-        "Yes.",
-    ],
-    "rerecord": [
-        "Yes.",
-        "Talked about pricing. Done.",
-        "Re-record.",
-        "Actually, we discussed a contract renewal instead. That's it.",
-        "Save.",
-        "Meeting.",
-        "They placed the order already.",
-        "Yes.",
-    ],
-    "ambiguous_disposition": [
-        "Go ahead.",
-        "We covered pricing, it was a weird conversation, hard to say "
-        "where it landed. End notes.",
-        "Save.",
-        "Meeting.",
-        "It was complicated, kind of all over the place, not sure.",
-        "No, that's not it.",
-        "Still not quite right, I don't know honestly.",
-        "I really don't know, let's just move on.",
-    ],
-}
-
 PLANNED_TOPICS_IMPLICIT = {
     "clean_save": "Pricing discussion",
     "correction": "Pricing discussion",
@@ -154,14 +97,6 @@ PLANNED_TOPICS_IMPLICIT = {
     "missing_topic": "Pricing discussion,Contract renewal",
     "multi_topic": "Pricing discussion,Contract renewal",
 }
-
-PLANNED_TOPICS_GUIDED = {
-    "clean_save": "Pricing discussion,Contract renewal",
-    "playback_then_save": "Pricing discussion",
-    "rerecord": "Contract renewal",
-    "ambiguous_disposition": "Pricing discussion",
-}
-
 
 def _summarize_event(evt: dict) -> str | None:
     bits = []
@@ -192,12 +127,11 @@ def _summarize_event(evt: dict) -> str | None:
 # How long the agent must stay silent AFTER a turn_complete before we accept
 # that it has finished and send the next scripted turn.
 QUIET_PERIOD_S = 3.0
-# After the LAST scripted turn the agent often still owes trailing work -- e.g.
-# guided's record_topic_disposition returns "all topics done, call
-# commit_guided_notes now", which needs another beat (and may need main.py's
-# auto-continue nudge to land). Closing the socket at the normal quiet period
-# cuts the commit off and the scenario ends with no CRM record for reasons that
-# have nothing to do with the code under test.
+# After the LAST scripted turn the agent often still owes trailing work -- the
+# commit call after the rep approves the readback, which needs another beat (and
+# may need main.py's auto-continue nudge to land). Closing the socket at the
+# normal quiet period cuts the commit off and the scenario ends with no CRM
+# record for reasons that have nothing to do with the code under test.
 FINAL_QUIET_PERIOD_S = 15.0
 # Absolute cap on how long one scripted turn may take.
 TURN_TIMEOUT_S = 60.0
@@ -284,7 +218,11 @@ async def run_scenario(
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("agent_mode", choices=["implicit", "guided"])
+    # Positional and optional: "implicit" is the only mode, but the existing
+    # invocation `ws_smoke_test.py implicit` stays valid.
+    parser.add_argument(
+        "agent_mode", nargs="?", default="implicit", choices=["implicit"]
+    )
     parser.add_argument("--scenario", default=None, help="run just one scenario")
     parser.add_argument(
         "--raw", action="store_true", help="print full raw event JSON"
@@ -293,10 +231,7 @@ async def main() -> None:
     global RAW_MODE
     RAW_MODE = args.raw
 
-    if args.agent_mode == "implicit":
-        scenarios, planned_lookup = IMPLICIT_SCENARIOS, PLANNED_TOPICS_IMPLICIT
-    else:
-        scenarios, planned_lookup = GUIDED_SCENARIOS, PLANNED_TOPICS_GUIDED
+    scenarios, planned_lookup = IMPLICIT_SCENARIOS, PLANNED_TOPICS_IMPLICIT
     names = [args.scenario] if args.scenario else list(scenarios.keys())
 
     for name in names:

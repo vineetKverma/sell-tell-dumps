@@ -5,6 +5,10 @@ Writes one row per committed call to a table keyed by ``agent_mode``
 ``VOICE_NOTES_BQ_TABLE_GUIDED``) so the two flows can be compared side by
 side for the demo.
 
+The guided flow itself was removed in AIML-2751, so nothing writes to the
+guided table any more. The mapping stays: the rows already there are the
+historical comparison data the mode decision was made on.
+
 This must NEVER take down a live call or the commit REST response: every
 failure path (missing config, unreachable BigQuery, bad schema) is caught and
 logged, never raised. Table creation is manual (BigQuery console); this

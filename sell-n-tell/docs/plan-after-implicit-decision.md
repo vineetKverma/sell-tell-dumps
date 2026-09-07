@@ -223,7 +223,7 @@ doing them first means consolidating code that is about to be deleted.
 1. No file references `tools_guided` or `agent_guided`.
 2. `allow_skips` has no `agent_mode` term.
 3. The implicit smoke suite passes with the same scenario count.
-4. `scripts/test_correction_reliability.py` passes unchanged.
+4. `scripts/repro_orphan_restage.py` still exits 0 (the supersede gate holds).
 5. A stage/commit cycle works end to end in the browser.
 
 ### Note
@@ -242,8 +242,8 @@ already open in the handoff. Rough sizing only; each needs a proper pass.
 ### a. Extend the direct REST test suite — **3 pts** *(CI deferred — still in development)*
 
 Every gate defect in the review was found by calling the REST layer directly, in
-seconds, while ten conversational scenarios passed. `scripts/test_correction_reliability.py`
-is the shape. Extend it to coverage, campaign validation and event-type mapping,
+seconds, while ten conversational scenarios passed. `scripts/repro_orphan_restage.py`
+is the shape. Extend that idea to coverage, campaign validation and event-type mapping,
 and run it by hand before pushing. Wiring it into CI can wait until there is a
 pipeline to wire it into.
 

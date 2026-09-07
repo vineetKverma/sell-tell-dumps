@@ -102,8 +102,9 @@ class DiscussionTopic(BaseModel):
     needs_manual_review: bool = Field(
         default=False,
         description=(
-            "Guided flow only: true if 3 disposition-confirm attempts failed "
-            "and the code had to be left unresolved for a human to fix."
+            "True if the disposition could not be resolved and the code had "
+            "to be left for a human to fix. Set automatically whenever a "
+            "topic carries code 99 (OUTCOME_NOT_COVERED)."
         ),
     )
 
@@ -505,9 +506,14 @@ def validate_against_campaign(
         label = (topic.get("topic") or f"topic #{idx + 1}").strip()
         code = topic.get("disposition_code")
         # Two cases legitimately carry no code: a planned topic the rep never
-        # got to, and a discussed topic the guided flow could not resolve after
-        # its confirm attempts (flagged for a human instead of guessing -- see
-        # tools_guided.record_topic_disposition). Anything else is a gap.
+        # got to, and a discussed topic the caller could not resolve, flagged
+        # for a human instead of guessing a code the rep never confirmed.
+        # Anything else is a gap.
+        #
+        # The agent expresses "unresolved" as code 99 (OUTCOME_NOT_COVERED),
+        # which stage_notes turns into needs_manual_review. The null-code shape
+        # below is the other half of the same flag and is still reachable from
+        # plain REST callers; unifying the two is what remains of AIML-2705.
         if code is None:
             if topic.get("discussed", True) and not topic.get(
                 "needs_manual_review", False
@@ -705,7 +711,7 @@ def stage_notes(
 
     # A topic the agent could not map to a real outcome is by definition one a
     # human has to look at. Set the flag here rather than trusting each caller
-    # to pair the code with it, so implicit, guided and plain REST all agree.
+    # to pair the code with it, so the agent and plain REST callers agree.
     for topic in payload.get("topics") or []:
         if topic.get("disposition_code") == int(
             DispositionCode.OUTCOME_NOT_COVERED
@@ -732,15 +738,17 @@ def stage_notes(
     # On the first staging call the model can otherwise skip topics on the
     # rep's behalf and bypass the coverage reminder entirely.
     #
-    # Guided is exempt. There, a discussed=false entry can ONLY be produced by
-    # record_topic_disposition, which is gated by turn_guard.has_new_reply --
-    # so the rep provably answered the outcome question for that topic before
-    # the skip was recorded. The provenance the re-stage rule infers is already
-    # guaranteed at the tool level. Without this exemption guided deadlocks:
-    # it asks about the topic, the rep says they skipped it, and the first (and
-    # only) staging call then reports that same topic as uncovered, so the
-    # commit 409s and the agent asks again. Observed live 2026-08-11.
-    allow_skips = previous is not None or agent_mode == "guided"
+    # This used to carry an exemption for the guided flow, removed with that
+    # flow in AIML-2751. It was safe there only because a guided discussed=false
+    # entry could ONLY come from a tool gated by turn_guard.has_new_reply, so
+    # the rep provably answered before the skip was recorded -- the provenance
+    # the re-stage rule infers was guaranteed at the tool level. Nothing here
+    # has that guarantee, so do not reinstate the exemption for a new mode
+    # without supplying it: without the re-stage rule the model can skip on the
+    # rep's behalf, and *with* an unearned exemption the flow deadlocks -- the
+    # first and only staging call reports the skipped topic as uncovered, the
+    # commit 409s, and the agent asks again (observed live 2026-08-11).
+    allow_skips = previous is not None
 
     if previous:
         confirmation_text = build_change_confirmation(

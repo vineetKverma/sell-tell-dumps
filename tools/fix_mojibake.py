@@ -27,6 +27,9 @@ import sys
 _PASSTHROUGH = {0x81, 0x8D, 0x8F, 0x90, 0x9D}
 
 TARGETS = [
+    # Not just the frontend: .gitignore was mojibaked by the same import bug and
+    # went unnoticed because it wasn't listed here.
+    ".gitignore",
     "app/static/index.html",
     "app/static/js/app.js",
     "app/static/js/audio-recorder.js",
