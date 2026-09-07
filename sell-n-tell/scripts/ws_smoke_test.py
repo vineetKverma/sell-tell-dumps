@@ -1,14 +1,23 @@
 """Manual dev smoke-test client for the voice-notes WebSocket, text-mode.
 
 Drives a scripted conversation through /ws/{user}/{session} using TEXT turns
-(bypassing the mic/audio pipeline entirely) so the implicit agent can be
-exercised quickly from the terminal. The native-audio model still replies with
-audio, but `output_audio_transcription` is enabled server side, so we can read
-back what it *said* as text.
+(bypassing the mic/audio pipeline entirely). The native-audio model still
+replies with audio, but `output_audio_transcription` is enabled server side,
+so we can read back what it *said* as text.
+
+Per the contract-simplification pass: the guided flow is retired (no more
+`agent_mode` argument -- there is only one flow now).
+
+`campaign_type` IS sent on the connection query string (business decision:
+keep it flowing end-to-end for forward-compatibility) but is NOT processed
+by the backend -- see main.py's websocket_endpoint docstring. It has no
+effect on this test's scenarios or assertions; it's included only so the
+smoke test continues to exercise the full, real connection contract the
+frontend uses.
 
 Usage:
-    uv run python scripts/ws_smoke_test.py implicit
-    uv run python scripts/ws_smoke_test.py implicit --scenario missing_topic
+    uv run python scripts/ws_smoke_test.py
+    uv run python scripts/ws_smoke_test.py --scenario missing_topic
 
 Requires the app to already be running locally (uvicorn app.main:app).
 """
@@ -27,11 +36,18 @@ import websockets
 BASE_WS_URL = "ws://localhost:8000/ws"
 RAW_MODE = False
 
+# campaign_type is sent but inert on the backend (see module docstring).
+# Kept as a plain constant, not a CLI flag, since there is currently nothing
+# server-side to vary it against -- add a --campaign-type flag if/when
+# notes_workflow.validate_payload() starts reading it.
+DEFAULT_CAMPAIGN_TYPE = "standard_sales"
+
 # ---------------------------------------------------------------------------
 # Scripted turns per scenario. Each turn is one simulated "rep speaks" event.
+# (Guided-flow scenarios removed -- that flow is retired.)
 # ---------------------------------------------------------------------------
 
-IMPLICIT_SCENARIOS: dict[str, list[str]] = {
+SCENARIOS: dict[str, list[str]] = {
     "clean_save": [
         "I met with the customer on site today. We discussed pricing and "
         "they said it was too expensive for their budget right now. End of "
@@ -85,7 +101,7 @@ IMPLICIT_SCENARIOS: dict[str, list[str]] = {
     ],
 }
 
-PLANNED_TOPICS_IMPLICIT = {
+PLANNED_TOPICS: dict[str, str] = {
     "clean_save": "Pricing discussion",
     "correction": "Pricing discussion",
     "correction_summary": "Pricing discussion",
@@ -97,6 +113,7 @@ PLANNED_TOPICS_IMPLICIT = {
     "missing_topic": "Pricing discussion,Contract renewal",
     "multi_topic": "Pricing discussion,Contract renewal",
 }
+
 
 def _summarize_event(evt: dict) -> str | None:
     bits = []
@@ -127,11 +144,12 @@ def _summarize_event(evt: dict) -> str | None:
 # How long the agent must stay silent AFTER a turn_complete before we accept
 # that it has finished and send the next scripted turn.
 QUIET_PERIOD_S = 3.0
-# After the LAST scripted turn the agent often still owes trailing work -- the
-# commit call after the rep approves the readback, which needs another beat (and
-# may need main.py's auto-continue nudge to land). Closing the socket at the
-# normal quiet period cuts the commit off and the scenario ends with no CRM
-# record for reasons that have nothing to do with the code under test.
+# After the LAST scripted turn the agent often still owes trailing work --
+# e.g. speaking the closing_statement after commit_visit_notes returns, which
+# needs another beat (and may need main.py's auto-continue nudge to land).
+# Closing the socket at the normal quiet period cuts that off and the
+# scenario ends with no commit for reasons that have nothing to do with the
+# code under test.
 FINAL_QUIET_PERIOD_S = 15.0
 # Absolute cap on how long one scripted turn may take.
 TURN_TIMEOUT_S = 60.0
@@ -185,20 +203,22 @@ async def _drain_until_agent_settles(
             saw_turn_complete = True
 
 
-async def run_scenario(
-    agent_mode: str, scenario: str, turns: list[str], planned_topics: str
-) -> None:
+async def run_scenario(scenario: str, turns: list[str], planned_topics: str) -> None:
     user_id = "smoke_tester"
-    session_id = f"smoke-{agent_mode}-{scenario}-{uuid.uuid4().hex[:6]}"
+    session_id = f"smoke-{scenario}-{uuid.uuid4().hex[:6]}"
+    # campaign_type is sent per the business decision to keep it flowing
+    # end-to-end, but the backend stores it as inert session-state metadata
+    # only -- see main.py's websocket_endpoint docstring. It does not affect
+    # any scenario's assertions here. agent_mode is not sent: guided flow is
+    # retired and there is only one flow now.
     query = urllib.parse.urlencode(
         {
-            "campaign_type": "standard_sales",
             "planned_topics": planned_topics,
-            "agent_mode": agent_mode,
+            "campaign_type": DEFAULT_CAMPAIGN_TYPE,
         }
     )
     url = f"{BASE_WS_URL}/{user_id}/{session_id}?{query}"
-    print(f"\n=== {agent_mode} / {scenario} ===")
+    print(f"\n=== {scenario} ===")
     print(f"connecting: {url}")
 
     async with websockets.connect(url, max_size=None) as ws:
@@ -218,11 +238,6 @@ async def run_scenario(
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    # Positional and optional: "implicit" is the only mode, but the existing
-    # invocation `ws_smoke_test.py implicit` stays valid.
-    parser.add_argument(
-        "agent_mode", nargs="?", default="implicit", choices=["implicit"]
-    )
     parser.add_argument("--scenario", default=None, help="run just one scenario")
     parser.add_argument(
         "--raw", action="store_true", help="print full raw event JSON"
@@ -231,13 +246,12 @@ async def main() -> None:
     global RAW_MODE
     RAW_MODE = args.raw
 
-    scenarios, planned_lookup = IMPLICIT_SCENARIOS, PLANNED_TOPICS_IMPLICIT
-    names = [args.scenario] if args.scenario else list(scenarios.keys())
+    names = [args.scenario] if args.scenario else list(SCENARIOS.keys())
 
     for name in names:
-        turns = scenarios[name]
-        planned = planned_lookup.get(name, "")
-        await run_scenario(args.agent_mode, name, turns, planned)
+        turns = SCENARIOS[name]
+        planned = PLANNED_TOPICS.get(name, "")
+        await run_scenario(name, turns, planned)
 
 
 if __name__ == "__main__":

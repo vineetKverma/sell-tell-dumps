@@ -10,7 +10,7 @@ verbal approval.
 
 ```text
 [User speaks notes] -> [VAD silence stop-trigger] -> [single Mega-Payload tool call]
-   -> [spoken confirmation] -> ["Save" / "Change â€¦"] -> [commit to CRM] -> [end]
+   -> [spoken confirmation] -> ["Save" / "Change …"] -> [commit to CRM] -> [end]
 ```
 
 ## How the spec maps to the code
@@ -18,10 +18,10 @@ verbal approval.
 | Spec step | Implementation |
 |-----------|----------------|
 | **1. Dynamic session init & open voice capture** | `before_agent_callback` in `app/voice_notes_agent/agent.py` fetches the campaign-specific schema/instructions from `GET /api/v1/config/agent-schema` and injects them into the system prompt. No trigger words required. |
-| **2. VAD stop-trigger (silence)** | Audio streams continuously and the model's automatic VAD (`RealtimeInputConfig.automatic_activity_detection.silence_duration_ms` in `app/main.py`) finalizes each spoken turn after the silence threshold. The browser shows a live silence countdown and gates the mic while the agent speaks, then re-opens it for the rep's response. **Note:** the spec asks for 2.5â€“3.0s, but the Live API caps `silence_duration_ms` at **2000ms**, so the value is clamped to that maximum. |
-| **3. Single-function extraction (temp 0.1 / top_p 0.8)** | `generate_content_config` on the agent enforces determinism; the prompt forces a single `stage_visit_notes` "Mega-Payload" tool call before any freeform text. The payload carries an overall `event_type` plus a `topics` list â€” one entry per discussion topic, **each with its own `disposition_code` and `executive_summary`**. |
+| **2. VAD stop-trigger (silence)** | Audio streams continuously and the model's automatic VAD (`RealtimeInputConfig.automatic_activity_detection.silence_duration_ms` in `app/main.py`) finalizes each spoken turn after the silence threshold. The browser shows a live silence countdown and gates the mic while the agent speaks, then re-opens it for the rep's response. **Note:** the spec asks for 2.5–3.0s, but the Live API caps `silence_duration_ms` at **2000ms**, so the value is clamped to that maximum. |
+| **3. Single-function extraction (temp 0.1 / top_p 0.8)** | `generate_content_config` on the agent enforces determinism; the prompt forces a single `stage_visit_notes` "Mega-Payload" tool call before any freeform text. The payload carries an overall `event_type` plus a `topics` list — one entry per discussion topic, **each with its own `disposition_code` and `executive_summary`**. |
 | **4. Implicit confirmation + generative playback** | The `stage_visit_notes` tool POSTs to `/api/v1/notes/stage`, which builds the confirmation string; the native-audio model speaks it back (AUDIO modality). |
-| **5. Branching (save vs. correction)** | "Save" â†’ `commit_visit_notes` â†’ `POST /api/v1/notes/commit`. A correction â†’ re-call `stage_visit_notes` with the updated payload and re-confirm. |
+| **5. Branching (save vs. correction)** | "Save" → `commit_visit_notes` → `POST /api/v1/notes/commit`. A correction → re-call `stage_visit_notes` with the updated payload and re-confirm. |
 
 The ADK tools call the REST API over HTTP (true to the spec); the REST API is
 backed by an in-memory mock config DB + CRM store in
@@ -29,10 +29,10 @@ backed by an in-memory mock config DB + CRM store in
 
 ## API spec endpoints
 
-- `GET  /api/v1/config/agent-schema?campaign_type=...` â€” dynamic agent config
-- `POST /api/v1/notes/stage` â€” stage extracted `StagedVisitPayload`
-- `POST /api/v1/notes/commit` â€” commit a staged payload to the CRM
-- `GET  /api/v1/notes/committed` â€” (debug) inspect committed records
+- `GET  /api/v1/config/agent-schema?campaign_type=...` — dynamic agent config
+- `POST /api/v1/notes/stage` — stage extracted `StagedVisitPayload`
+- `POST /api/v1/notes/commit` — commit a staged payload to the CRM
+- `GET  /api/v1/notes/committed` — (debug) inspect committed records
 
 Try a different `campaign_type` (`standard_sales`, `enterprise_field`,
 `renewals`) to see different allowed event types and disposition registries

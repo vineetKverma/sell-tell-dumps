@@ -1,58 +1,51 @@
 """ADK function-call tools for the Voice Notes Logger agent.
 
-True to the API spec, these tools do NOT touch the data store directly: they
-issue real HTTP calls to the FastAPI ``/api/v1`` endpoints (the same endpoints
-an external client would use). The base URL is configurable via the
-``VOICE_NOTES_API_BASE`` environment variable.
+These tools call the notes workflow (notes_workflow.py) directly, in-process
+-- there is no HTTP hop. Previously they issued real HTTP calls to this same
+FastAPI process's own /api/v1 endpoints (a self-loopback); that pattern, and
+the endpoints it called, existed only to serve the guided flow and the
+headless /api/v1/notes/process+/confirm API, both retired. Removing the
+loopback also removes the one network hop that could time out mid-commit --
+see the idempotent-retry comment in notes_workflow.commit_notes for what
+that used to protect against and why the guard stays anyway (a retry can
+still happen at the model level).
 
 Two tools cover the whole flow:
 
 * ``stage_visit_notes`` -- the single "Mega-Payload" function call the model
-  emits after the user finishes dictating (Step 3/4). It POSTs to
-  ``/api/v1/notes/stage`` and returns the natural-language confirmation string.
-  Re-calling it with corrected fields handles the correction branch (Step 5B).
-* ``commit_visit_notes`` -- POSTs to ``/api/v1/notes/commit`` once the user
-  gives positive confirmation (Step 5A), returning the closing statement.
+  emits after the user finishes dictating. Stages the payload and returns the
+  natural-language confirmation string. Re-calling it with corrected fields
+  handles the correction branch.
+* ``commit_visit_notes`` -- commits the staged payload once the user gives
+  positive confirmation, returning the full Output2 payload (see
+  schemas.CommitResult) plus the closing statement.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 
-import httpx
 from google.adk.tools import ToolContext
 
-from .mock_db import DiscussionTopic, VALID_DISPOSITION_CODES
-from . import turn_guard
+from . import notes_workflow, turn_guard
+from .schemas import DiscussionTopic
 
 logger = logging.getLogger(__name__)
 
-_API_BASE = os.getenv("VOICE_NOTES_API_BASE", "http://localhost:8000")
-_HTTP_TIMEOUT = 15.0
-
-# Session-state key holding the CRM session_id returned by the staging endpoint.
+# Session-state key holding the notes_workflow session_id for the currently
+# staged record. This is the SAME id as tool_context.session.id: the ADK
+# WebSocket session id is passed straight through as the staging session_id
+# (see stage_visit_notes below), and app.js's finishSession() ->
+# newSessionId() guarantees a fresh one per dictation (AIML-2703: one
+# session = one commit) -- so there is nothing else to mint or track here.
 _STAGED_SESSION_KEY = "crm_staged_session_id"
 _LAST_CONFIRMATION_KEY = "crm_last_confirmation_text"
-# Written by agent.load_campaign_config (kept as a literal to avoid a circular
-# import back into the agent module).
-_AGENT_CONFIG_KEY = "agent_config"
-_CAMPAIGN_TYPE_KEY = "campaign_type"
 
-
-def _allowed_codes(tool_context: ToolContext) -> set[int]:
-    """Disposition codes legal for THIS session's campaign.
-
-    Falls back to the full registry only if the dynamic config never loaded --
-    validating against the global list would defeat the purpose, but a failed
-    config fetch must not block the rep entirely (the REST layer re-validates
-    campaign rules regardless, so nothing illegal can be staged).
-    """
-    config = tool_context.state.get(_AGENT_CONFIG_KEY) or {}
-    registry = config.get("disposition_registry") or []
-    codes = {int(rule["code"]) for rule in registry if "code" in rule}
-    return codes or set(VALID_DISPOSITION_CODES)
+# The disposition registry is universal now (no campaign_type, no per-session
+# fetch) -- codes legal for a topic are just every code notes_workflow knows
+# about, always.
+_VALID_DISPOSITION_CODES = set(notes_workflow.VALID_DISPOSITION_CODES)
 
 
 def _normalize_topics(
@@ -94,8 +87,8 @@ def _normalize_topics(
         except (ValueError, TypeError):
             code = None
         # Never forward a code that isn't in the disposition registry -- the
-        # API schema would reject it. Drop it and let the discussed-topic
-        # check below ask the model to re-map.
+        # workflow's validation would reject it. Drop it and let the
+        # discussed-topic check below ask the model to re-map.
         if code is not None and code not in valid_codes:
             code = None
 
@@ -174,7 +167,7 @@ async def stage_visit_notes(
               (or the rep's reason if it was planned but not discussed).
               If no business-outcome code describes what actually happened,
               use code 99 ("Outcome not covered - needs manual review"), which
-              is present in every campaign registry. Never pick a nearby code
+              is always present in the registry. Never pick a nearby code
               that states something false -- a record flagged 99 gets corrected
               by a human, a confidently wrong one never gets noticed.
             - needs_manual_review: set automatically when disposition_code is
@@ -190,8 +183,7 @@ async def stage_visit_notes(
         A dict containing ``confirmation_text`` -- the exact sentence to read
         back to the user -- and ``session_id``.
     """
-    valid_codes = _allowed_codes(tool_context)
-    topic_list, problems = _normalize_topics(topics, valid_codes)
+    topic_list, problems = _normalize_topics(topics, _VALID_DISPOSITION_CODES)
     if problems:
         # Don't stage an incomplete record (and don't raise -- that would kill
         # the live stream). Ask the model to re-call with full topic objects.
@@ -205,77 +197,45 @@ async def stage_visit_notes(
                 + ". Call stage_visit_notes again. Each entry in `topics` MUST "
                 "be an object with three fields: `topic` (short subject), "
                 "`disposition_code` (one of these integers, and no other: "
-                + ", ".join(str(c) for c in sorted(valid_codes))
+                + ", ".join(str(c) for c in sorted(_VALID_DISPOSITION_CODES))
                 + "), and `executive_summary` (1-2 sentences). Do not "
                 "pass topics as plain strings."
             ),
         }
 
-    # Planned topics were seeded into session state at connect time. They drive
-    # the coverage check (which planned topics still need an outcome).
+    # Planned topics were seeded into session state at connect time. They
+    # drive the coverage check (which planned topics still need an outcome).
     planned_topics = tool_context.state.get("planned_topics") or []
 
     payload = {
-        "caller_session_id": tool_context.session.id,
         "event_type": event_type,
         "executive_summary": executive_summary,
         "raw_transcript_backup": raw_transcript_backup,
         "topics": topic_list,
-        "planned_topics": list(planned_topics),
-        # Without this the staging endpoint cannot tell which campaign's rules
-        # to enforce, and falls back to allowing every event type / code.
-        "campaign_type": tool_context.state.get(_CAMPAIGN_TYPE_KEY)
-        or "standard_sales",
     }
-    logger.info("stage_visit_notes tool invoked: %s", payload)
 
-    # If notes were already staged this session, this call is a correction:
-    # pass the prior session id so the backend reads back only the changes.
-    previous_session_id = tool_context.state.get(_STAGED_SESSION_KEY)
-    params = (
-        {"previous_session_id": previous_session_id}
-        if previous_session_id
-        else None
-    )
-
-    try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_API_BASE}/api/v1/notes/stage", json=payload, params=params
-            )
-    except httpx.HTTPError as exc:
-        logger.error("Staging request failed: %s", exc)
-        return {
-            "status": "error",
-            "error": "Could not reach the staging endpoint.",
-            "instruction_for_model": (
-                "Tell the user there was a temporary problem saving and to try "
-                "again in a moment."
-            ),
-            "ui_event": "tool_error",
-        }
-
-    if resp.status_code == 422:
-        # Campaign-rule violation (illegal event type or disposition code).
-        # Never silently accept it and never guess a replacement -- hand the
-        # model the legal values and make it re-map or ask the rep.
-        try:
-            detail = resp.json()
-        except ValueError:
-            detail = {"detail": resp.text[:300]}
-        problems = detail.get("problems") or [detail.get("detail", "")]
-        allowed_codes = detail.get("allowed_disposition_codes") or []
-        allowed_events = detail.get("allowed_event_types") or []
-        logger.warning("Staging rejected by campaign rules: %s", problems)
+    # Validate against the universal event/disposition rules before staging.
+    # Previously this was the REST layer's job (a 422 from
+    # /api/v1/notes/stage); calling it directly here is the same check,
+    # just without a network hop to carry the rejection back over.
+    validation_problems, config = notes_workflow.validate_payload(payload)
+    if validation_problems:
+        allowed_codes = [
+            rule["code"] for rule in config["disposition_registry"]
+        ]
+        allowed_events = config["allowed_event_types"]
+        logger.warning(
+            "Staging rejected by validation: %s", validation_problems
+        )
         return {
             "status": "rejected",
-            "problems": problems,
+            "problems": validation_problems,
             "instruction_for_model": (
                 "The record was REJECTED and nothing was saved: "
-                + "; ".join(p for p in problems if p)
-                + ". This campaign only allows event types ["
+                + "; ".join(p for p in validation_problems if p)
+                + ". Only these event types are allowed: ["
                 + ", ".join(allowed_events)
-                + "] and disposition codes ["
+                + "] and only these disposition codes: ["
                 + ", ".join(str(c) for c in allowed_codes)
                 + "]. Re-map to the closest ALLOWED value and call "
                 "stage_visit_notes again. Never invent a code. If no allowed "
@@ -284,20 +244,41 @@ async def stage_visit_notes(
             ),
         }
 
-    if resp.status_code != 200:
-        logger.error(
-            "Staging failed: %s %s", resp.status_code, resp.text[:300]
+    logger.info("stage_visit_notes tool invoked: %s", payload)
+
+    # If notes were already staged this session, this call is a correction:
+    # pass the prior session id so the confirmation reads back only the
+    # changes.
+    previous_session_id = tool_context.state.get(_STAGED_SESSION_KEY)
+
+    try:
+        data = notes_workflow.stage_notes(
+            payload,
+            previous_session_id=previous_session_id,
+            planned_topics=list(planned_topics),
+            # The ADK WebSocket session id doubles as the notes_workflow
+            # session_id -- see the module docstring above. Passing it
+            # explicitly (rather than letting stage_notes mint a fresh uuid)
+            # is what makes commit_visit_notes's later lookup and the
+            # eventual audit row line up with the same session_id the rest
+            # of the app already knows about.
+            session_id=tool_context.session.id,
         )
+    except Exception:  # noqa: BLE001 - must never break the live stream
+        logger.exception("stage_notes raised for session_id=%s", tool_context.session.id)
         return {
             "status": "error",
-            "error": f"Staging endpoint returned {resp.status_code}",
-            "detail": resp.text[:300],
+            "error": "Could not stage the notes due to an internal error.",
+            "instruction_for_model": (
+                "Tell the user there was a temporary problem saving and to "
+                "try again in a moment."
+            ),
+            "ui_event": "tool_error",
         }
 
-    data = resp.json()
-    # Persist the CRM session id so the commit tool can reference it later.
+    # Persist the staged session id so the commit tool can reference it
+    # later (also handles the correction branch above, next time through).
     tool_context.state[_STAGED_SESSION_KEY] = data["session_id"]
-    tool_context.state["last_staged_id"] = data["session_id"]
 
     missing = data.get("missing_topics") or []
     if missing:
@@ -343,8 +324,10 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
     "yes", "that's correct"). Do not call it before notes have been staged.
 
     Returns:
-        A dict containing ``closing_statement`` -- the exact sentence to read
-        back to the user before ending the session.
+        A dict containing the full Output2 payload (session_id,
+        executive_summary, planned_topics, per-topic outcomes) plus
+        ``closing_statement`` -- the exact sentence to read back to the user
+        before ending the session.
     """
     session_id = tool_context.state.get(_STAGED_SESSION_KEY)
     if not session_id:
@@ -421,75 +404,96 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
             "instruction_for_model": reask,
         }
 
-    body = {
-        "session_id": session_id,
-        "confirmed": True,
-        "agent_mode": "implicit",
-        "campaign_type": tool_context.state.get("campaign_type"),
-        "ws_user_id": tool_context.user_id,
-        "ws_session_id": tool_context.session.id,
-    }
-    logger.info("commit_visit_notes tool invoked: %s", body)
+    logger.info("commit_visit_notes tool invoked: session_id=%s", session_id)
 
     try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_API_BASE}/api/v1/notes/commit", json=body
-            )
-    except httpx.HTTPError as exc:
-        logger.error("Commit request failed: %s", exc)
+        result = notes_workflow.commit_notes(session_id, confirmed=True)
+    except KeyError:
+        # The staged record is gone (should not normally happen -- the
+        # _STAGED_SESSION_KEY check above already confirmed one was staged
+        # -- but never let this surface as a crash).
+        logger.exception("commit_notes found no staged record for session_id=%s", session_id)
         return {
             "status": "error",
-            "error": "Could not reach the commit endpoint.",
+            "error": "no_staged_notes",
             "instruction_for_model": (
-                "Tell the user there was a temporary problem saving and to try "
-                "again in a moment."
+                "There are no staged notes to save anymore. Ask the user to "
+                "dictate their notes again."
+            ),
+        }
+    except notes_workflow.SupersededRecordError as exc:
+        # The rep corrected this record after it was staged, but before this
+        # confirm -- committing it would save the outcome they corrected
+        # away from. This should be rare given turn_guard's checks above,
+        # but is a real, named failure mode (AIML-2703), not a crash.
+        logger.warning(
+            "Commit blocked -- session_id=%s was superseded by %s",
+            session_id,
+            exc.superseded_by,
+        )
+        tool_context.state[_STAGED_SESSION_KEY] = exc.superseded_by
+        return {
+            "status": "blocked",
+            "error": "superseded_record",
+            "instruction_for_model": (
+                "NOTHING was saved -- that draft was replaced by a later "
+                "correction. Say so, then confirm with the rep whether the "
+                "most recent version is correct before calling "
+                "commit_visit_notes again."
+            ),
+        }
+    except notes_workflow.IncompleteCoverageError as exc:
+        # Coverage gate: planned topics still have no outcome. Nothing was
+        # written. Collect the outcomes and re-stage before trying again.
+        logger.warning(
+            "Commit blocked -- uncovered planned topics: %s",
+            exc.missing_topics,
+        )
+        return {
+            "status": "blocked",
+            "error": "incomplete_coverage",
+            "missing_topics": exc.missing_topics,
+            "instruction_for_model": (
+                "NOTHING was saved. These planned topics still have no "
+                "outcome: " + ", ".join(exc.missing_topics) + ". Say out "
+                "loud that you still need those before saving, and ask the "
+                "rep what happened with them. When they answer, call "
+                "stage_visit_notes again with the FULL payload including an "
+                "entry for each (discussed=true with a disposition_code if "
+                "they give an outcome, or discussed=false with their reason "
+                "if they skipped it), then commit."
+            ),
+        }
+    except Exception:  # noqa: BLE001 - must never break the live stream
+        logger.exception("commit_notes raised for session_id=%s", session_id)
+        return {
+            "status": "error",
+            "error": "Could not commit the notes due to an internal error.",
+            "instruction_for_model": (
+                "Tell the user there was a temporary problem saving and to "
+                "try again in a moment."
             ),
             "ui_event": "tool_error",
         }
 
-    if resp.status_code == 409:
-        # Coverage gate: planned topics still have no outcome. Nothing was
-        # written. Collect the outcomes and re-stage before trying again.
-        try:
-            detail = resp.json()
-        except ValueError:
-            detail = {}
-        missing = detail.get("missing_topics") or []
-        logger.warning("Commit blocked -- uncovered planned topics: %s", missing)
+    if isinstance(result, dict):
+        # confirmed=False path returns {"status": "cancelled", ...} instead
+        # of a CommitResult -- not reachable from this tool (we always pass
+        # confirmed=True), but handled rather than assumed away.
         return {
-            "status": "blocked",
-            "error": "incomplete_coverage",
-            "missing_topics": missing,
-            "instruction_for_model": (
-                "NOTHING was saved. These planned topics still have no "
-                "outcome: " + ", ".join(missing) + ". Say out loud that you "
-                "still need those before saving, and ask the rep what "
-                "happened with them. When they answer, call stage_visit_notes "
-                "again with the FULL payload including an entry for each "
-                "(discussed=true with a disposition_code if they give an "
-                "outcome, or discussed=false with their reason if they "
-                "skipped it), then commit."
-            ),
+            **result,
+            "instruction_for_model": "Read the closing_statement to the user verbatim.",
         }
 
-    if resp.status_code != 200:
-        logger.error(
-            "Commit failed: %s %s", resp.status_code, resp.text[:300]
-        )
-        return {
-            "status": "error",
-            "error": f"Commit endpoint returned {resp.status_code}",
-            "detail": resp.text[:300],
-        }
-
-    data = resp.json()
     # Clear staged session so a fresh dictation starts clean.
     tool_context.state[_STAGED_SESSION_KEY] = None
+
+    # Output2: the commit tool's own, authoritative response -- the UI
+    # renders from this directly instead of reconstructing it from earlier
+    # streamed tool-call arguments.
     return {
-        "status": data.get("status", "success"),
-        "crm_record_id": data.get("crm_record_id"),
-        "closing_statement": data.get("closing_statement"),
+        "status": "success",
+        **result.model_dump(),
         "instruction_for_model": (
             "Read the closing_statement to the user verbatim. The session is "
             "now complete."

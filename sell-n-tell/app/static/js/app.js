@@ -11,7 +11,7 @@
 // index.html loads `app.js?v=N`, but that query covers ONLY app.js -- the
 // modules it imports were requested at their bare URL and could be served from
 // disk cache indefinitely, so a change to audio-recorder.js could be invisible
-// while app.js itself was demonstrably fresh. Observed in the browser: app.js
+// while app.js itself was demonstrably fresh. Observed on the VDI: app.js
 // fetched 200/65kB, audio-recorder.js "0 B (disk cache)" in the same load.
 //
 // Keep N in step with the value in index.html whenever either file changes.
@@ -24,12 +24,6 @@ import { startAudioRecorderWorklet } from "./audio-recorder.js?v=10";
 // ---------------------------------------------------------------------------
 // Config / constants
 // ---------------------------------------------------------------------------
-
-// The only solution the server offers. The guided explicit-script flow and its
-// picker were removed in AIML-2751. Still sent on the WS URL because the value
-// is recorded on the committed record and routes the BigQuery analytics sink.
-const AGENT_MODE = "implicit";
-
 /**
  * RFC 4122 v4 UUID, with a fallback for non-secure contexts.
  *
@@ -87,8 +81,10 @@ function newSessionId() {
 // Client-side VAD tuning. The browser's VAD is the authoritative stop-trigger
 // (the Live API's server-side VAD caps at 2000ms, below the spec's 2.5-3.0s),
 // so we run the session in manual activity-detection mode. The threshold is
-// fetched from the backend (VOICE_NOTES_VAD_SILENCE_MS) and defaults to 2800ms.
-let SILENCE_MS = 2800;            // stop-trigger window (spec: 2.5-3.0s)
+// set here is only for informational purpose in UI , since /api/v1/client-config was removed 
+//for contract simplification , it no longer fetches value from backend to display
+
+let SILENCE_MS = 2000;            // stop-trigger window (spec: 2.5-3.0s)
 const VOICE_RMS_THRESHOLD = 0.022; // above this = speech present
 const MIN_SPEECH_MS = 400;        // require some speech before arming silence
 
@@ -143,8 +139,41 @@ let agentResponseWatchdog = null;
 let liveUserText = "";
 let liveAgentText = "";
 
-// Disposition code -> label map (from dynamic config)
-let dispositionLabels = {};
+// ===========================================================================
+// Disposition label lookup, hardcoded client-side.
+//
+// Replaces fetchConfig()'s only remaining purpose. The endpoint it called
+// (GET /api/v1/config/agent-schema?campaign_type=...) is deleted along with
+// campaign_type entirely (see PR: "Contract Simplification & Audit
+// Logging") -- there is now one universal disposition registry, so the
+// labels below are copied verbatim from the deleted
+// mock_db._FULL_DISPOSITION_REGISTRY / _NOT_COVERED_RULE (now
+// resources/dispositions.yaml) and never change per call.
+//
+// NOTE: campaign_type's removal from validation rules (event types /
+// disposition codes) is confirmed by the PR. Whether campaign context
+// should still be captured as CRM metadata is a separate, open business
+// question -- flagged, not resolved here. This patch only fixes the
+// label-lookup break; it does not touch the campaignSelect dropdown.
+// ===========================================================================
+const DISPOSITION_LABELS = {
+  1: "Create Opportunity",
+  2: "Order Placed",
+  3: "No current need - revisit in the future",
+  4: "Contracted to buy from competitor",
+  5: "Buying from preferred vendor already",
+  6: "Not a product or service they use/need",
+  7: "Does not meet brand/property guidelines",
+  8: "Pricing concerns",
+  9: "Recently discussed",
+  10: "Customer recently purchased related item(s)",
+  99: "Outcome not covered - needs manual review",
+};
+
+// dispositionLabels was previously populated async by fetchConfig(); it's
+// now a plain constant available synchronously from module load, so no
+// init call is needed anywhere.
+let dispositionLabels = DISPOSITION_LABELS;
 
 // Pre-call planning: catalog of selectable topics + the rep's selection.
 let plannedTopicCatalog = [];
@@ -360,11 +389,7 @@ function createWavBlob(buffers, sampleRate = 16000) {
 
 // F3 / F2 / F7 UI Elements
 const repIdInput = document.getElementById("repIdInput");
-const historyButton = document.getElementById("historyButton");
-const historyModal = document.getElementById("historyModal");
-const closeHistoryBtn = document.getElementById("closeHistoryBtn");
-const exportCsvBtn = document.getElementById("exportCsvBtn");
-const historyTableBody = document.getElementById("historyTableBody");
+
 
 if (repIdInput) {
   repIdInput.value = userId;
@@ -375,61 +400,6 @@ if (repIdInput) {
   });
 }
 
-if (historyButton) {
-  historyButton.addEventListener("click", async () => {
-    historyTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
-    historyModal.showModal();
-    try {
-      const res = await fetch("/api/v1/notes/committed");
-      const data = await res.json();
-      historyTableBody.innerHTML = "";
-
-      const records = data.records || [];
-      records.reverse().forEach(record => {
-        const tr = document.createElement("tr");
-        const dateStr = record.staged_at ? new Date(record.staged_at).toLocaleString() : "—";
-        const crmId = record.crm_record_id || "—";
-        const payload = record.payload || {};
-
-        tr.innerHTML = `
-          <td>${dateStr}</td>
-          <td>${crmId}</td>
-          <td>${record.session_id}</td>
-          <td>${payload.event_type || "—"}</td>
-          <td>${payload.executive_summary || "—"}</td>
-        `;
-        historyTableBody.appendChild(tr);
-      });
-
-      exportCsvBtn.onclick = () => {
-        const rows = [["Date", "CRM ID", "Session ID", "Event Type", "Summary"]];
-        records.forEach(record => {
-          const payload = record.payload || {};
-          rows.push([
-            record.staged_at || "",
-            record.crm_record_id || "",
-            record.session_id || "",
-            payload.event_type || "",
-            (payload.executive_summary || "").replace(/"/g, '""')
-          ]);
-        });
-        const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "sell_n_tell_history.csv";
-        a.click();
-      };
-    } catch (err) {
-      historyTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Error loading history</td></tr>';
-    }
-  });
-}
-
-if (closeHistoryBtn) {
-  closeHistoryBtn.addEventListener("click", () => historyModal.close());
-}
 
 // ---------------------------------------------------------------------------
 // Phase / UI helpers
@@ -573,6 +543,13 @@ const useClientSpeech = !!SpeechRecognitionCls;
 let speechRecognition = null;
 let speechWantActive = false; // do we want the recognizer running right now?
 
+
+
+
+
+
+
+
 function startSpeechRecognition() {
   if (!useClientSpeech) return;
   speechWantActive = true;
@@ -666,40 +643,47 @@ clearConsoleBtn.addEventListener("click", () => (consoleContent.innerHTML = ""))
 // ---------------------------------------------------------------------------
 // Dynamic config (also used to label disposition codes in the UI)
 // ---------------------------------------------------------------------------
-async function fetchConfig() {
-  const campaign = campaignSelect.value;
-  try {
-    const resp = await fetch(`/api/v1/config/agent-schema?campaign_type=${encodeURIComponent(campaign)}`);
-    const cfg = await resp.json();
-    dispositionLabels = {};
-    (cfg.disposition_registry || []).forEach((r) => (dispositionLabels[r.code] = r.label));
-    logEvent("incoming", `Loaded agent config for "${campaign}"`, cfg, "🧩");
-  } catch (e) {
-    logEvent("error", "Failed to load agent config", { error: String(e) }, "⚠️");
-  }
-}
+
 campaignSelect.addEventListener("change", () => {
   if (websocket && websocket.readyState === WebSocket.OPEN) closeWebsocketIntentionally();
   // A new session id ensures the backend re-seeds state for this campaign.
   newSessionId();
   resetSession();
-  fetchConfig();
 });
+
 // ---------------------------------------------------------------------------
 // Pre-call planning (selectable planned topics)
+//
+// Hardcoded client-side per the contract-simplification pass: the backend's
+// GET /api/v1/config/planned-topics route and its PLANNED_TOPIC_CATALOG were
+// deleted (verified: this route's only consumer anywhere in the codebase was
+// this fetch, and nothing server-side actually validated submitted topics
+// against the catalog -- it just fuzzy-matched whatever strings the client
+// sent). Values below are copied verbatim from the deleted
+// mock_db.PLANNED_TOPIC_CATALOG so the rep-facing list doesn't change.
 // ---------------------------------------------------------------------------
-async function fetchPlannedTopics() {
-  try {
-    const resp = await fetch("/api/v1/config/planned-topics");
-    const data = await resp.json();
-    plannedTopicCatalog = data.topics || [];
-    renderTopicOptions();
-    logEvent("incoming", `Loaded ${plannedTopicCatalog.length} planned topics`, data, "🗂️");
-  } catch (e) {
-    topicOptions.textContent = "Failed to load topics.";
-    logEvent("error", "Failed to load planned topics", { error: String(e) }, "⚠️");
-  }
+const PLANNED_TOPIC_CATALOG = [
+  { id: "appliances", label: "Appliances" },
+  { id: "cleaning_janitorial", label: "Cleaning & Janitorial" },
+  { id: "electrical", label: "Electrical" },
+  { id: "hardware", label: "Hardware" },
+  { id: "hvac", label: "HVAC" },
+  { id: "lighting_ceiling_fans", label: "Lighting & Ceiling Fans" },
+  { id: "linens_towels", label: "Linens & Towels" },
+  { id: "office_supplies", label: "Office Supplies" },
+  { id: "paint_supplies", label: "Paint & Supplies" },
+  { id: "plumbing", label: "Plumbing" },
+  { id: "pool_supplies", label: "Pool Supplies" },
+  { id: "storage", label: "Storage" },
+  { id: "tools", label: "Tools" },
+];
+
+function loadPlannedTopics() {
+  plannedTopicCatalog = PLANNED_TOPIC_CATALOG;
+  renderTopicOptions();
+  logEvent("incoming", `Loaded ${plannedTopicCatalog.length} planned topics (client-side catalog)`, { topics: plannedTopicCatalog }, "🗂️");
 }
+
 
 function renderTopicOptions() {
   topicOptions.innerHTML = "";
@@ -759,12 +743,20 @@ function closeWebsocketIntentionally() {
   }
 }
 
+// ===========================================================================
+// wsUrl() -- campaign_type re-added per business decision: send it from the
+// frontend so the pipeline is ready end-to-end, even though the backend
+// currently stores it as inert session-state metadata and does not use it
+// for any validation/config decision. See main.py's websocket_endpoint
+// docstring for the backend side of this contract.
+// ===========================================================================
 function wsUrl() {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const campaign = encodeURIComponent(campaignSelect.value);
   const planned = encodeURIComponent(selectedTopics.join(","));
-  return `${proto}//${window.location.host}/ws/${userId}/${sessionId}?campaign_type=${campaign}&planned_topics=${planned}&agent_mode=${AGENT_MODE}`;
+  const campaign = encodeURIComponent(campaignSelect.value);
+  return `${proto}//${window.location.host}/ws/${userId}/${sessionId}?planned_topics=${planned}&campaign_type=${campaign}`;
 }
+
 
 function connectWebsocket() {
   const ws = new WebSocket(wsUrl());
@@ -776,7 +768,7 @@ function connectWebsocket() {
     logEvent(
       "incoming",
       "WebSocket connected",
-      { userId, sessionId, campaign: campaignSelect.value, agentMode: AGENT_MODE },
+      { userId, sessionId, campaign: campaignSelect.value },
       "🔌",
     );
   };
@@ -849,6 +841,10 @@ function connectWebsocket() {
 function handleAdkEvent(ev) {
   // Display-only: track the model's own reported token usage for the cost
   // estimate. Does not affect any agent/session/execution behavior.
+  if (agentResponseWatchdog) {
+      clearTimeout(agentResponseWatchdog);
+      agentResponseWatchdog = null;
+  }
   if (ev.usageMetadata) applyUsageMetadata(ev.usageMetadata);
 
   // Console summary
@@ -902,12 +898,13 @@ function handleAdkEvent(ev) {
     // agent says next is suppressed until a real tool call proves it's done
     // guessing (see the `suppressAgentSpeech` declaration above).
     //
-    // The pre-tool-call guess bug this gate hides is specific to the implicit
-    // flow's stage_visit_notes turn, and implicit is the only flow left. Do
-    // not arm this for a mode whose turns can be pure speech with NO tool
-    // call (e.g. a scripted "I think you mean X -- is that correct?"): the
-    // gate would never lift, because nothing would lift it, and that speech
-    // and its caption would be dropped forever.
+    // The gate is safe to arm unconditionally because every agent turn in
+    // this flow ends in a tool call (stage_visit_notes, then
+    // commit_visit_notes) which lifts it. A flow with turns that are pure
+    // speech and NO tool call would deadlock here -- nothing would lift the
+    // gate, and that speech/caption would be dropped forever. The retired
+    // guided flow was exactly that shape, which is why this used to be
+    // conditional on mode.
     if (
       ev.inputTranscription.finished &&
       (ev.inputTranscription.text || "").trim()
@@ -1022,9 +1019,11 @@ function handleFunctionResponse(fr) {
     // means a new refusal silently falls through to the saved state and the UI
     // claims "Saved to CRM" for a record that was never written. Test for the
     // only thing that actually proves a CRM write instead: a record id.
-    if (resp.error === "no_reply_heard") return;
-
-    if (!resp.crm_record_id) {
+    //
+    // Output2 has no crm_record_id -- session_id is the only identifier
+    // (see schemas.CommitResult). Success/failure must be read from
+    // resp.status, which tools.py always sets ("success" | "blocked" | "error").
+    if (resp.status !== "success") {
       const why = resp.error || resp.status || "unknown";
       const missing = Array.isArray(resp.missing_topics)
         ? resp.missing_topics
@@ -1033,18 +1032,21 @@ function handleFunctionResponse(fr) {
         ? `${why} (still needed: ${missing.join(", ")})`
         : why;
       logEvent("incoming", `Commit refused: ${detail}`, resp, "🚫");
-      // Nothing was saved: keep the record staged and leave the rep in the
-      // confirm phase so they can answer the agent and try again.
       payloadStatus.textContent = "staged";
       payloadStatus.className = "badge";
       return;
     }
+    // The card was already populated by stage_visit_notes' mega-payload, so
+    // there is nothing to render here -- commit only reveals it.
+
     // Setting committed here also matters for the mic: otherwise
     // turnComplete's fallback branch would just re-arm it forever.
 
     committed = true;
     payloadCard.classList.remove("hidden");
-    if (resp.crm_record_id) pCrmId.textContent = resp.crm_record_id;
+    // Output2 has no crm_record_id -- display session_id instead, the one
+    // identifier Output2 actually carries.
+    if (resp.session_id) pCrmId.textContent = resp.session_id;
     payloadStatus.textContent = "committed";
     payloadStatus.className = "badge committed";
     saveButton.disabled = true;
@@ -1181,6 +1183,10 @@ function finishSession() {
   // next dictation pays Vertex's cold-start handshake again, which is why the
   // socket was being held open between dictations -- worth it against silently
   // losing a visit.
+  //
+  // Note this guarantee now rests on the client alone: the retired guided
+  // flow's capture_dictation also cleared the state server-side, and the
+  // implicit flow has no equivalent entry-point tool.
   if (websocket && websocket.readyState === WebSocket.OPEN) {
     closeWebsocketIntentionally();
   }
@@ -1200,7 +1206,7 @@ async function ensureAudio() {
   // the PLAYER worklet is constructed first, so on plain HTTP the rep got
   // "Cannot read properties of undefined (reading 'addModule')" from
   // audioContext.audioWorklet before the mic guard was ever reached. Observed
-  // over http://<lan-ip>:8000, 2026-08-20.
+  // on the VDI over http://<lan-ip>:8000, 2026-08-20.
   //
   // Deliberately NOT at module load: the page must still render over plain HTTP
   // (that is the A7 fix), and this is the first point where the missing
@@ -1327,6 +1333,11 @@ function audioRecorderHandler(pcmData) {
   } else if (hadSpeech && now - speechStartTs > MIN_SPEECH_MS) {
     const silentFor = now - lastVoiceTs;
     if (silentFor >= SILENCE_MS) {
+      // Informational only. Do NOT stop the mic here -- the server's automatic
+      // VAD needs to keep RECEIVING audio (including this trailing silence) to
+      // detect end-of-speech and finalize the turn. Stopping the stream now
+      // starves the server VAD and the turn never completes. The mic is closed
+      // by beginAgentResponse() once the agent actually starts replying.
       silenceCountdown.textContent = "pause detected — wrapping up…";
       silenceCountdown.classList.remove("counting");
     } else {
@@ -1551,21 +1562,9 @@ function base64ToArray(base64) {
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-async function fetchClientConfig() {
-  try {
-    const resp = await fetch("/api/v1/client-config");
-    const cfg = await resp.json();
-    if (cfg.vad_silence_ms) SILENCE_MS = cfg.vad_silence_ms;
-    logEvent("incoming", `Client VAD threshold: ${SILENCE_MS}ms`, cfg, "⏱️");
-  } catch (e) {
-    logEvent("error", "Failed to load client config", { error: String(e) }, "⚠️");
-  }
-}
 
 setPhase("idle");
-fetchClientConfig();
-fetchConfig();
-fetchPlannedTopics();
+loadPlannedTopics();
 
 // ---------------------------------------------------------------------------
 // Dev/test hook — exposes key internal functions on window.__snTest so they

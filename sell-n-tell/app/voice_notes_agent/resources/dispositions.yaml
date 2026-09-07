@@ -1,0 +1,137 @@
+# Disposition registry -- the fixed outcome codes a call topic can be mapped
+# to. Moved out of mock_db.py (now notes_workflow.py) per the contract-
+# simplification pass: this is static data, not logic. Loaded once at import
+# time to build the DispositionCode IntEnum and the code -> rule lookup.
+#
+# Each entry's `mapping_keywords` are phrases the LLM uses to map spoken
+# language to a code (not an exhaustive/exact-match list -- illustrative
+# keywords the model generalizes from).
+#
+# `name` becomes the DispositionCode enum member name (e.g.
+# DispositionCode.CREATE_OPPORTUNITY == 1) -- kept so any code that still
+# references DispositionCode.SOME_NAME continues to work unchanged.
+
+dispositions:
+  - name: CREATE_OPPORTUNITY
+    code: 1
+    label: "Create Opportunity"
+    mapping_keywords:
+      - "interested"
+      - "wants to buy"
+      - "ready to purchase"
+      - "send a quote"
+      - "create an opportunity"
+      - "new opportunity"
+
+  - name: ORDER_PLACED
+    code: 2
+    label: "Order Placed"
+    mapping_keywords:
+      - "placed an order"
+      - "ordered"
+      - "order confirmed"
+      - "purchase made"
+      - "bought"
+      - "closed the sale"
+
+  - name: NO_CURRENT_NEED
+    code: 3
+    label: "No current need - revisit in the future"
+    mapping_keywords:
+      - "no need"
+      - "not right now"
+      - "revisit later"
+      - "check back"
+      - "future"
+      - "no current need"
+
+  - name: CONTRACTED_TO_COMPETITOR
+    code: 4
+    label: "Contracted to buy from competitor"
+    mapping_keywords:
+      - "contracted with competitor"
+      - "locked in with a competitor"
+      - "signed with another vendor"
+      - "under contract elsewhere"
+
+  - name: PREFERRED_VENDOR_ALREADY
+    code: 5
+    label: "Buying from preferred vendor already"
+    mapping_keywords:
+      - "preferred vendor"
+      - "already buying from"
+      - "existing supplier"
+      - "loyal to current vendor"
+      - "happy with current supplier"
+
+  - name: NOT_A_PRODUCT_THEY_USE
+    code: 6
+    label: "Not a product or service they use/need"
+    mapping_keywords:
+      - "don't use this"
+      - "not relevant"
+      - "no use for it"
+      - "not applicable"
+      - "not something they need"
+
+  - name: FAILS_BRAND_GUIDELINES
+    code: 7
+    label: "Does not meet brand/property guidelines"
+    mapping_keywords:
+      - "brand guidelines"
+      - "property guidelines"
+      - "not approved"
+      - "not on brand"
+      - "compliance"
+      - "not compliant"
+
+  - name: PRICING_CONCERNS
+    code: 8
+    label: "Pricing concerns"
+    mapping_keywords:
+      - "expensive"
+      - "cost too much"
+      - "pricing high"
+      - "too pricey"
+      - "budget issue"
+      - "price is a concern"
+
+  - name: RECENTLY_DISCUSSED
+    code: 9
+    label: "Recently discussed"
+    mapping_keywords:
+      - "already discussed"
+      - "talked recently"
+      - "covered last time"
+      - "recent conversation"
+      - "discussed before"
+
+  - name: RECENTLY_PURCHASED_RELATED
+    code: 10
+    label: "Customer recently purchased related item(s)"
+    mapping_keywords:
+      - "recently purchased"
+      - "just bought"
+      - "already purchased related"
+      - "bought a related item"
+      - "recent purchase"
+
+# Escape hatch, appended to the registry at load time (not a normal
+# disposition -- kept separate so `dispositions` above stays a clean list of
+# real business outcomes). Without an explicit "none of these" option the
+# model has no way to say the registry doesn't cover what happened -- filling
+# a structured field is an argmax over the allowed values, so it always
+# returns a "best" code even when the best is wrong. Measured: a call where
+# the customer asked for a quote (no matching code existed) returned 2
+# "Order Placed" or 3 "No current need" at random across six runs -- opposite
+# meanings, both false. Making "not covered" an ordinary peer option lets the
+# model select it normally instead of having to volunteer an exception
+# against the grain.
+not_covered:
+  name: OUTCOME_NOT_COVERED
+  code: 99
+  label: "Outcome not covered - needs manual review"
+  mapping_keywords:
+    - "none of the other codes describe what happened"
+    - "the real outcome is not in this list"
+    - "would have to force a code that misstates the call"

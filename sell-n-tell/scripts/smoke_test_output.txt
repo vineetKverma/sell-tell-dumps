@@ -1,0 +1,305 @@
+(voice-notes-logger) PS C:\Users\5000240\sellNtell_dev\sell-n-tell> uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+INFO:     Will watch for changes in these directories: ['C:\\Users\\5000240\\sellNtell_dev\\sell-n-tell']
+2026-09-01 01:55:09,242 - google_adk.google.adk.plugins.plugin_manager - INFO - Plugin 'bigquery_agent_analytics' registered.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [28336] using WatchFiles
+2026-09-01 01:55:16,116 - google_adk.google.adk.plugins.plugin_manager - INFO - Plugin 'bigquery_agent_analytics' registered.
+INFO:     Started server process [14548]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:64938 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64938 - "GET /static/css/style.css?v=3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64938 - "GET /static/js/app.js?v=9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64938 - "GET /static/js/audio-player.js?v=9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60000 - "GET /static/js/audio-recorder.js?v=9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60000 - "GET /api/v1/client-config HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61731 - "GET /static/js/pcm-player-processor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61731 - "GET /static/js/pcm-recorder-processor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57723 - "WebSocket /ws/rep-23ee446d-57d8-48ea-b565-6dc2af503ada/sess-8049e227-1443-4905-8554-1ce8432a7ed8?planned_topics=Hardware&agent_mode=implicit&campaign_type=standard_sales" [accepted]
+2026-09-01 01:55:45,961 - app.main - INFO - WS connect user_id=rep-23ee446d-57d8-48ea-b565-6dc2af503ada session_id=sess-8049e227-1443-4905-8554-1ce8432a7ed8 planned=['Hardware']
+INFO:     connection open
+2026-09-01 01:55:46,947 - app.main - INFO - Upstream audio: 50 chunks, 32000 bytes total
+2026-09-01 01:55:47,955 - app.main - INFO - Upstream audio: 100 chunks, 64000 bytes total
+2026-09-01 01:55:48,950 - app.main - INFO - Upstream audio: 150 chunks, 96000 bytes total
+2026-09-01 01:55:49,939 - app.main - INFO - Upstream audio: 200 chunks, 128000 bytes total
+2026-09-01 01:55:50,954 - app.main - INFO - Upstream audio: 250 chunks, 160000 bytes total
+2026-09-01 01:55:51,950 - app.main - INFO - Upstream audio: 300 chunks, 192000 bytes total
+2026-09-01 01:55:52,946 - app.main - INFO - Upstream audio: 350 chunks, 224000 bytes total
+2026-09-01 01:55:53,954 - app.main - INFO - Upstream audio: 400 chunks, 256000 bytes total
+2026-09-01 01:55:54,950 - app.main - INFO - Upstream audio: 450 chunks, 288000 bytes total
+2026-09-01 01:55:55,948 - app.main - INFO - Upstream audio: 500 chunks, 320000 bytes total
+2026-09-01 01:55:56,957 - app.main - INFO - Upstream audio: 550 chunks, 352000 bytes total
+2026-09-01 01:55:57,951 - app.main - INFO - Upstream audio: 600 chunks, 384000 bytes total
+2026-09-01 01:55:58,946 - app.main - INFO - Upstream audio: 650 chunks, 416000 bytes total
+2026-09-01 01:55:59,954 - app.main - INFO - Upstream audio: 700 chunks, 448000 bytes total
+2026-09-01 01:56:00,953 - app.main - INFO - Upstream audio: 750 chunks, 480000 bytes total
+2026-09-01 01:56:01,946 - app.main - INFO - Upstream audio: 800 chunks, 512000 bytes total
+2026-09-01 01:56:02,954 - app.main - INFO - Upstream audio: 850 chunks, 544000 bytes total
+2026-09-01 01:56:03,950 - app.main - INFO - Upstream audio: 900 chunks, 576000 bytes total
+2026-09-01 01:56:04,946 - app.main - INFO - Upstream audio: 950 chunks, 608000 bytes total
+2026-09-01 01:56:05,955 - app.main - INFO - Upstream audio: 1000 chunks, 640000 bytes total
+2026-09-01 01:56:06,954 - app.main - INFO - Upstream audio: 1050 chunks, 672000 bytes total
+2026-09-01 01:56:07,938 - app.main - INFO - Upstream audio: 1100 chunks, 704000 bytes total
+2026-09-01 01:56:08,954 - app.main - INFO - Upstream audio: 1150 chunks, 736000 bytes total
+2026-09-01 01:56:09,956 - app.main - INFO - Upstream audio: 1200 chunks, 768000 bytes total
+2026-09-01 01:56:10,947 - app.main - INFO - Upstream audio: 1250 chunks, 800000 bytes total
+2026-09-01 01:56:11,958 - app.main - INFO - Upstream audio: 1300 chunks, 832000 bytes total
+2026-09-01 01:56:12,950 - app.main - INFO - Upstream audio: 1350 chunks, 864000 bytes total
+2026-09-01 01:56:13,946 - app.main - INFO - Upstream audio: 1400 chunks, 896000 bytes total
+2026-09-01 01:56:14,957 - app.main - INFO - Upstream audio: 1450 chunks, 928000 bytes total
+2026-09-01 01:56:15,951 - app.main - INFO - Upstream audio: 1500 chunks, 960000 bytes total
+2026-09-01 01:56:16,947 - app.main - INFO - Upstream audio: 1550 chunks, 992000 bytes total
+2026-09-01 01:56:17,955 - app.main - INFO - Upstream audio: 1600 chunks, 1024000 bytes total
+2026-09-01 01:56:18,952 - app.main - INFO - Upstream audio: 1650 chunks, 1056000 bytes total
+2026-09-01 01:56:19,946 - app.main - INFO - Upstream audio: 1700 chunks, 1088000 bytes total
+2026-09-01 01:56:20,957 - app.main - INFO - Upstream audio: 1750 chunks, 1120000 bytes total
+2026-09-01 01:56:21,950 - app.main - INFO - Upstream audio: 1800 chunks, 1152000 bytes total
+2026-09-01 01:56:22,941 - app.main - INFO - Upstream audio: 1850 chunks, 1184000 bytes total
+2026-09-01 01:56:23,957 - app.main - INFO - Upstream audio: 1900 chunks, 1216000 bytes total
+C:\Users\5000240\sellNtell_dev\sell-n-tell\.venv\Lib\site-packages\google\adk\tools\function_tool.py:95: UserWarning: [EXPERIMENTAL] feature FeatureName.JSON_SCHEMA_FOR_FUNC_DECL is enabled.
+  build_function_declaration(
+2026-09-01 01:56:24,134 - google_adk.google.adk.flows.llm_flows.base_llm_flow - INFO - Establishing live connection for agent: voice_notes_logger
+2026-09-01 01:56:24,134 - google_genai._api_client - INFO - The project/location from the environment variables will take precedence over the API key from the environment variables.
+2026-09-01 01:56:25,358 - google_adk.google.adk.models.google_llm - INFO - Trying to connect to live model: gemini-live-2.5-flash-native-audio with api backend: GoogleLLMVariant.VERTEX_AI
+2026-09-01 01:56:25,358 - google_genai._api_client - INFO - The project/location from the environment variables will take precedence over the API key from the environment variables.
+2026-09-01 01:56:30,940 - app.main - INFO - Upstream audio: 1950 chunks, 1248000 bytes total
+2026-09-01 01:56:30,942 - app.main - INFO - Upstream audio: 2000 chunks, 1280000 bytes total
+2026-09-01 01:56:30,945 - app.main - INFO - Upstream audio: 2050 chunks, 1312000 bytes total
+2026-09-01 01:56:30,948 - app.main - INFO - Upstream audio: 2100 chunks, 1344000 bytes total
+2026-09-01 01:56:30,950 - app.main - INFO - Upstream audio: 2150 chunks, 1376000 bytes total
+2026-09-01 01:56:30,952 - app.main - INFO - Upstream audio: 2200 chunks, 1408000 bytes total
+2026-09-01 01:56:30,956 - app.main - INFO - Upstream audio: 2250 chunks, 1440000 bytes total
+2026-09-01 01:56:31,946 - app.main - INFO - Upstream audio: 2300 chunks, 1472000 bytes total
+2026-09-01 01:56:32,954 - app.main - INFO - Upstream audio: 2350 chunks, 1504000 bytes total
+2026-09-01 01:56:33,950 - app.main - INFO - Upstream audio: 2400 chunks, 1536000 bytes total
+2026-09-01 01:56:34,947 - app.main - INFO - Upstream audio: 2450 chunks, 1568000 bytes total
+2026-09-01 01:56:35,955 - app.main - INFO - Upstream audio: 2500 chunks, 1600000 bytes total
+2026-09-01 01:56:36,952 - app.main - INFO - Upstream audio: 2550 chunks, 1632000 bytes total
+2026-09-01 01:56:37,946 - app.main - INFO - Upstream audio: 2600 chunks, 1664000 bytes total
+2026-09-01 01:56:38,957 - app.main - INFO - Upstream audio: 2650 chunks, 1696000 bytes total
+2026-09-01 01:56:39,952 - app.main - INFO - Upstream audio: 2700 chunks, 1728000 bytes total
+2026-09-01 01:56:40,947 - app.main - INFO - Upstream audio: 2750 chunks, 1760000 bytes total
+2026-09-01 01:56:41,956 - app.main - INFO - Upstream audio: 2800 chunks, 1792000 bytes total
+2026-09-01 01:56:42,950 - app.main - INFO - Upstream audio: 2850 chunks, 1824000 bytes total
+2026-09-01 01:56:43,946 - app.main - INFO - Upstream audio: 2900 chunks, 1856000 bytes total
+2026-09-01 01:56:44,954 - app.main - INFO - Upstream audio: 2950 chunks, 1888000 bytes total
+2026-09-01 01:56:45,821 - app.main - INFO - DOWNSTREAM EVENT | author=user | INPUT_TX text='I had an onsite visit with the customer today. We discussed about the hardware requirements for their upcoming project. They have requested for a pricing quotes and sample products. That concludes my notes.' finished=False
+2026-09-01 01:56:45,824 - app.main - INFO - DOWNSTREAM EVENT | author=user | INPUT_TX text='I had an onsite visit with the customer today. We discussed about the hardware requirements for their upcoming project. They have requested for a pricing quotes and sample products. That concludes my notes.' finished=True
+2026-09-01 01:56:45,950 - app.main - INFO - Upstream audio: 3000 chunks, 1920000 bytes total
+2026-09-01 01:56:46,937 - app.main - INFO - Upstream audio: 3050 chunks, 1952000 bytes total
+2026-09-01 01:56:47,017 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text="I've staged" finished=False
+2026-09-01 01:56:47,182 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11114b)
+2026-09-01 01:56:47,475 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:47,488 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' an' finished=False
+2026-09-01 01:56:47,827 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(15360b)
+2026-09-01 01:56:47,842 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' on-site' finished=False
+2026-09-01 01:56:47,846 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:47,851 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' visit' finished=False
+2026-09-01 01:56:48,069 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(15360b)
+2026-09-01 01:56:48,122 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' where you' finished=False
+2026-09-01 01:56:48,133 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,156 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,165 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' discussed' finished=False
+2026-09-01 01:56:48,212 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,295 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,306 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' hardware,' finished=False
+2026-09-01 01:56:48,340 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,402 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:48,406 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' creating' finished=False
+2026-09-01 01:56:48,437 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,451 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,455 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' a new' finished=False
+2026-09-01 01:56:48,478 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,482 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' opportunity.' finished=False
+2026-09-01 01:56:48,514 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,521 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,546 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:48,550 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' Does that' finished=False
+2026-09-01 01:56:48,565 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,585 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:48,590 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' sound' finished=False
+2026-09-01 01:56:48,604 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,607 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' correct?' finished=False
+2026-09-01 01:56:48,623 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,638 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,657 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:48,664 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text="I've staged an on-site visit where you discussed hardware, creating a new opportunity. Does that sound correct?" finished=True
+2026-09-01 01:56:48,666 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger
+2026-09-01 01:56:48,668 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | TOOL_CALL=stage_visit_notes
+2026-09-01 01:56:48,704 - voice_notes_agent.tools - INFO - stage_visit_notes tool invoked: {'event_type': 'On-site visit', 'executive_summary': 'The customer requested pricing and samples for an upcoming hardware project. I will create an opportunity to track this request.', 'raw_transcript_backup': 'I had an on-site visit with the customer today. We discussed about their hardware requirements for their upcoming project. They have requested for pricing quotes and sample products. That concludes my notes.', 'topics': [{'topic': 'Hardware', 'disposition_code': 1, 'executive_summary': 'The customer expressed interest in hardware for a new project and requested pricing and samples.', 'discussed': True, 'needs_manual_review': False}]}
+2026-09-01 01:56:48,704 - voice_notes_agent.notes_workflow - INFO - Staged notes session_id=sess-8049e227-1443-4905-8554-1ce8432a7ed8 event_type=On-site visit topics=1 missing=0 (correction=False, correction_count=0)
+2026-09-01 01:56:48,727 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | TOOL_RESP=stage_visit_notes
+2026-09-01 01:56:48,733 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | TURN_COMPLETE
+2026-09-01 01:56:48,737 - google_adk.google.adk.flows.llm_flows.base_llm_flow - INFO - Update session resumption handle: new_handle='a856c8c5-34ef-432c-bfba-655c4f3fe4be' resumable=True last_consumed_client_message_index=None.
+2026-09-01 01:56:48,739 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger
+2026-09-01 01:56:49,185 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text='' finished=True
+2026-09-01 01:56:49,187 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger
+2026-09-01 01:56:49,187 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | TURN_COMPLETE
+2026-09-01 01:56:49,192 - google_adk.google.adk.flows.llm_flows.base_llm_flow - INFO - Update session resumption handle: new_handle='5ebd4e4c-7733-4e5c-a1c9-97173a12b5e5' resumable=True last_consumed_client_message_index=None.
+2026-09-01 01:56:49,194 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger
+2026-09-01 01:56:49,646 - app.main - INFO - Upstream audio: 3100 chunks, 1983870 bytes total
+2026-09-01 01:56:49,958 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text='Got it.' finished=False
+2026-09-01 01:56:49,995 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11114b)
+2026-09-01 01:56:50,055 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:50,114 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=" Here's" finished=False
+2026-09-01 01:56:50,126 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(13440b)
+2026-09-01 01:56:50,154 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' my summary:' finished=False
+2026-09-01 01:56:50,224 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(15360b)
+2026-09-01 01:56:50,294 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(13440b)
+2026-09-01 01:56:50,307 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' The customer' finished=False
+2026-09-01 01:56:50,307 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+INFO:     127.0.0.1:59286 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+2026-09-01 01:56:50,363 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,450 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:50,454 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' requested' finished=False
+2026-09-01 01:56:50,474 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,524 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,554 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' pricing' finished=False
+2026-09-01 01:56:50,595 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,621 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,635 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' and samples' finished=False
+2026-09-01 01:56:50,699 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,726 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,770 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' for an' finished=False
+2026-09-01 01:56:50,774 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,832 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' upcoming' finished=False
+2026-09-01 01:56:50,840 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:50,894 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:50,934 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' hardware' finished=False
+2026-09-01 01:56:50,942 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,026 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,026 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' project.' finished=False
+2026-09-01 01:56:51,074 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:51,158 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:51,158 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' I will' finished=False
+2026-09-01 01:56:51,172 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,262 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,266 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' create' finished=False
+2026-09-01 01:56:51,294 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,326 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' an opportunity' finished=False
+2026-09-01 01:56:51,345 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,446 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,458 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,483 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' to track' finished=False
+2026-09-01 01:56:51,500 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,582 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,588 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' this request.' finished=False
+2026-09-01 01:56:51,618 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:51,674 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:51,722 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,746 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=" I've staged" finished=False
+2026-09-01 01:56:51,774 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:51,839 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:51,890 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' an On-site' finished=False
+2026-09-01 01:56:51,902 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:51,968 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:52,018 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' visit' finished=False
+2026-09-01 01:56:52,025 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,106 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,114 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' covering' finished=False
+2026-09-01 01:56:52,150 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:52,168 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' Hardware' finished=False
+2026-09-01 01:56:52,198 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,243 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,268 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' marked' finished=False
+2026-09-01 01:56:52,310 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:52,326 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' as create' finished=False
+2026-09-01 01:56:52,371 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(13440b)
+2026-09-01 01:56:52,422 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' opportunity.' finished=False
+2026-09-01 01:56:52,430 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,516 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,568 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,596 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' Should' finished=False
+2026-09-01 01:56:52,659 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:52,731 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:52,738 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' I save' finished=False
+2026-09-01 01:56:52,778 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,804 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' this,' finished=False
+2026-09-01 01:56:52,826 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,868 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' or do' finished=False
+2026-09-01 01:56:52,876 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,924 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:52,927 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' you want' finished=False
+2026-09-01 01:56:52,966 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' to change' finished=False
+2026-09-01 01:56:52,971 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:53,023 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:53,026 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text=' something?' finished=False
+2026-09-01 01:56:53,071 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(9600b)
+2026-09-01 01:56:53,130 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(11520b)
+2026-09-01 01:56:53,188 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | OUTPUT_TX text="Got it. Here's my summary: The customer requested pricing and samples for an upcoming hardware project. I will create an opportunity to track this request. I've staged an On-site visit covering Hardware marked as create opportunity. Should I save this, or do you want to change something?" finished=True
+2026-09-01 01:56:53,200 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | AUDIO(7680b)
+2026-09-01 01:56:53,210 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger
+2026-09-01 01:56:53,212 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger | TURN_COMPLETE
+2026-09-01 01:56:53,216 - google_adk.google.adk.flows.llm_flows.base_llm_flow - INFO - Update session resumption handle: new_handle='3803eb34-684f-4b3b-b2e8-6e36ea28c5fe' resumable=True last_consumed_client_message_index=None.
+2026-09-01 01:56:53,216 - app.main - INFO - DOWNSTREAM EVENT | author=voice_notes_logger
+2026-09-01 01:56:53,883 - app.main - INFO - Upstream audio: 3150 chunks, 2015742 bytes total
+2026-09-01 01:56:54,878 - app.main - INFO - Upstream audio: 3200 chunks, 2047742 bytes total
+2026-09-01 01:56:55,877 - app.main - INFO - Upstream audio: 3250 chunks, 2079742 bytes total
+2026-09-01 01:56:56,883 - app.main - INFO - Upstream audio: 3300 chunks, 2111742 bytes total
+2026-09-01 01:56:57,879 - app.main - INFO - Upstream audio: 3350 chunks, 2143742 bytes total
+2026-09-01 01:56:58,874 - app.main - INFO - Upstream audio: 3400 chunks, 2175742 bytes total
+2026-09-01 01:56:59,883 - app.main - INFO - Upstream audio: 3450 chunks, 2207742 bytes total
+2026-09-01 01:57:00,879 - app.main - INFO - Upstream audio: 3500 chunks, 2239742 bytes total
+2026-09-01 01:57:01,875 - app.main - INFO - Upstream audio: 3550 chunks, 2271742 bytes total
+2026-09-01 01:57:02,880 - app.main - INFO - Upstream audio: 3600 chunks, 2303742 bytes total
+2026-09-01 01:57:03,878 - app.main - INFO - Upstream audio: 3650 chunks, 2335742 bytes total
+2026-09-01 01:57:04,875 - app.main - INFO - Upstream audio: 3700 chunks, 2367742 bytes total
+2026-09-01 01:57:05,884 - app.main - INFO - Upstream audio: 3750 chunks, 2399742 bytes total
+2026-09-01 01:57:06,879 - app.main - INFO - Upstream audio: 3800 chunks, 2431742 bytes total
+2026-09-01 01:57:07,875 - app.main - INFO - Upstream audio: 3850 chunks, 2463742 bytes total
+2026-09-01 01:57:08,883 - app.main - INFO - Upstream audio: 3900 chunks, 2495742 bytes total
+2026-09-01 01:57:09,878 - app.main - INFO - Upstream audio: 3950 chunks, 2527742 bytes total
+2026-09-01 01:57:10,875 - app.main - INFO - Upstream audio: 4000 chunks, 2559742 bytes total
+2026-09-01 01:57:11,882 - app.main - INFO - Upstream audio: 4050 chunks, 2591742 bytes total
+2026-09-01 01:57:12,878 - app.main - INFO - Upstream audio: 4100 chunks, 2623742 bytes total
+2026-09-01 01:57:13,875 - app.main - INFO - Upstream audio: 4150 chunks, 2655742 bytes total
+2026-09-01 01:57:14,883 - app.main - INFO - Upstream audio: 4200 chunks, 2687742 bytes total
+2026-09-01 01:57:15,879 - app.main - INFO - Upstream audio: 4250 chunks, 2719742 bytes total
+2026-09-01 01:57:16,877 - app.main - INFO - Upstream audio: 4300 chunks, 2751742 bytes total
+2026-09-01 01:57:17,883 - app.main - INFO - Upstream audio: 4350 chunks, 2783742 bytes total
+2026-09-01 01:57:18,879 - app.main - INFO - Upstream audio: 4400 chunks, 2815742 bytes total
+2026-09-01 01:57:19,876 - app.main - INFO - Upstream audio: 4450 chunks, 2847742 bytes total
+2026-09-01 01:57:20,883 - app.main - INFO - Upstream audio: 4500 chunks, 2879742 bytes total
+2026-09-01 01:57:21,880 - app.main - INFO - Upstream audio: 4550 chunks, 2911742 bytes total
+2026-09-01 01:57:22,875 - app.main - INFO - Upstream audio: 4600 chunks, 2943742 bytes total
+2026-09-01 01:57:23,884 - app.main - INFO - Upstream audio: 4650 chunks, 2975742 bytes total
+2026-09-01 01:57:24,879 - app.main - INFO - Upstream audio: 4700 chunks, 3007742 bytes total
+2026-09-01 01:57:25,875 - app.main - INFO - Upstream audio: 4750 chunks, 3039742 bytes total
+2026-09-01 01:57:26,882 - app.main - INFO - Upstream audio: 4800 chunks, 3071742 bytes total
+2026-09-01 01:57:27,875 - app.main - INFO - Upstream audio: 4850 chunks, 3103742 bytes total
+2026-09-01 01:57:28,874 - app.main - INFO - Upstream audio: 4900 chunks, 3135742 bytes total
+2026-09-01 01:57:29,883 - app.main - INFO - Upstream audio: 4950 chunks, 3167742 bytes total
+2026-09-01 01:57:30,879 - app.main - INFO - Upstream audio: 5000 chunks, 3199742 bytes total
+2026-09-01 01:57:31,875 - app.main - INFO - Upstream audio: 5050 chunks, 3231742 bytes total
+2026-09-01 01:57:32,883 - app.main - INFO - Upstream audio: 5100 chunks, 3263742 bytes total
+2026-09-01 01:57:33,879 - app.main - INFO - Upstream audio: 5150 chunks, 3295742 bytes total
+2026-09-01 01:57:34,875 - app.main - INFO - Upstream audio: 5200 chunks, 3327742 bytes total
+2026-09-01 01:57:35,883 - app.main - INFO - Upstream audio: 5250 chunks, 3359742 bytes total
+2026-09-01 01:57:36,875 - app.main - INFO - Upstream audio: 5300 chunks, 3391742 bytes total
+2026-09-01 01:57:37,876 - app.main - INFO - Upstream audio: 5350 chunks, 3423742 bytes total
+2026-09-01 01:57:38,884 - app.main - INFO - Upstream audio: 5400 chunks, 3455742 bytes total
+2026-09-01 01:57:39,878 - app.main - INFO - Upstream audio: 5450 chunks, 3487742 bytes total
+2026-09-01 01:57:40,875 - app.main - INFO - Upstream audio: 5500 chunks, 3519742 bytes total
+2026-09-01 01:57:41,882 - app.main - INFO - Upstream audio: 5550 chunks, 3551742 bytes total
+2026-09-01 01:57:42,879 - app.main - INFO - Upstream audio: 5600 chunks, 3583742 bytes total
+2026-09-01 01:57:43,875 - app.main - INFO - Upstream audio: 5650 chunks, 3615742 bytes total
+2026-09-01 01:57:44,883 - app.main - INFO - Upstream audio: 5700 chunks, 3647742 bytes total
+2026-09-01 01:57:45,879 - app.main - INFO - Upstream audio: 5750 chunks, 3679742 bytes total
+2026-09-01 01:57:46,874 - app.main - INFO - Upstream audio: 5800 chunks, 3711742 bytes total
+2026-09-01 01:57:47,883 - app.main - INFO - Upstream audio: 5850 chunks, 3743742 bytes total
+2026-09-01 01:57:48,879 - app.main - INFO - Upstream audio: 5900 chunks, 3775742 bytes total
+2026-09-01 01:57:49,874 - app.main - INFO - Upstream audio: 5950 chunks, 3807742 bytes total
+2026-09-01 01:57:50,887 - app.main - INFO - Upstream audio: 6000 chunks, 3839742 bytes total
+2026-09-01 01:57:51,879 - app.main - INFO - Upstream audio: 6050 chunks, 3871742 bytes total
+2026-09-01 01:57:52,877 - app.main - INFO - Upstream audio: 6100 chunks, 3903742 bytes total
+2026-09-01 01:57:53,883 - app.main - INFO - Upstream audio: 6150 chunks, 3935742 bytes total
+2026-09-01 01:57:54,879 - app.main - INFO - Upstream audio: 6200 chunks, 3967742 bytes total
+2026-09-01 01:57:55,875 - app.main - INFO - Upstream audio: 6250 chunks, 3999742 bytes total
+2026-09-01 01:57:56,883 - app.main - INFO - Upstream audio: 6300 chunks, 4031742 bytes total
+2026-09-01 01:57:57,879 - app.main - INFO - Upstream audio: 6350 chunks, 4063742 bytes total
+2026-09-01 01:57:58,875 - app.main - INFO - Upstream audio: 6400 chunks, 4095742 bytes total
+2026-09-01 01:57:59,883 - app.main - INFO - Upstream audio: 6450 chunks, 4127742 bytes total
+2026-09-01 01:58:00,878 - app.main - INFO - Upstream audio: 6500 chunks, 4159742 bytes total
+2026-09-01 01:58:01,875 - app.main - INFO - Upstream audio: 6550 chunks, 4191742 bytes total
+2026-09-01 01:58:02,047 - google_adk.google.adk.flows.llm_flows.base_llm_flow - ERROR - APIError in live flow: 1011 None. Input data processing failed. This is likely due to the client sending data too fast. Please review your flow control mecha
+2026-09-01 01:58:02,047 - app.main - ERROR - Streaming error: 1011 None. Input data processing failed. This is likely due to the client sending data too fast. Please review your flow control mecha
