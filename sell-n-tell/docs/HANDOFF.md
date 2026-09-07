@@ -6,10 +6,76 @@ why. Then `plan-after-implicit-decision.md` for the current piece of work, and
 
 ---
 
-## ✅ START HERE — AIML-2751, rebuilt on a rewritten `development`
+## ✅ START HERE — AIML-2751 code is done; it needs pushing and testing
 
 Current as of 2026-09-07. Read this whole section before touching anything —
 `development` is not the codebase this file described a week ago.
+
+### Where this stands right now
+
+The local copy has been re-imported from `_export` and the AIML-2751 work is
+**committed locally as `3d0229f`** (the WIP that preceded it is `a3051f8`).
+What was done, against the sections below:
+
+- **Steps 1–4 are all done.** Both guided files deleted; the four modules
+  AIML-2750 removed upstream (`mock_db.py`, `db_interface.py`,
+  `bigquery_db.py`, `bigquery_sink.py`) deleted too, since the importer never
+  deletes and they had survived the import; `app.js` stripped; the asset
+  version bumped 9 → 10 in `index.html` **and** in `app.js`'s two module
+  imports; `.gitignore` split and given its trailing newline.
+- **Fewer comments needed changing than step 3 predicted.** `main.py`,
+  `tools.py`, `agent.py` and `ws_smoke_test.py` already read "retired" after
+  the rewrite. Only `notes_workflow.py` and `behavioral_rules.yaml` still said
+  "being retired separately". `schemas.py`'s `needs_manual_review` description
+  was also updated to explain why a guided-only field survives.
+- **One extra deletion in `app.js`** worth knowing about at review time: the
+  early return on `resp.status === "next_topic" || resp.error ===
+  "no_reply_heard"` went too. Neither value is emitted anywhere any more —
+  both were `tools_guided`'s. `tools.py`'s turn-guard refusal is
+  `no_confirmation_heard`, which the normal refusal path already handles.
+
+**Still to do:** push, reply on PR #6, and run the tests — but read
+"Testing is more broken than this file says" first, because the commands in
+§5 no longer work.
+
+### ⚠️ Testing is more broken than this file says
+
+**The entire `/api/v1` REST layer is gone.** `main.py` now serves exactly two
+routes, `/healthz` and `/`. The tools call `notes_workflow` in-process; there
+is no HTTP hop and no REST surface at all. Three things in this file depend on
+that layer and are now dead:
+
+1. **`Invoke-RestMethod .../api/v1/notes/committed`** — the "count the result
+   is the real check" step in §5 and in the Testing section below. There is no
+   such endpoint, and `notes_workflow` has no `list_committed` at all.
+   Committed records live only as `_STAGED_NOTES[session_id]["committed"] =
+   True` in process memory. **There is currently no way to verify a smoke run
+   other than reading the transcript.** Restoring a count means either a small
+   read-only debug endpoint or querying the BigQuery audit table the ADK
+   plugin writes.
+2. **`scripts/repro_orphan_restage.py`** — the supersede-gate coverage the
+   AIML-2703 row below names. It drives `http://localhost:8000/api/v1`, so it
+   cannot run. It is also local-only (not in the export manifest, so not on
+   the branch). AIML-2703's supersede gate now has **no** executable coverage
+   of any kind.
+3. **The 9-case REST suite** in `AIML-2698-experiments.md` — same cause.
+
+Also: **`ws_smoke_test.py` takes no positional argument now.** The documented
+`uv run python scripts/ws_smoke_test.py implicit` fails on argparse. It is
+just `uv run python scripts/ws_smoke_test.py`, optionally `--scenario NAME`
+or `--raw`. Seven scenarios survive: `clean_save`, `correction`,
+`correction_summary`, `correction_disposition`, `correction_add_topic`,
+`missing_topic`, `multi_topic`.
+
+None of this is AIML-2751's doing — it all landed with AIML-2750 — but it
+means the project currently has no automated verification of anything. Worth
+raising alongside the scope point for Sai below.
+
+**Verified still intact** in `notes_workflow.commit_notes` after the import:
+the idempotency replay, the supersede gate (`SupersededRecordError`), and the
+coverage gate (`IncompleteCoverageError`), in that order, with the ordering
+comments from PR #5 carried over. `python -m compileall app scripts` is clean
+and `node --check app/static/js/app.js` passes.
 
 ### What happened
 
@@ -48,8 +114,9 @@ so it now sits at `6ffd86f` with no local commits. That discarded:
    `mock_db.py`, which no longer exists. Recoverable by SHA if ever wanted.
 2. **`dce35cb`** — the `.gitignore` fix. **Needs redoing** (see below).
 
-### The remaining work
+### The work — all done in `3d0229f`
 
+Kept below as the record of what AIML-2751 actually changed.
 Much smaller than before — the rewrite already retired guided from the backend.
 
 **1. Delete two files**
@@ -91,12 +158,12 @@ define a `guided_flow_calls` table and an `agent_mode` column, but
 `bigquery_sink.py` was deleted in the rewrite, so nothing writes to them. Loose
 end from AIML-2750.
 
-### To resume with the assistant
+### To resume with the assistant — ✅ already done
 
-The local copy at `c:\Personal Storage\poc\sellNtell\sell-n-tell` is still the
-**old** structure and cannot be used to edit the new files. A fresh export is
-already sitting in `c:\Personal Storage\poc\sellNtell\_export` (10 markdown
-files). Import it first:
+Left here because the next export will need the same steps. The local copy at
+`c:\Personal Storage\poc\sellNtell\sell-n-tell` **has been** re-imported from
+`c:\Personal Storage\poc\sellNtell\_export` and now matches `6ffd86f` plus the
+AIML-2751 changes. The commands were:
 
 ```powershell
 cd "c:\Personal Storage\poc\sellNtell"
@@ -104,14 +171,21 @@ cd "c:\Personal Storage\poc\sellNtell"
 python tools\fix_mojibake.py --write
 ```
 
-The second line is not optional — the import decodes UTF-8 as the Windows ANSI
-codepage and mangles every emoji and box-drawing character. `.gitignore` is now
-in its target list too.
+The second line is a safety net, not a fix — `import-repo-md.ps1` now reads
+with `-Encoding UTF8` explicitly, so this import produced **no** mojibake and
+`fix_mojibake.py` reported everything clean. Keep running it anyway; it is
+idempotent and costs nothing. Two gotchas: it must be run **from the repo
+root** (`sell-n-tell/`), not the parent — its `TARGETS` are repo-relative and
+it silently prints `skip … (not found)` otherwise; and its target list covers
+only `.gitignore` and the frontend, so pass the Python/YAML files as arguments
+if you want them checked (they were, and were clean).
 
 **Note the import never deletes.** Files removed upstream (`mock_db.py`,
-`db_interface.py`, `bigquery_db.py`, `bigquery_sink.py`) will still be sitting
-in the local copy after importing, and must be deleted by hand or they will
-mislead. Same trap that left the guided files behind on the app machine.
+`db_interface.py`, `bigquery_db.py`, `bigquery_sink.py`) were still sitting in
+the local copy after importing and had to be deleted by hand — they are gone
+as of `3d0229f`. Same trap that left the guided files behind on the app
+machine. A quick check after any future import: diff the tree against
+`_export/_manifest.md`, which lists every file the branch actually has.
 
 ### Then
 
@@ -131,28 +205,30 @@ addressed by this work — reply once it is pushed and the file list is visible.
 With the server running (no `--reload`):
 
 ```powershell
-uv run python scripts/ws_smoke_test.py implicit
+uv run python scripts/ws_smoke_test.py                       # all 7 scenarios
+uv run python scripts/ws_smoke_test.py --scenario clean_save
 ```
 
-Then one browser dictation end to end, hard-reloaded, producing one CRM record.
-Note the smoke harness prints a transcript, not a pass/fail — count the
-committed records:
+No positional argument — the `implicit` this file used to pass now fails on
+argparse.
 
-```powershell
-$r = (Invoke-RestMethod -Uri "http://localhost:8000/api/v1/notes/committed").records
-"TOTAL: $($r.Count)"
-$r | Group-Object ws_session_id | Where-Object Count -gt 1   # must print nothing
-```
+Then one browser dictation end to end, hard-reloaded (the asset version is
+`v=10` now), producing one CRM record.
 
-The record store resets on restart, so note the baseline first. The scenario
-count and the harness itself changed in the rewrite — check what
-`ws_smoke_test.py` actually defines now rather than assuming seven.
+**Read the transcript, because there is nothing else to read.** The
+`/api/v1/notes/committed` count this section used to prescribe no longer
+exists — see "Testing is more broken than this file says" above. Watch the
+server log for `Commit BLOCKED for session_id=` and confirm each scenario
+reaches a `commit_visit_notes` response with `status: "success"` exactly once.
 
-**`scripts/test_correction_reliability.py` is gone.** It was 16 assertions
-covering the supersede gate, retry idempotency and correction chains, and passed
-on 2026-08-21 — only a stale `.pyc` remains in `scripts/__pycache__/`. Check
-whether it survived on the app machine; if not it is worth rewriting, because
-the smoke suite would still pass with the supersede gate deleted.
+**`scripts/test_correction_reliability.py` is gone**, and its stand-in
+`scripts/repro_orphan_restage.py` cannot run either (it needs the deleted REST
+layer). The supersede gate therefore has no executable coverage at all: the
+smoke suite would still pass with that gate deleted, because the model always
+commits the record it just staged and never the one it replaced. Restoring
+coverage means an in-process test calling `notes_workflow.stage_notes` /
+`commit_notes` directly — which is now easy, since there is no HTTP hop to
+stand up.
 
 ### Guided is preserved
 
@@ -200,11 +276,11 @@ and every follow-up story written against the old structure.
 
 | Ticket | Title | Status |
 |---|---|---|
-| **AIML-2751** | Remove the guided flow | **PR #6 open, changes requested.** Branch reset onto the rewritten `development`; work to redo — see START HERE |
+| **AIML-2751** | Remove the guided flow | **PR #6 open, changes requested. Code done locally (`3d0229f`), not yet pushed.** Rebuilt on the rewritten `development` — see START HERE |
 | **AIML-2750** | CRM backend decision (Dharun) | **Closed, merged as PR #7 `6ffd86f`.** Delivered as a full re-architecture: `mock_db`/`db_interface`/`bigquery_db`/`bigquery_sink` deleted, `notes_workflow.py` + `schemas.py` + YAML resources added |
 | **AIML-2698** | Disposition + State Correctness | **Closed.** Delivered in PR #5 |
 | **AIML-2705** | Disposition Quality Guardrails | **Closed.** ACs 1/2/5 delivered; AC4 took its "documents residual risk" clause; AC3 met with 3 cases |
-| **AIML-2703** | Correction & Re-stage Reliability | **Closed.** All 5 ACs met. Supersede-gate coverage is `scripts/repro_orphan_restage.py` (exit 0 = gate holds), *not* the `test_correction_reliability.py` this table used to name — that script does not exist |
+| **AIML-2703** | Correction & Re-stage Reliability | **Closed, but now uncovered.** All 5 ACs met in code (the gate is verified present in `notes_workflow.commit_notes`). `scripts/repro_orphan_restage.py`, named here as the coverage, drives the `/api/v1` layer AIML-2750 deleted, so it cannot run — and it is local-only, not on the branch |
 | **AIML-2702** | Eval Harness (faithfulness / factualness / contextualness) | Not started. Q3-S3 |
 | **AIML-2697** | FAR Demo Hardening: Mode UX + Demo Script | Partly in flight — the audio fixes are tagged to it |
 | **AIML-2651** | Error Handling & Resilience | Not started. No retry/backoff anywhere; timeouts hardcoded |
@@ -231,52 +307,61 @@ optional BigQuery backend, and a BigQuery analytics sink.
 
 ## 3. Architecture
 
-> ⚠️ **Stale below this line.** This section describes the pre-AIML-2750
-> structure — `mock_db.py`, `db_interface.py`, `bigquery_db.py` and
-> `bigquery_sink.py` no longer exist. The storage and config layer is now
-> `notes_workflow.py` + `schemas.py` + `resources/*.yaml`. The WS/ADK/Live flow
-> at the top is still accurate. Rewrite this section once the local copy is
-> re-imported from `_export`.
+Rewritten 2026-09-07 against the post-AIML-2750 code, after the re-import.
 
 ```
 browser mic (16 kHz Int16 PCM, 20 ms chunks)
-   │  WS /ws/{user_id}/{session_id}?campaign_type=&planned_topics=&agent_mode=
+   │  WS /ws/{user_id}/{session_id}?planned_topics=&campaign_type=
    ▼
 FastAPI upstream_task ──> ADK LiveRequestQueue ──> Gemini Live (Vertex, native audio)
                                                         │
                           downstream_task <── events ───┘
-                                ├─ function_call → tools.py → HTTP POST → own REST API → db
+                                ├─ function_call → tools.py → notes_workflow (in-process)
                                 └─ audio chunks  → WS → browser playback
 ```
 
-**The tools never touch the store.** They HTTP-call the app's own `/api/v1`
-endpoints, so **all enforcement belongs in the REST layer** — implicit, guided
-and hybrid inherit it for free. It's also why gaps reproduce with plain HTTP
-calls, no mic and no model.
+**The HTTP loopback is gone, and so is the REST layer.** `tools.py` calls
+`notes_workflow` directly, in-process. `main.py` serves exactly two routes,
+`/healthz` and `/`. This inverts the old rule: enforcement no longer "belongs
+in the REST layer", it lives in `notes_workflow` — and, critically, **gaps no
+longer reproduce with plain HTTP calls**, which is what broke every REST-based
+test this project had. See the testing warning in START HERE.
 
-**Storage indirection (new, from `development`):**
+`agent_mode` is gone entirely — not a WS parameter, not on the record, not a
+Runner key. One agent, one `Runner`. `planned_topics` is live and seeds the
+prompt's coverage-reminder block; `campaign_type` is accepted and logged but
+**inert** — `main.py`'s `websocket_endpoint` docstring says so explicitly, and
+`notes_workflow.validate_payload()` never reads it.
 
-- `db_interface.py` — `get_db()` returns `bigquery_db` when `BIGQUERY_ENABLED=true`,
-  else `mock_db`. Exposes it as `db`. `CRMStore`'s signatures are now correct;
-  the rest of B1 (it declares `self` on methods a *module* has to satisfy)
-  stands.
-- `bigquery_db.py` — delegates config/staging **and all commit gating** to
-  `mock_db`, owns only the BigQuery insert (A1 fix). Gates are inherited by
-  delegation; don't re-implement one here.
-- `config.py` — just `API_BASE`.
-- **Two BigQuery flags:** `db_interface` reads `BIGQUERY_ENABLED`,
-  `bigquery_sink` reads `VOICE_NOTES_BQ_ENABLED`. One feature, two switches.
+**The layer, as it now is:**
 
-**Modes** (`agent_mode`, one `Runner` each):
-- `implicit` — `agent.py` + `tools.py`, 2 tools, ~2 rep turns. **The only mode.**
-- `guided` — 5 tools, ~8 turns. Removed in AIML-2751; recoverable from the tag
-  `archive/guided-flow`.
-- hybrid exists on `feature/AIML-2686` — not ours
+- `notes_workflow.py` (678 lines) — staging, the correction/supersede chain,
+  the coverage gate, commit and its idempotency replay. In-memory
+  `_STAGED_NOTES` only; nothing survives a restart, and there is **no
+  `list_committed`** — a committed record is just
+  `_STAGED_NOTES[sid]["committed"] = True`.
+- `schemas.py` — the Pydantic payloads pulled out of the old `mock_db`.
+- `resources/dispositions.yaml` — one universal disposition registry. No
+  per-campaign variants any more.
+- `resources/behavioral_rules.yaml` — the agent's static prompt text. Now the
+  single source, since `agent_guided.py`'s prompt is gone.
+- Durable audit is ADK's `BigQueryAgentAnalyticsPlugin` on the Runner, not
+  hand-rolled writes. **The two-BigQuery-flags problem is resolved** —
+  `BIGQUERY_ENABLED` and `VOICE_NOTES_BQ_ENABLED` are both gone, replaced by
+  the single `BQ_ANALYTICS_ENABLED` (default `false`), with
+  `BQ_ANALYTICS_DATASET_ID` / `_TABLE_ID` / `_LOCATION` beside it. Open
+  decision #5 below is closed.
+- `config.py` — now **dead**. It defines `API_BASE` for the HTTP loopback that
+  no longer exists, and nothing imports it. Safe to delete; left alone because
+  it is outside AIML-2751.
+
+**Modes.** `implicit` is the only flow: `agent.py` + `tools.py`, 2 tools
+(`stage_visit_notes`, `commit_visit_notes`), ~2 rep turns. `guided` is
+retired (AIML-2751) and recoverable from the tag `archive/guided-flow`. A
+hybrid exists on `feature/AIML-2686` — not ours.
 
 On identical input the two modes produced **identical dispositions**; they
 differed only in how much the rep was asked, which is why guided went.
-`agent_mode` survives the removal as a parameter, on the committed record, and
-as the BigQuery sink's table key.
 
 ---
 
@@ -337,23 +422,30 @@ Symptom to recognise: the file on disk is correct, `Invoke-WebRequest` of the
 plain URL returns the correct content, and the browser still runs old code.
 
 **Debugging:** `_log_event` in `main.py` prints every downstream event without
-PCM noise. Watch for `commit_visit_notes BLOCKED:`, `Staging rejected for
-campaign_type=`, `Commit BLOCKED for session_id=`.
+PCM noise. The strings to watch for, verified against the current code:
+`commit_visit_notes BLOCKED:` (turn_guard, two variants — `real
+confirmation_text was never…` and `no new rep reply since staging…`),
+`Staging rejected by validation:` (was `Staging rejected for campaign_type=`;
+campaign rules are gone with campaign_type), and `Commit BLOCKED for
+session_id=` (superseded, and incomplete coverage).
 
 ---
 
 ## 5. Tests
 
-> ⚠️ **Partly stale.** `ws_smoke_test.py` changed in the rewrite (guided
-> scenarios removed, `agent_mode` no longer sent) — check what it defines now
-> rather than trusting the counts below.
+Rechecked 2026-09-07 against the post-AIML-2750 code.
 
-**Conversational harness** (no mic, real WebSocket, text turns):
+**Conversational harness** (no mic, real WebSocket, text turns). This is the
+**only** working test in the project:
 
 ```powershell
-uv run python scripts/ws_smoke_test.py implicit   # 7 scenarios
-uv run python scripts/ws_smoke_test.py implicit --scenario clean_save
+uv run python scripts/ws_smoke_test.py                       # 7 scenarios
+uv run python scripts/ws_smoke_test.py --scenario clean_save
 ```
+
+No positional mode argument any more. The seven scenarios are `clean_save`,
+`correction`, `correction_summary`, `correction_disposition`,
+`correction_add_topic`, `missing_topic`, `multi_topic`.
 
 Bar: every scenario commits, one CRM record each, no duplicates.
 
@@ -363,37 +455,48 @@ Bar: every scenario commits, one CRM record each, no duplicates.
   committed on its own re-run, no code change in between. Model
   non-determinism, same family as Gap 6/F5 (see `change-log.md`, Batch N).
 
-The committed-record count is in-memory, so **a server restart resets it to 0**.
-Always note the baseline before reading a count as a failure.
+🔴 **There is no longer a way to count the result.** This section used to say
+"counting the result is the real check, not the transcript", via
+`Invoke-RestMethod .../api/v1/notes/committed`. AIML-2750 deleted the whole
+`/api/v1` layer — `main.py` serves only `/healthz` and `/` — and
+`notes_workflow` has no `list_committed`. Committed records exist only as
+`_STAGED_NOTES[sid]["committed"] = True` in process memory. **Reading the
+transcript is now the only check available**, which is a real regression in
+verifiability, not a documentation gap.
 
-**Counting the result is the real check**, not the transcript — the harness
-prints a live log and no pass/fail summary:
+Restoring it is cheap and is the first thing to do before trusting any smoke
+run again: a read-only `GET /healthz`-style debug route over `_STAGED_NOTES`,
+or a query against the BigQuery table the ADK analytics plugin writes when
+`BQ_ANALYTICS_ENABLED=true`. The duplicate check that mattered — group by
+`ws_session_id`, expect no group above 1, since each scenario opens its own —
+needs whichever of those lands first.
 
-```powershell
-$r = (Invoke-RestMethod -Uri "http://localhost:8000/api/v1/notes/committed").records
-"TOTAL: $($r.Count)"                                    # expect 7
-$r | Group-Object agent_mode | Select-Object Name, Count # implicit 7
-$r | Group-Object ws_session_id | Where-Object Count -gt 1   # must print nothing
-```
+**One scenario is intermittent — re-run before calling a failure a
+regression:** `correction_summary` (see above).
 
-The third line is the duplicate check: each scenario opens its own
-`ws_session_id`, so any group above 1 is two CRM records for one visit.
+🔴 **The REST suite is gone too.** The 9-case block in
+`AIML-2698-experiments.md` (coverage gate 409, campaign rules 422, happy path,
+skip-after-reminder, manual review, self-skip rejection) drove `/api/v1` and
+cannot run. Note two of those cases are also now meaningless on their own
+terms: campaign rules no longer exist, and there is one universal disposition
+registry.
 
-**No automated coverage for the AIML-2703 supersede gate.** A repro script was
-written to prove the orphan bug (stage → correct → commit the *old* id, expect
-409) and deliberately **not kept in the repo** — it existed to diagnose, and the
-bug is fixed. Worth knowing: the smoke suite exercises the correction path but
-never tries to commit a superseded draft, so if that gate regressed, all six
-implicit scenarios would still pass. Fold an assertion into the REST suite if
-the gate is ever in question.
+🔴 **The AIML-2703 supersede gate has no coverage at all.**
+`scripts/repro_orphan_restage.py` — local-only, never on the branch — was the
+stand-in named in §1, and it is a `/api/v1` client. The gate itself is
+verified present in `notes_workflow.commit_notes`, above the coverage gate,
+raising `SupersededRecordError`. But the smoke suite exercises the correction
+path without ever trying to commit a superseded draft, so **all seven
+scenarios would still pass with that gate deleted.** The fix is now easier
+than it was: call `notes_workflow.stage_notes` / `commit_notes` directly
+in-process — stage, re-stage with `previous_session_id`, commit the *old* id,
+expect `SupersededRecordError`. No server, no mic, no model.
 
-**REST suite** — 9 cases, ~15 min, no mic or model. Paste-able block in
-`AIML-2698-experiments.md`. Covers the coverage gate (409), campaign rules
-(422), happy path, skip-after-reminder, manual review, self-skip rejection.
-
-Harness gap: it **hardcodes `campaign_type=standard_sales`**, so none of the
-`enterprise_field` golden-path scenarios are covered. Adding `--campaign` is
-step one for AIML-2702.
+Old harness gap, now moot: it hardcoded `campaign_type=standard_sales`, so no
+`enterprise_field` scenarios were covered. `campaign_type` is inert now, so
+adding `--campaign` buys nothing until `validate_payload()` reads it again.
+AIML-2702's step one is no longer that flag — it is rebuilding an assertable
+harness at all.
 
 ---
 
@@ -428,9 +531,18 @@ concurrency races (A2, A10) were invisible.
 2. **Who consumes `needs_manual_review`?** Nothing downstream reads it.
 3. **Is coverage a blocker or a prompt?** With category topics, most visits will
    trigger reminders — 67% of real notes name no product category at all.
-4. **Two flag shapes** — guided uses null code + `needs_manual_review`, implicit
-   uses code 99. Unify (this is what's left of AIML-2705's scope).
-5. **Two BigQuery env flags** — `BIGQUERY_ENABLED` vs `VOICE_NOTES_BQ_ENABLED`.
+4. **Two flag shapes** — guided used null code + `needs_manual_review`,
+   implicit uses code 99. Still open, and now odder: with guided retired
+   nothing *sets* `needs_manual_review`, but `schemas.py` still declares it and
+   `notes_workflow`'s coverage gate still honours it as a legitimate reason for
+   a topic to carry no code. So it is a live branch with no producer. Either
+   delete it or make implicit use it. (What's left of AIML-2705's scope.)
+5. ~~**Two BigQuery env flags**~~ — **closed by AIML-2750.** `BIGQUERY_ENABLED`
+   and `VOICE_NOTES_BQ_ENABLED` are both gone; there is one flag,
+   `BQ_ANALYTICS_ENABLED`.
+6. **Restore verifiability** — new, and the most urgent of these. The project
+   has no assertable test of any kind since the `/api/v1` layer was deleted.
+   See §5. Not really a product decision, but it needs someone to own it.
 
 ---
 
