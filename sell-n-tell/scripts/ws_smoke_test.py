@@ -67,7 +67,7 @@ SCENARIOS: dict[str, list[str]] = {
     #
     # None of these can exercise the supersede gate -- the model always commits
     # the record it just staged, never the one it replaced. That gate is covered
-    # by scripts/test_correction_reliability.py.
+    # by scripts/repro_orphan_restage.py, which drives notes_workflow directly.
     "correction_summary": [
         "Met on site to talk about pricing. They said it was too expensive. "
         "End of notes.",

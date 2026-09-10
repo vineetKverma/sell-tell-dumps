@@ -1,157 +1,197 @@
-"""AIML-2703 -- reproduce (or rule out) orphaned staged records after a correction.
+"""AIML-2703 regression suite -- correction, re-stage and commit gates.
 
-Gap 15 hypothesis, from code reading, never reproduced:
-
-    stage_notes() mints a BRAND-NEW session_id on every call, including a
-    correction (`previous_session_id=...`). The record being corrected is left
-    in _STAGED_NOTES: not deleted, not marked superseded, and still a valid
-    commit target. So one visit with N corrections leaves N+1 committable
-    drafts, each holding a different version of the data.
-
-    Committing an old draft writes the PRE-correction payload -- the exact
-    thing the rep just corrected. And because mock_db's idempotency guard keys
-    on session_id, draft A and draft B look like two unrelated commits, so both
-    succeed and one visit produces two CRM records.
-
-Why it was never reproduced through the agent: tools.py overwrites
-`crm_staged_session_id` on every re-stage, so the agent only ever knows the
-newest id and always commits the right one. This script bypasses the agent and
-holds the old id deliberately -- which is what a retry, a second client, or any
-future non-agent API consumer would effectively do.
-
-REST only: no microphone, no model, no Vertex. Deterministic, runs in seconds.
+Runs the workflow in-process. No server, no Vertex, no credentials:
 
     uv run python scripts/repro_orphan_restage.py
 
-Exit code 1 if the gap reproduces, 0 if it does not.
+Originally this drove the REST API over HTTP. The contract-simplification pass
+(AIML-2750) removed that API -- ``/api/v1/notes/stage`` and ``/commit`` no
+longer exist, and the only network surface is the WebSocket -- so the script
+could no longer run at all. It now imports ``notes_workflow`` directly, which is
+where those gates actually live.
+
+That is a straight improvement: the gates are pure functions over in-process
+state, so testing them needs neither a running app nor a model. The
+conversational smoke test cannot cover them at all -- the agent always commits
+the record it just staged, never the one it replaced, so the supersede gate can
+only be exercised by holding an old session_id deliberately, which is what this
+does.
+
+The original hypothesis, from code reading, now fixed and guarded here:
+
+    stage_notes() mints a brand-new session_id on every call, including a
+    correction. The record being corrected was left in _STAGED_NOTES -- not
+    deleted, not marked superseded, still a valid commit target. So one visit
+    with N corrections left N+1 committable drafts, each holding a different
+    version of the data. Committing an old draft wrote the PRE-correction
+    payload, and because the idempotency guard keys on session_id, the two
+    looked like unrelated commits and both succeeded: one visit, two records.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import sys
+import types
+from pathlib import Path
 
-import httpx
+# Load notes_workflow (and the schemas it imports) directly rather than through
+# `voice_notes_agent/__init__.py`, which pulls in the ADK agent. The gates are
+# plain functions over in-process state and need none of that -- importing the
+# package would make this script require ADK, Vertex config and a model name to
+# test logic that touches none of them.
+_PKG_DIR = Path(__file__).resolve().parents[1] / "app" / "voice_notes_agent"
+_pkg = types.ModuleType("_vna")
+_pkg.__path__ = [str(_PKG_DIR)]
+sys.modules["_vna"] = _pkg
 
-BASE = "http://localhost:8000/api/v1"
-CAMPAIGN = "standard_sales"
-PLANNED = ["HVAC"]
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(
+        f"_vna.{name}", _PKG_DIR / f"{name}.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[f"_vna.{name}"] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def _payload(event_type: str, summary: str) -> dict:
-    """A minimal, legal single-topic payload for `standard_sales`."""
+_load("schemas")
+wf = _load("notes_workflow")
+
+results: list[bool] = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    results.append(ok)
+    print(f"{'PASS' if ok else 'FAIL'}  {name}{'  ' + detail if detail else ''}")
+
+
+def topic(name: str, code: int = 8, summary: str = "s") -> dict:
     return {
-        "event_type": event_type,
+        "topic": name,
+        "disposition_code": code,
         "executive_summary": summary,
-        "raw_transcript_backup": (
-            "Met with Bethany about HVAC. She is sending an order for AC units."
-        ),
-        "topics": [
-            {
-                "topic": "HVAC",
-                "disposition_code": 2,  # Order Placed
-                "executive_summary": "Rep received an order for AC units.",
-                "discussed": True,
-            }
-        ],
-        "planned_topics": PLANNED,
-        "campaign_type": CAMPAIGN,
+        "discussed": True,
     }
 
 
-def _stage(client: httpx.Client, payload: dict, previous: str | None) -> str:
-    params = {"agent_mode": "implicit"}
-    if previous:
-        params["previous_session_id"] = previous
-    resp = client.post(f"{BASE}/notes/stage", json=payload, params=params)
-    resp.raise_for_status()
-    return resp.json()["session_id"]
+def payload(topics: list[dict], summary: str = "Visit summary.") -> dict:
+    return {
+        "event_type": "Meeting",
+        "executive_summary": summary,
+        "raw_transcript_backup": "transcript",
+        "topics": topics,
+    }
 
 
-def _commit(client: httpx.Client, session_id: str) -> httpx.Response:
-    return client.post(
-        f"{BASE}/notes/commit",
-        json={
-            "session_id": session_id,
-            "confirmed": True,
-            "agent_mode": "implicit",
-            "campaign_type": CAMPAIGN,
-        },
-    )
+def staged_count() -> int:
+    return len(wf._STAGED_NOTES)
+
+
+def committed_ids() -> set[str]:
+    return {
+        sid
+        for sid, rec in wf._STAGED_NOTES.items()
+        if rec.get("committed")
+    }
 
 
 def main() -> int:
-    with httpx.Client(timeout=15.0) as client:
-        # 1. Rep dictates. Draft A: "On-site visit".
-        draft_a = _stage(
-            client, _payload("On-site visit", "Visit covering HVAC."), None
+    # --- the orphan bug: committing a draft a correction replaced -----------
+    first = wf.stage_notes(
+        payload([topic("Pricing discussion", 2)]), planned_topics=["Pricing discussion"]
+    )
+    second = wf.stage_notes(
+        payload([topic("Pricing discussion", 8)]),
+        previous_session_id=first["session_id"],
+        planned_topics=["Pricing discussion"],
+    )
+    check(
+        "a correction re-stages under a new session_id",
+        second["session_id"] != first["session_id"],
+    )
+
+    try:
+        wf.commit_notes(first["session_id"], True)
+        check("committing the superseded draft is refused", False, "no raise")
+    except wf.SupersededRecordError as exc:
+        check(
+            "committing the superseded draft is refused",
+            exc.superseded_by == second["session_id"],
+            f"superseded_by={exc.superseded_by}",
         )
-        print(f"draft A (original)          : {draft_a}")
 
-        # 2. Rep corrects the event type. Draft B supersedes A -- in intent.
-        draft_b = _stage(
-            client,
-            _payload("Phone Call", "Phone call covering HVAC."),
-            previous=draft_a,
+    check("the refused commit committed nothing", not committed_ids())
+
+    wf.commit_notes(second["session_id"], True)
+    check(
+        "the corrected record commits normally",
+        committed_ids() == {second["session_id"]},
+    )
+
+    # --- retry safety -------------------------------------------------------
+    again = wf.commit_notes(second["session_id"], True)
+    check("a retry is accepted rather than 404ing", again is not None)
+    check(
+        "the retry created no second committed record",
+        committed_ids() == {second["session_id"]},
+    )
+
+    # --- a chain of corrections: only the last is committable ---------------
+    a = wf.stage_notes(payload([topic("Pricing discussion", 1)]), planned_topics=["Pricing discussion"])
+    b = wf.stage_notes(
+        payload([topic("Pricing discussion", 2)]),
+        previous_session_id=a["session_id"],
+        planned_topics=["Pricing discussion"],
+    )
+    c = wf.stage_notes(
+        payload([topic("Pricing discussion", 8)]),
+        previous_session_id=b["session_id"],
+        planned_topics=["Pricing discussion"],
+    )
+    for label, sid in (("first", a["session_id"]), ("middle", b["session_id"])):
+        try:
+            wf.commit_notes(sid, True)
+            check(f"the {label} draft in a chain is refused", False, "no raise")
+        except wf.SupersededRecordError:
+            check(f"the {label} draft in a chain is refused", True)
+    wf.commit_notes(c["session_id"], True)
+    check(
+        "only the newest draft in the chain commits",
+        c["session_id"] in committed_ids() and a["session_id"] not in committed_ids(),
+    )
+
+    # --- commit without a valid staged session ------------------------------
+    try:
+        wf.commit_notes("no-such-session", True)
+        check("an unknown session_id raises", False, "no raise")
+    except KeyError:
+        check("an unknown session_id raises", True)
+
+    # --- coverage gate, and its release on a correction ---------------------
+    planned = ["Pricing discussion", "Contract renewal"]
+    d = wf.stage_notes(payload([topic("Pricing discussion", 8)]), planned_topics=planned)
+    try:
+        wf.commit_notes(d["session_id"], True)
+        check("an incomplete record is blocked", False, "no raise")
+    except wf.IncompleteCoverageError as exc:
+        check(
+            "an incomplete record is blocked",
+            exc.missing_topics == ["Contract renewal"],
+            str(exc.missing_topics),
         )
-        print(f"draft B (after correction)  : {draft_b}")
+    e = wf.stage_notes(
+        payload([topic("Pricing discussion", 8), topic("Contract renewal", 2)]),
+        previous_session_id=d["session_id"],
+        planned_topics=planned,
+    )
+    wf.commit_notes(e["session_id"], True)
+    check("the correction that adds the topic commits", e["session_id"] in committed_ids())
 
-        if draft_a == draft_b:
-            print(
-                "\nNOT REPRODUCED: the correction reused the same session_id, "
-                "so it overwrote in place and no orphan exists."
-            )
-            return 0
-
-        # 3. Commit the OLD draft -- the pre-correction data the rep rejected.
-        resp_a = _commit(client, draft_a)
-        print(f"\ncommit(A) -> HTTP {resp_a.status_code}")
-
-        if resp_a.status_code != 200:
-            print(
-                "NOT REPRODUCED: the superseded draft was refused "
-                f"({resp_a.json().get('detail', resp_a.text)})."
-            )
-            return 0
-
-        crm_a = resp_a.json().get("crm_record_id")
-        print(f"  committed as {crm_a}")
-
-        # 4. And the newest one, as the agent would have.
-        resp_b = _commit(client, draft_b)
-        crm_b = resp_b.json().get("crm_record_id") if resp_b.status_code == 200 else None
-        print(f"commit(B) -> HTTP {resp_b.status_code}  {crm_b or ''}")
-
-        # 5. What actually landed in the CRM.
-        records = client.get(f"{BASE}/notes/committed").json()["records"]
-        ours = [
-            r
-            for r in records
-            if r.get("crm_record_id") in {crm_a, crm_b}
-        ]
-
-        print("\n--- committed records for ONE visit ---")
-        for rec in ours:
-            # commit_notes spreads the payload at the top level of the
-            # committed record, so event_type is not nested under "payload".
-            print(
-                f"  {rec.get('crm_record_id')}  "
-                f"event_type={rec.get('event_type')!r}"
-            )
-
-        if crm_a and crm_b:
-            print(
-                "\nREPRODUCED: one visit produced two CRM records, and the "
-                "first carries the event type the rep corrected away from. "
-                "The idempotency guard cannot catch this -- it keys on "
-                "session_id, and these are two different ids."
-            )
-            return 1
-
-        print(
-            "\nPARTIALLY REPRODUCED: the superseded draft committed, but the "
-            "corrected one did not. Still a wrong-data write."
-        )
-        return 1
+    failed = results.count(False)
+    print(f"\n{len(results) - failed}/{len(results)} passed")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
