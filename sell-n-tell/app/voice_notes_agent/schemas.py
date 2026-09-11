@@ -63,11 +63,13 @@ class DiscussionTopic(BaseModel):
         default=False,
         description=(
             "True if the disposition code had to be left unresolved for a "
-            "human to fix. Only the retired guided flow ever set this (after "
-            "3 failed disposition-confirm attempts); the implicit flow uses "
-            "code 99 instead. Kept because notes_workflow's coverage gate "
-            "still honours it, and because unifying the two flag shapes is "
-            "an open decision -- see AIML-2705."
+            "human to fix. NOT partitioned by flow: stage_notes sets this "
+            "automatically whenever disposition_code == 99, so the surviving "
+            "flow produces both together. The retired guided flow set it "
+            "WITHOUT a code (after 3 failed disposition-confirm attempts), "
+            "which is the shape validate_payload's no-code exemption was "
+            "written for -- that exemption is now vestigial. Unifying the "
+            "two shapes is an open decision -- see AIML-2705."
         ),
     )
 

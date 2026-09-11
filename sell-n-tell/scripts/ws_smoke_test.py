@@ -67,7 +67,8 @@ SCENARIOS: dict[str, list[str]] = {
     #
     # None of these can exercise the supersede gate -- the model always commits
     # the record it just staged, never the one it replaced. That gate is covered
-    # by scripts/repro_orphan_restage.py, which drives notes_workflow directly.
+    # by tests/test_notes_workflow_gates.py, which drives notes_workflow
+    # directly -- including the live same-session_id call pattern tools.py uses.
     "correction_summary": [
         "Met on site to talk about pricing. They said it was too expensive. "
         "End of notes.",

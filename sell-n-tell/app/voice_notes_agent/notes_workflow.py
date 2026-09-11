@@ -163,9 +163,18 @@ def validate_payload(payload: dict[str, Any]) -> tuple[list[str], dict[str, Any]
     for idx, topic in enumerate(payload.get("topics") or []):
         label = (topic.get("topic") or f"topic #{idx + 1}").strip()
         code = topic.get("disposition_code")
-        # Two cases legitimately carry no code: a planned topic the rep
-        # never got to, and (guided-flow only, now retired) a topic flagged
-        # for manual review. Anything else is a gap.
+        # A planned topic the rep never got to legitimately carries no
+        # code. Anything else is a gap.
+        #
+        # VESTIGIAL: the `needs_manual_review` half of this exemption is
+        # effectively dead. It existed for the retired guided flow's
+        # "3 failed confirm attempts" path, which set the flag with no code.
+        # The surviving flow only reaches needs_manual_review=True via
+        # disposition_code=99 (see stage_notes below), which is not None, so
+        # the exemption is never the reason a topic passes. Kept rather than
+        # removed because dropping it would newly REJECT a payload where the
+        # model sets the flag itself -- a behaviour change that belongs with
+        # the AIML-2705 flag-shape unification, not here.
         if code is None:
             if topic.get("discussed", True) and not topic.get(
                 "needs_manual_review", False
@@ -285,7 +294,9 @@ class SupersededRecordError(Exception):
     and because the idempotency check keys on session_id, committing both
     drafts looks like two unrelated saves for one visit.
 
-    Reproduced by scripts/repro_orphan_restage.py (AIML-2703).
+    Guarded by tests/test_notes_workflow_gates.py (AIML-2703). Note this
+    orphan shape needs DISTINCT session ids, so it is reachable only by a
+    caller that is not tools.py -- see that test module's docstring.
     """
 
     def __init__(self, session_id: str, superseded_by: str) -> None:

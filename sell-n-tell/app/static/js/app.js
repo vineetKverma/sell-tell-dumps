@@ -898,13 +898,22 @@ function handleAdkEvent(ev) {
     // agent says next is suppressed until a real tool call proves it's done
     // guessing (see the `suppressAgentSpeech` declaration above).
     //
-    // The gate is safe to arm unconditionally because every agent turn in
-    // this flow ends in a tool call (stage_visit_notes, then
-    // commit_visit_notes) which lifts it. A flow with turns that are pure
-    // speech and NO tool call would deadlock here -- nothing would lift the
-    // gate, and that speech/caption would be dropped forever. The retired
-    // guided flow was exactly that shape, which is why this used to be
-    // conditional on mode.
+    // The gate is lifted only by a real tool call, so any agent turn that is
+    // pure speech with NO tool call leaves it armed -- that speech and its
+    // caption are dropped, and the session looks like it has hung.
+    //
+    // KNOWN GAP (predates the guided removal, not fixed here): behavioral_rules
+    // .yaml instructs exactly such a turn -- "if the transcription is empty or
+    // contains no speech, DO NOT call stage_visit_notes; tell them you couldn't
+    // hear anything and ask them to record again". So the one message designed
+    // to recover from a no-speech turn is the one message this gate swallows.
+    // Lifting it needs a second trigger (a turn_complete carrying speech but no
+    // tool call, or a timeout); that is a behaviour change and wants its own
+    // ticket.
+    //
+    // This used to be conditional on agent_mode because the retired guided
+    // flow had many pure-speech turns. Unconditional is right for the one
+    // remaining flow -- it just isn't the guarantee the old comment claimed.
     if (
       ev.inputTranscription.finished &&
       (ev.inputTranscription.text || "").trim()
