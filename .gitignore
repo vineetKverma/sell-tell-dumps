@@ -175,3 +175,10 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 .env
+
+# Golden dataset (AIML-2898): contains customer visit notes and contact names.
+# Never commit or push.
+golden/
+
+# AIML-2898 code bundle (transfer only)
+bundle-2898/

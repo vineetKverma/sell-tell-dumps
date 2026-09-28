@@ -21,7 +21,11 @@ Neither pattern is reachable from the conversational smoke test: the agent
 always commits the record it just staged, so no scripted scenario can hold a
 stale id or exercise a second draft.
 
-    uv run pytest tests/ -q      # no server, no ADK, no credentials
+    uv run pytest tests/ -q
+
+No server, no credentials, no Vertex config. The dependencies still get
+installed as normal; the tests just never import the ADK agent (see
+conftest.py), so nothing that needs a model or a network connection runs.
 """
 
 from __future__ import annotations

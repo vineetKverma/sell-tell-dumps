@@ -171,3 +171,7 @@ junit*.xml
 *.adk/
 app.voice_notes_agent
 committed_notes.json
+
+# Golden dataset curation (AIML-2898): source exports and generated records
+# carry customer and contact names -- never commit them.
+evals/data/

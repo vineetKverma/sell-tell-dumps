@@ -18,11 +18,27 @@ dependencies = [
     "pyarrow>=25.0.1",
 ]
 
-[project.optional-dependencies]
+# A dependency group rather than an optional-dependencies extra: `uv run` and
+# `uv sync` install the `dev` group by default, so `uv run pytest tests/ -q`
+# works with no flags. As an extra it needed `--extra dev`, and the bare command
+# failed with "program not found".
+[dependency-groups]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
 ]
+# Golden dataset curation (AIML-2898) only -- reading the .xlsb source export.
+# Opt-in: `uv run --group dataset ...`. Kept out of `dev` so the unit tests
+# don't pull in pandas.
+dataset = [
+    "pandas>=2.2.0",
+    "pyxlsb>=1.0.10",
+    "openpyxl>=3.1.0",
+]
+
+[tool.pytest.ini_options]
+# Lets tests import the `evals` package from the repo root.
+pythonpath = ["."]
 
 [build-system]
 requires = ["hatchling"]

@@ -6,229 +6,141 @@ why. Then `plan-after-implicit-decision.md` for the current piece of work, and
 
 ---
 
-## ✅ START HERE — AIML-2751 code is done; it needs pushing and testing
+## ✅ START HERE — PR #6 is answered and waiting on re-review
 
-Current as of 2026-09-07. Read this whole section before touching anything —
-`development` is not the codebase this file described a week ago.
+Current as of 2026-09-17. `development` was re-architected by AIML-2750 in
+August — `mock_db.py`, `db_interface.py`, `bigquery_db.py` and
+`bigquery_sink.py` are gone, replaced by `notes_workflow.py`, `schemas.py` and
+`resources/*.yaml`. Sections 3 and 5 below still describe the old shape; the
+warnings there say so.
 
-### Where this stands right now
+### Where this stands
 
-The local copy has been re-imported from `_export` and the AIML-2751 work is
-**committed locally as `3d0229f`** (the WIP that preceded it is `a3051f8`).
-What was done, against the sections below:
+**PR #6 (AIML-2751, remove the guided flow) is open with every review comment
+addressed.** Nothing is outstanding on our side except Suresh's reply.
 
-- **Steps 1–4 are all done.** Both guided files deleted; the four modules
-  AIML-2750 removed upstream (`mock_db.py`, `db_interface.py`,
-  `bigquery_db.py`, `bigquery_sink.py`) deleted too, since the importer never
-  deletes and they had survived the import; `app.js` stripped; the asset
-  version bumped 9 → 10 in `index.html` **and** in `app.js`'s two module
-  imports; `.gitignore` split and given its trailing newline.
-- **Fewer comments needed changing than step 3 predicted.** `main.py`,
-  `tools.py`, `agent.py` and `ws_smoke_test.py` already read "retired" after
-  the rewrite. Only `notes_workflow.py` and `behavioral_rules.yaml` still said
-  "being retired separately". `schemas.py`'s `needs_manual_review` description
-  was also updated to explain why a guided-only field survives.
-- **One extra deletion in `app.js`** worth knowing about at review time: the
-  early return on `resp.status === "next_topic" || resp.error ===
-  "no_reply_heard"` went too. Neither value is emitted anywhere any more —
-  both were `tools_guided`'s. `tools.py`'s turn-guard refusal is
-  `no_confirmation_heard`, which the normal refusal path already handles.
+Three rounds of review, all answered:
 
-**Still to do:** push, reply on PR #6, and run the tests — but read
-"Testing is more broken than this file says" first, because the commands in
-§5 no longer work.
+1. **First round (3 comments)** — resolved. The confusing diff was because the
+   branch was cut before AIML-2750 merged; it was rebuilt on the new
+   `development`.
+2. **Second round (6 comments)** — resolved, pushed as `617faf8`.
+3. **Third round (1 comment)** — pytest was declared as an
+   `[project.optional-dependencies]` extra, which `uv run` does not install, so
+   the documented `uv run pytest tests/ -q` failed with "program not found".
+   Moved to `[dependency-groups] dev`, which `uv run` installs by default.
+   Verified after a `uv sync` so it is not leaning on a stale `.venv`.
 
-### ⚠️ Testing is more broken than this file says
+**One thread is deliberately still open** — the `session_id` one. Leave it until
+he replies; it is where we confirmed his diagnosis and changed what the tests
+claim.
 
-**The entire `/api/v1` REST layer is gone.** `main.py` now serves exactly two
-routes, `/healthz` and `/`. The tools call `notes_workflow` in-process; there
-is no HTTP hop and no REST surface at all. Three things in this file depend on
-that layer and are now dead:
+### The finding worth carrying forward
 
-1. **`Invoke-RestMethod .../api/v1/notes/committed`** — the "count the result
-   is the real check" step in §5 and in the Testing section below. There is no
-   such endpoint, and `notes_workflow` has no `list_committed` at all.
-   Committed records live only as `_STAGED_NOTES[session_id]["committed"] =
-   True` in process memory. **There is currently no way to verify a smoke run
-   other than reading the transcript.** Restoring a count means either a small
-   read-only debug endpoint or querying the BigQuery audit table the ADK
-   plugin writes.
-2. **`scripts/repro_orphan_restage.py`** — the supersede-gate coverage the
-   AIML-2703 row below names. It drives `http://localhost:8000/api/v1`, so it
-   cannot run. It is also local-only (not in the export manifest, so not on
-   the branch). AIML-2703's supersede gate now has **no** executable coverage
-   of any kind.
-3. **The 9-case REST suite** in `AIML-2698-experiments.md` — same cause.
+Suresh caught that the AIML-2703 supersede gate **cannot fire in the live
+flow**. `tools.py` passes `session_id=tool_context.session.id` on every
+`stage_notes` call, so `previous_session_id != session_id` in
+`notes_workflow.stage_notes` is always false, `superseded_by` is never set, and
+a correction overwrites `_STAGED_NOTES[session_id]` in place.
 
-Also: **`ws_smoke_test.py` takes no positional argument now.** The documented
-`uv run python scripts/ws_smoke_test.py implicit` fails on argparse. It is
-just `uv run python scripts/ws_smoke_test.py`, optionally `--scenario NAME`
-or `--raw`. Seven scenarios survive: `clean_save`, `correction`,
-`correction_summary`, `correction_disposition`, `correction_add_topic`,
-`missing_topic`, `multi_topic`.
+So what actually delivers AIML-2703's guarantee in production is the
+**single-draft invariant** — one visit only ever has one committable record —
+not the gate. The gate is defence for a caller that is not `tools.py`.
 
-None of this is AIML-2751's doing — it all landed with AIML-2750 — but it
-means the project currently has no automated verification of anything. Worth
-raising alongside the scope point for Sai below.
+`tests/test_notes_workflow_gates.py` now asserts both, split explicitly:
 
-**Verified still intact** in `notes_workflow.commit_notes` after the import:
-the idempotency replay, the supersede gate (`SupersededRecordError`), and the
-coverage gate (`IncompleteCoverageError`), in that order, with the ordering
-comments from PR #5 carried over. `python -m compileall app scripts` is clean
-and `node --check app/static/js/app.js` passes.
+- `TestLiveCallPattern` — same `session_id`, as `tools.py` does. Asserts one
+  draft, no `superseded_by`, correction lands in place, one commit, retry
+  replays, coverage gate blocks then releases.
+- `TestSupersedeGate` — distinct ids. The gate fires here.
 
-### What happened
+**Open question raised with Suresh, not yet answered:** if nothing but
+`tools.py` will ever call `notes_workflow`, the supersede gate is unreachable
+code — the same "dead code that reads as live" shape this whole PR cleaned up.
+Worth a decision either way.
 
-**AIML-2750 (Dharun, PR #7) turned into a full re-architecture and is merged.**
-Four commits, 19 files, +2018 / −2421 between `9433908` and `6ffd86f`:
-
-| Deleted | Added |
-|---|---|
-| `mock_db.py` (954 lines) | `notes_workflow.py` (678) |
-| `db_interface.py` | `schemas.py` (125) |
-| `bigquery_db.py` | `resources/dispositions.yaml` (137) |
-| `bigquery_sink.py` | `resources/behavioral_rules.yaml` (161) |
-
-`main.py`, `agent.py`, `tools.py` and `app.js` were rewritten. The disposition
-registry now lives in YAML rather than Python.
-
-**The PR #5 gates survived.** Verified directly against
-`origin/development:app/voice_notes_agent/notes_workflow.py` — it contains
-`compute_missing_topics`, `IncompleteCoverageError`, `SupersededRecordError`,
-the `Commit BLOCKED … superseded by` path, the
-`already committed -- returning` idempotency replay, and the
-`previous_session_id … is already committed` correction-base guard. Our comments
-were carried over verbatim. Nothing to escalate.
-
-**The guided flow was NOT removed** — `tools_guided.py` and `agent_guided.py`
-are still on `development` and now import from the deleted `mock_db.py`, so they
-are broken dead code on the mainline. AIML-2751 is still needed. This is exactly
-what Suresh's third review comment was describing.
-
-### Current branch state — two things were lost
-
-`feature/AIML-2751-remove-guided` was **`git reset --hard origin/development`**,
-so it now sits at `6ffd86f` with no local commits. That discarded:
-
-1. **`b5ee250`** — the original guided removal. Obsolete anyway; it edited
-   `mock_db.py`, which no longer exists. Recoverable by SHA if ever wanted.
-2. **`dce35cb`** — the `.gitignore` fix. **Needs redoing** (see below).
-
-### The work — all done in `3d0229f`
-
-Kept below as the record of what AIML-2751 actually changed.
-Much smaller than before — the rewrite already retired guided from the backend.
-
-**1. Delete two files**
-
-```
-app/voice_notes_agent/tools_guided.py
-app/voice_notes_agent/agent_guided.py
-```
-
-**2. Strip guided from `app.js`** — this is the real work, ~15 sites:
-`guidedPayload` (declared ~L1034, built ~L1016-1096, read ~L1579),
-`resetGuidedPayload()`, `commit_guided_notes` in the tool-name conditionals
-(~L1006, ~L1056), and the `record_topic_disposition` handling around ~L1067-1096.
-Remember to bump the version in `index.html` **and** in `app.js`'s module
-imports — they must match.
-
-**3. Update ~8 comments** that say guided is "being retired separately" to say
-it is retired: `main.py` ~L184, `notes_workflow.py` ~L26 / ~L166 / ~L588,
-`resources/behavioral_rules.yaml` ~L11-12, `tools.py` ~L6,
-`scripts/ws_smoke_test.py` ~L8 / ~L212. (`agent.py`'s docstring already says
-"implicit flow only -- guided flow retired".)
-
-**4. Redo the `.gitignore` fix.** `development`'s last line is the concatenated
-`app.voice_notes_agentcommitted_notes.json` — `committed_notes.json` was
-appended to a file with no trailing newline. Split into two lines **and add a
-trailing newline**, which is the actual root cause:
+### Testing — what exists now
 
 ```powershell
-$t = [IO.File]::ReadAllText(".gitignore")
-if (-not $t.EndsWith("`n")) { [IO.File]::WriteAllText(".gitignore", $t + "`n") }
+uv run pytest tests/ -q      # 8 tests, no server, no credentials
 ```
 
-**Nothing to do in `index.html`** — the mode selector is already gone.
+That is the only deterministic coverage in the repo. It needs no running app
+because `tests/conftest.py` imports `notes_workflow` under a private package
+name, bypassing `voice_notes_agent/__init__.py` (which builds the ADK agent).
 
-### Not ours, but worth raising
-
-`scripts/bigquery_create_tables.sql` and `scripts/bigquery_schema.json` still
-define a `guided_flow_calls` table and an `agent_mode` column, but
-`bigquery_sink.py` was deleted in the rewrite, so nothing writes to them. Loose
-end from AIML-2750.
-
-### To resume with the assistant — ✅ already done
-
-Left here because the next export will need the same steps. The local copy at
-`c:\Personal Storage\poc\sellNtell\sell-n-tell` **has been** re-imported from
-`c:\Personal Storage\poc\sellNtell\_export` and now matches `6ffd86f` plus the
-AIML-2751 changes. The commands were:
+For the model-level check, with the server running (no `--reload`):
 
 ```powershell
-cd "c:\Personal Storage\poc\sellNtell"
-.\tools\import-repo-md.ps1 -In .\_export -Dest .\sell-n-tell
-python tools\fix_mojibake.py --write
+uv run python scripts/ws_smoke_test.py      # no positional argument
 ```
 
-The second line is a safety net, not a fix — `import-repo-md.ps1` now reads
-with `-Encoding UTF8` explicitly, so this import produced **no** mojibake and
-`fix_mojibake.py` reported everything clean. Keep running it anyway; it is
-idempotent and costs nothing. Two gotchas: it must be run **from the repo
-root** (`sell-n-tell/`), not the parent — its `TARGETS` are repo-relative and
-it silently prints `skip … (not found)` otherwise; and its target list covers
-only `.gitignore` and the frontend, so pass the Python/YAML files as arguments
-if you want them checked (they were, and were clean).
-
-**Note the import never deletes.** Files removed upstream (`mock_db.py`,
-`db_interface.py`, `bigquery_db.py`, `bigquery_sink.py`) were still sitting in
-the local copy after importing and had to be deleted by hand — they are gone
-as of `3d0229f`. Same trap that left the guided files behind on the app
-machine. A quick check after any future import: diff the tree against
-`_export/_manifest.md`, which lists every file the branch actually has.
-
-### Then
-
-Commit, push, and reply on PR #6. Suggested reply to the top-level comment:
-
-> Rebuilt this branch on the current `development` now that AIML-2750 is in.
-> The earlier diff was reading against a base that had moved, which is why it
-> looked like it was reverting your changes. `tools_guided.py` and
-> `agent_guided.py` are deleted here, along with the remaining guided handling
-> in `app.js`.
-
-The other two review comments (`.gitignore`, `agent_guided.py`) are both
-addressed by this work — reply once it is pushed and the file list is visible.
-
-### Testing
-
-With the server running (no `--reload`):
+**Reading the transcript is the only verification.** The `/api/v1` layer is
+gone — `main.py` serves only `/healthz`, `/` and the WebSocket — so there is no
+`notes/committed` endpoint to count. Each scenario should reach a
+`TOOL_RESP=commit_visit_notes -> {'status': 'success'` before the next begins.
+Capture it and count:
 
 ```powershell
-uv run python scripts/ws_smoke_test.py                       # all 7 scenarios
-uv run python scripts/ws_smoke_test.py --scenario clean_save
+uv run python scripts/ws_smoke_test.py *> smoke.log
+(Select-String smoke.log -Pattern "scenario complete").Count       # expect 7
+(Select-String smoke.log -Pattern "'status': 'success'").Count     # expect >= 7
+Select-String smoke.log -Pattern "no_confirmation_heard|BLOCKED|'status': 'error'"
 ```
 
-No positional argument — the `implicit` this file used to pass now fails on
-argparse.
+Last full run: 7/7 committed, no errors. Delete `smoke.log`, do not commit it.
 
-Then one browser dictation end to end, hard-reloaded (the asset version is
-`v=10` now), producing one CRM record.
+### Next, once PR #6 merges
 
-**Read the transcript, because there is nothing else to read.** The
-`/api/v1/notes/committed` count this section used to prescribe no longer
-exists — see "Testing is more broken than this file says" above. Watch the
-server log for `Commit BLOCKED for session_id=` and confirm each scenario
-reaches a `commit_visit_notes` response with `status: "success"` exactly once.
+From `stories-after-guided-removal.md`, adjusted — AIML-2750 delivered Story 6,
+and Story 3 is likely moot now there is one store:
 
-**`scripts/test_correction_reliability.py` is gone**, and its stand-in
-`scripts/repro_orphan_restage.py` cannot run either (it needs the deleted REST
-layer). The supersede gate therefore has no executable coverage at all: the
-smoke suite would still pass with that gate deleted, because the model always
-commits the record it just staged and never the one it replaced. Restoring
-coverage means an in-process test calling `notes_workflow.stage_notes` /
-`commit_notes` directly — which is now easy, since there is no HTTP hop to
-stand up.
+1. **Story 1** — consolidate campaign rules, *before* vertical-market context
+   adds a second config dimension. **Re-check its scope first**: the rewrite
+   moved the registry into YAML and may have closed part of it.
+2. **Event type interpretation** — Jeremy's first refinement.
+   `plan-after-implicit-decision.md` §2 has the root cause (event types carry no
+   mapping cues while disposition codes do). **Re-verify against
+   `resources/dispositions.yaml`** — that analysis predates the rewrite.
+3. **AIML-2702 + AIML-2733** — eval harness and golden set. These gate the
+   vertical-market work.
+4. **Vertical market context** — Jeremy's second refinement.
+
+**All six follow-up stories need re-checking against the new structure** before
+anyone picks one up. They were written against `mock_db.py`, which no longer
+exists.
+
+### Open, not ticketed
+
+- **F7** — `_topic_matches` uses substring containment, so an inflected label
+  ("Appliance Contract Renewal" vs planned "Appliances") reports the topic
+  uncovered and can produce two rows for one discussion.
+- **Invented skip reasons** — the agent still writes "due to time constraints"
+  when the rep gave no reason. Prompt wording was measured over six runs and
+  made no difference; needs a server-side fix.
+- **Registry content gap** — no code expresses "renewal agreed", "quote created"
+  or "no contact made"; roughly a quarter of real visits.
+  `note-disposition-registry-gap.md`.
+- **Vestigial BigQuery DDL** — `scripts/bigquery_create_tables.sql` and
+  `bigquery_schema.json` still define a `guided_flow_calls` table and an
+  `agent_mode` column, but `bigquery_sink.py` was deleted, so nothing writes to
+  them. Loose end from AIML-2750.
+- **The sync tool never deletes.** `tools/import-repo-md.ps1` only writes files,
+  so anything removed upstream survives locally and has to be deleted by hand.
+
+### Three traps that have each cost time
+
+1. **Run `python tools/fix_mojibake.py --write` after every import.** The
+   importer decodes UTF-8 as the Windows ANSI codepage and mangles every emoji
+   and box-drawing character. `.gitignore` is in its target list now too.
+2. **Bump the asset version in two places.** `index.html` *and* `app.js`'s two
+   module imports, and they must match. Currently `v=10`.
+3. **Verify a documented command exactly as written, in a clean environment.**
+   Three separate findings in this project came from state left lying around —
+   `crypto.randomUUID` passing on `localhost` but blanking on a LAN IP, a smoke
+   count that looked right until a restart zeroed it, and pytest "working"
+   because a stale `.venv` already had it. `uv sync` before `uv run` when
+   proving a dependency change.
 
 ### Guided is preserved
 
@@ -238,49 +150,18 @@ Tag `archive/guided-flow` on `9433908`, pushed, verified to contain both files:
 git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
 ```
 
-### After AIML-2751
-
-From `stories-after-guided-removal.md`, adjusted — Story 6 is delivered by
-AIML-2750 and Story 3 is likely moot now that there is one store:
-
-1. **Story 1** — consolidate campaign rules, *before* vertical-market context
-   adds a second config dimension. Re-check its scope first: the rewrite moved
-   the registry into YAML and may have closed part of it already.
-2. **Event type interpretation** — Jeremy's first refinement. Root cause in
-   `plan-after-implicit-decision.md` §2: event types carry no mapping keywords
-   while disposition codes do. **Re-verify against `dispositions.yaml`** — the
-   rewrite may have changed this.
-3. **AIML-2702 + AIML-2733** — eval harness and golden set. These gate the
-   vertical-market work.
-4. **Vertical market context** — Jeremy's second refinement.
-
-**All six follow-up stories need re-checking against the new structure** before
-anyone picks one up. They were written against `mock_db.py`, which is gone.
-
-### Process point for Sai
-
-Our intended order was AIML-2751 before AIML-2750, because removing guided
-shrinks the surface everyone else works on. That ordering lived only in our docs
-— not in Jira, not as a blocker link, not in either PR description — so there
-was no way for it to be honoured. The cost was one obsolete commit, not lost
-work.
-
-Separately: AIML-2750 was scoped as "decide where CRM records live" and
-delivered a re-architecture of the storage and config layer. Worth agreeing how
-scope changes of that size get flagged, since it invalidated a branch in review
-and every follow-up story written against the old structure.
-
 ---
 
 ## 1. Ticket status
 
 | Ticket | Title | Status |
 |---|---|---|
-| **AIML-2751** | Remove the guided flow | **PR #6 open, changes requested. Code done locally (`3d0229f`), not yet pushed.** Rebuilt on the rewritten `development` — see START HERE |
+| **AIML-2751** | Remove the guided flow | **PR #6 open, all review comments answered.** Waiting on Suresh's re-review — see START HERE |
+| **AIML-2845** | No-speech turns leave the agent's recovery message suppressed | **Backlog.** Raised from PR #6 review; `suppressAgentSpeech` is only lifted by a tool call, and the no-speech path has none |
 | **AIML-2750** | CRM backend decision (Dharun) | **Closed, merged as PR #7 `6ffd86f`.** Delivered as a full re-architecture: `mock_db`/`db_interface`/`bigquery_db`/`bigquery_sink` deleted, `notes_workflow.py` + `schemas.py` + YAML resources added |
 | **AIML-2698** | Disposition + State Correctness | **Closed.** Delivered in PR #5 |
 | **AIML-2705** | Disposition Quality Guardrails | **Closed.** ACs 1/2/5 delivered; AC4 took its "documents residual risk" clause; AC3 met with 3 cases |
-| **AIML-2703** | Correction & Re-stage Reliability | **Closed, but now uncovered.** All 5 ACs met in code (the gate is verified present in `notes_workflow.commit_notes`). `scripts/repro_orphan_restage.py`, named here as the coverage, drives the `/api/v1` layer AIML-2750 deleted, so it cannot run — and it is local-only, not on the branch |
+| **AIML-2703** | Correction & Re-stage Reliability | **Closed.** Coverage is now `tests/test_notes_workflow_gates.py` (8 tests). Note the supersede gate cannot fire in the live flow — the single-draft invariant is what delivers the guarantee; see START HERE |
 | **AIML-2702** | Eval Harness (faithfulness / factualness / contextualness) | Not started. Q3-S3 |
 | **AIML-2697** | FAR Demo Hardening: Mode UX + Demo Script | Partly in flight — the audio fixes are tagged to it |
 | **AIML-2651** | Error Handling & Resilience | Not started. No retry/backoff anywhere; timeouts hardcoded |
