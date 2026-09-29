@@ -23,12 +23,25 @@ from pathlib import Path
 import yaml
 from google.adk.agents import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
+from google.adk.models import Gemini
 from google.genai import types
 
 from . import notes_workflow
+from .live_credentials import build_prewarmed_live_client
 from .tools import commit_visit_notes, stage_visit_notes
 
+
+
+
 logger = logging.getLogger(__name__)
+
+# Pre-warm Gemini Live credentials ONCE at import time (before `agent` below
+# is constructed) -- see BLOCKING_AUTH_FINDING.md for why this must happen
+# HERE, not in main.py: main.py imports this module (and therefore fully
+# constructs `agent`) before any code back in main.py could run, so building
+# the client any later would be too late to use it here.
+live_client = build_prewarmed_live_client()
+
 
 # Seeded at session creation from the rep's pre-call topic selection. This is
 # the only per-session state this module still reads -- campaign_type and
@@ -108,8 +121,11 @@ _GENERATION_CONFIG = types.GenerateContentConfig(
 
 agent = Agent(
     name="voice_notes_logger",
-    model=os.getenv(
-        "VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
+    model=Gemini(
+        model=os.getenv(
+            "VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
+        ),
+        client=live_client,
     ),
     instruction=voice_notes_instruction,
     tools=[stage_visit_notes, commit_visit_notes],

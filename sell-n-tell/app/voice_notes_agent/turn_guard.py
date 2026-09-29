@@ -56,8 +56,14 @@ def snapshot(tool_context: ToolContext) -> None:
 def has_new_reply(tool_context: ToolContext) -> bool:
     """True if a genuine new user turn arrived since the last ``snapshot()``."""
     session_id = tool_context.session.id
+    if session_id not in _BASELINES:
+        logger.debug(
+            "turn_guard blocked: session_id=%s has no recorded baseline in this process",
+            session_id,
+        )
+        return False
     current = _TURN_COUNTS.get(session_id, 0)
-    baseline = _BASELINES.get(session_id, -1)
+    baseline = _BASELINES[session_id]
     result = current > baseline
     if not result:
         # The counter/baseline pair is the only way to explain a refused tool
@@ -72,7 +78,11 @@ def has_new_reply(tool_context: ToolContext) -> bool:
     return result
 
 
-def mark_awaiting_readback(session_id: str) -> None:
+# session_id -> tool name that triggered the awaiting readback (e.g. stage_visit_notes, commit_visit_notes)
+_AWAITING_TOOL: dict[str, str] = {}
+
+
+def mark_awaiting_readback(session_id: str, tool_name: str = "") -> None:
     """Call from the WS downstream loop when a tool whose result MUST be read
     aloud (e.g. stage_visit_notes) returns a response. Some native-audio
     Live model turns speak a guessed filler BEFORE the tool call and then, on
@@ -81,7 +91,13 @@ def mark_awaiting_readback(session_id: str) -> None:
     UX bug.
     """
     _AWAITING_READBACK[session_id] = True
+    _AWAITING_TOOL[session_id] = tool_name
     _NUDGE_SENT[session_id] = False
+
+
+def awaiting_tool_name(session_id: str) -> str:
+    """Return the tool name currently awaiting readback, if any."""
+    return _AWAITING_TOOL.get(session_id, "")
 
 
 def record_agent_speech(session_id: str, text: str) -> None:
@@ -115,3 +131,16 @@ def needs_readback_nudge(session_id: str) -> bool:
 def mark_nudge_sent(session_id: str) -> None:
     """Call right after injecting the auto-continue nudge for this session."""
     _NUDGE_SENT[session_id] = True
+
+
+def cleanup_session(session_id: str) -> None:
+    """Clean up in-memory turn_guard tracking state for a completed or disconnected session.
+
+    Evicts session_id from all process-local tracking dictionaries to prevent memory leaks.
+    """
+    _TURN_COUNTS.pop(session_id, None)
+    _BASELINES.pop(session_id, None)
+    _AWAITING_READBACK.pop(session_id, None)
+    _NUDGE_SENT.pop(session_id, None)
+    _AWAITING_TOOL.pop(session_id, None)
+    logger.debug("turn_guard state cleaned up for session_id=%s", session_id)

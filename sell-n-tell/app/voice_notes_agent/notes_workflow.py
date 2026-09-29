@@ -31,6 +31,7 @@ Logging"):
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -559,6 +560,15 @@ def get_staged(session_id: str) -> dict[str, Any] | None:
     return _STAGED_NOTES.get(session_id)
 
 
+def rehydrate_staged(session_id: str, record: dict[str, Any]) -> None:
+    """Restore a staged record into _STAGED_NOTES from external/session state.
+
+    Used when resuming an active session across process restarts or reconnects.
+    """
+    _STAGED_NOTES[session_id] = record
+    logger.debug("rehydrate_staged: restored session_id=%s into _STAGED_NOTES", session_id)
+
+
 def _build_commit_result(
     session_id: str, record: dict[str, Any], closing_statement: str
 ) -> CommitResult:
@@ -688,3 +698,75 @@ def commit_notes(session_id: str, confirmed: bool) -> CommitResult | dict[str, s
         session_id,
     )
     return result
+
+
+def cleanup_session(session_id: str) -> None:
+    """Clean up in-memory staged notes for a session on disconnect or completion."""
+    _STAGED_NOTES.pop(session_id, None)
+    logger.debug("notes_workflow._STAGED_NOTES cleaned up for session_id=%s", session_id)
+
+
+# Configurable retention TTLs for defense-in-depth in-memory dictionary pruning
+VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS = float(
+    os.getenv("VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS", "3600.0")
+)
+VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS = float(
+    os.getenv("VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS", "7200.0")
+)
+
+
+def prune_stale_staged_notes(
+    max_age_seconds: float | None = None,
+    committed_max_age_seconds: float | None = None,
+    uncommitted_max_age_seconds: float | None = None,
+) -> int:
+    """Prune stale records from _STAGED_NOTES as a defense-in-depth safety net.
+
+    Configurable via environment variables:
+    - VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS (default 3600s / 1 hr)
+    - VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS (default 7200s / 2 hrs)
+
+    - Committed or superseded records older than committed TTL are evicted
+      to prevent memory leaks while giving clients a generous window to retry.
+    - Active uncommitted records older than uncommitted TTL are evicted as abandoned.
+
+    Returns the count of evicted records.
+    """
+    if max_age_seconds is not None:
+        c_ttl = max_age_seconds
+        u_ttl = max_age_seconds * 2
+    else:
+        c_ttl = (
+            committed_max_age_seconds
+            if committed_max_age_seconds is not None
+            else VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS
+        )
+        u_ttl = (
+            uncommitted_max_age_seconds
+            if uncommitted_max_age_seconds is not None
+            else VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS
+        )
+
+    now = datetime.now(timezone.utc)
+    to_delete = []
+    for sid, rec in list(_STAGED_NOTES.items()):
+        ts_str = rec.get("committed_at") or rec.get("staged_at")
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str)
+            age = (now - ts).total_seconds()
+        except (ValueError, TypeError):
+            continue
+
+        if rec.get("committed") or rec.get("superseded_by"):
+            if age > c_ttl:
+                to_delete.append(sid)
+        elif age > u_ttl:
+            to_delete.append(sid)
+
+    for sid in to_delete:
+        _STAGED_NOTES.pop(sid, None)
+    if to_delete:
+        logger.info("prune_stale_staged_notes evicted %d records", len(to_delete))
+    return len(to_delete)

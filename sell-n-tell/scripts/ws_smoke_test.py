@@ -29,6 +29,7 @@ import asyncio
 import json
 import sys
 import urllib.parse
+import urllib.request
 import uuid
 
 import websockets
@@ -206,12 +207,23 @@ async def _drain_until_agent_settles(
 
 async def run_scenario(scenario: str, turns: list[str], planned_topics: str) -> None:
     user_id = "smoke_tester"
-    session_id = f"smoke-{scenario}-{uuid.uuid4().hex[:6]}"
-    # campaign_type is sent per the business decision to keep it flowing
-    # end-to-end, but the backend stores it as inert session-state metadata
-    # only -- see main.py's websocket_endpoint docstring. It does not affect
-    # any scenario's assertions here. agent_mode is not sent: guided flow is
-    # retired and there is only one flow now.
+    topics_list = [t.strip() for t in planned_topics.split(",") if t.strip()] if planned_topics else []
+    
+    # Mint session on server via POST /api/sessions (AIML-2743 / VertexAiSessionService)
+    post_data = json.dumps({
+        "user_id": user_id,
+        "planned_topics": topics_list,
+        "campaign_type": DEFAULT_CAMPAIGN_TYPE,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "http://localhost:8000/api/sessions",
+        data=post_data,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req) as resp:
+        session_info = json.loads(resp.read().decode("utf-8"))
+        session_id = session_info["session_id"]
+
     query = urllib.parse.urlencode(
         {
             "planned_topics": planned_topics,
@@ -220,6 +232,7 @@ async def run_scenario(scenario: str, turns: list[str], planned_topics: str) -> 
     )
     url = f"{BASE_WS_URL}/{user_id}/{session_id}?{query}"
     print(f"\n=== {scenario} ===")
+    print(f"minted session: {session_id}")
     print(f"connecting: {url}")
 
     async with websockets.connect(url, max_size=None) as ws:

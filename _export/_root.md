@@ -1,6 +1,6 @@
 # _root
 
-branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 6
+branch: `development`  commit: `85b108c`  files: 6
 
 <!-- FILE: .dockerignore -->
 ````text
@@ -190,7 +190,8 @@ junit*.xml
 .agents/
 .adk/
 *.adk/
-app.voice_notes_agentcommitted_notes.json
+app.voice_notes_agent
+committed_notes.json
 ````
 <!-- END: .gitignore -->
 
@@ -246,7 +247,11 @@ dependencies = [
     "pyarrow>=25.0.1",
 ]
 
-[project.optional-dependencies]
+# A dependency group rather than an optional-dependencies extra: `uv run` and
+# `uv sync` install the `dev` group by default, so `uv run pytest tests/ -q`
+# works with no flags. As an extra it needed `--extra dev`, and the bare command
+# failed with "program not found".
+[dependency-groups]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

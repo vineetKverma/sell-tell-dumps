@@ -1,6 +1,6 @@
 # app/static/css
 
-branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 1
+branch: `development`  commit: `85b108c`  files: 1
 
 <!-- FILE: app/static/css/style.css -->
 ````css

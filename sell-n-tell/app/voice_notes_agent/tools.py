@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 # session = one commit) -- so there is nothing else to mint or track here.
 _STAGED_SESSION_KEY = "crm_staged_session_id"
 _LAST_CONFIRMATION_KEY = "crm_last_confirmation_text"
+_CLOSING_STATEMENT = notes_workflow._CLOSING_STATEMENT
 
 # The disposition registry is universal now (no campaign_type, no per-session
 # fetch) -- codes legal for a topic are just every code notes_workflow knows
@@ -279,6 +280,17 @@ async def stage_visit_notes(
     # Persist the staged session id so the commit tool can reference it
     # later (also handles the correction branch above, next time through).
     tool_context.state[_STAGED_SESSION_KEY] = data["session_id"]
+    # Dual-Sync (AIML-2807 & 2743): Persist full staged record to ADK session
+    # state so it survives process restarts and can rehydrate on reconnect.
+    raw_staged = notes_workflow.get_staged(data["session_id"])
+    if raw_staged:
+        tool_context.state["staged_record"] = dict(raw_staged)
+
+    # Clear prior commit tracking so a newly staged note in the same session
+    # is never blocked by or replays an earlier visit's commit result:
+    tool_context.state["commit_result"] = None
+    tool_context.state["committed"] = False
+
 
     missing = data.get("missing_topics") or []
     if missing:
@@ -330,7 +342,8 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
         before ending the session.
     """
     session_id = tool_context.state.get(_STAGED_SESSION_KEY)
-    if not session_id:
+    staged_record = tool_context.state.get("staged_record")
+    if not session_id and not staged_record:
         logger.warning("commit_visit_notes called with no staged session")
         return {
             "status": "error",
@@ -340,6 +353,19 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
                 "notes first."
             ),
         }
+    if not session_id and staged_record:
+        session_id = staged_record.get("session_id") or tool_context.session.id
+
+    # If the process restarted or redeployed, _STAGED_NOTES in RAM is empty,
+    # but tool_context.state["staged_record"] persisted in VertexAiSessionService.
+    # Rehydrate it back into _STAGED_NOTES now so gates and commits work seamlessly.
+    if notes_workflow.get_staged(session_id) is None and staged_record:
+        logger.info(
+            "commit_visit_notes: rehydrating _STAGED_NOTES for session_id=%s from session state",
+            session_id,
+        )
+        notes_workflow.rehydrate_staged(session_id, staged_record)
+
 
     # Hard backstop: refuse to commit unless a genuine NEW rep utterance has
     # arrived since the confirmation question was staged/asked. This blocks
@@ -378,6 +404,8 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
         }
 
     if not turn_guard.has_new_reply(tool_context):
+        # Arm the baseline so the upcoming rep confirmation will satisfy has_new_reply
+        turn_guard.snapshot(tool_context)
         logger.warning(
             "commit_visit_notes BLOCKED: no new rep reply since staging "
             "(session_id=%s) -- refusing to save.",
@@ -476,14 +504,31 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
             "ui_event": "tool_error",
         }
 
+    closing = getattr(result, "closing_statement", _CLOSING_STATEMENT) if not isinstance(result, dict) else result.get("closing_statement", _CLOSING_STATEMENT)
     if isinstance(result, dict):
         # confirmed=False path returns {"status": "cancelled", ...} instead
         # of a CommitResult -- not reachable from this tool (we always pass
         # confirmed=True), but handled rather than assumed away.
         return {
             **result,
-            "instruction_for_model": "Read the closing_statement to the user verbatim.",
+            "instruction_for_model": (
+                f"Say out loud to the user right now, verbatim: \"{closing}\". "
+                "Do not stay silent. You MUST speak this sentence aloud before ending."
+            ),
         }
+
+    commit_payload = (
+        result.model_dump() if hasattr(result, "model_dump") else dict(result)
+    )
+    # Persist commit result to tool_context.state so restarts and reconnects survive
+    tool_context.state["commit_result"] = commit_payload
+    tool_context.state["committed"] = True
+
+    # Dual-Sync: update staged_record in session state so rehydration across
+    # process restart carries committed=True and commit_result intact.
+    staged_rec = notes_workflow.get_staged(session_id)
+    if staged_rec:
+        tool_context.state["staged_record"] = dict(staged_rec)
 
     # Clear staged session so a fresh dictation starts clean.
     tool_context.state[_STAGED_SESSION_KEY] = None
@@ -493,9 +538,9 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
     # streamed tool-call arguments.
     return {
         "status": "success",
-        **result.model_dump(),
+        **commit_payload,
         "instruction_for_model": (
-            "Read the closing_statement to the user verbatim. The session is "
-            "now complete."
+            f"Say out loud to the user right now, verbatim: \"{closing}\". "
+            "Do not stay silent. You MUST speak this sentence aloud before ending."
         ),
     }

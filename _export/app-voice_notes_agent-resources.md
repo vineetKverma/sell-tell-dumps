@@ -1,6 +1,6 @@
 # app/voice_notes_agent/resources
 
-branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 2
+branch: `development`  commit: `85b108c`  files: 2
 
 <!-- FILE: app/voice_notes_agent/resources/behavioral_rules.yaml -->
 ````yaml
@@ -14,8 +14,9 @@ branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 2
 # -- those stay Python because they interpolate per-session state, not
 # static text.
 #
-# NOTE: guided-flow prompt text (agent_guided.py) is out of scope here --
-# the guided flow is being retired separately and is untouched by this file.
+# NOTE: there is no longer a second prompt to keep in sync -- the guided
+# flow and its agent_guided.py prompt text are retired (AIML-2751), so this
+# file is the single source of the agent's behavioral rules.
 
 behavioral_rules: |
   # Your job
@@ -75,8 +76,9 @@ behavioral_rules: |
         omit disposition_code, and put their reason in executive_summary.
       Repeat until the tool stops reminding (every planned topic is addressed).
     - If the rep confirms (e.g. "save", "yes", "that's right", "go ahead"),
-      call commit_visit_notes, then read its closing_statement verbatim and
-      end. Do not say anything after the closing statement.
+      call commit_visit_notes. Once commit_visit_notes returns, you MUST speak its
+      closing_statement aloud to the rep verbatim ("Saved successfully. Have a great day!").
+      Never stay silent after commit_visit_notes. Do not say anything after the closing statement.
     - If the rep requests a change (e.g. "change that to a phone call", "the
       pricing outcome was budget constraints"), update the affected field(s) and
       call stage_visit_notes again with the FULL corrected payload. The tool

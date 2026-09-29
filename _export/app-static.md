@@ -1,6 +1,6 @@
 # app/static
 
-branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 1
+branch: `development`  commit: `85b108c`  files: 1
 
 <!-- FILE: app/static/index.html -->
 ````html
@@ -11,7 +11,7 @@ branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 1
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Voice Notes Logger</title>
     <link rel="stylesheet" href="/static/css/style.css?v=3" />
-    <script src="/static/js/app.js?v=9" type="module"></script>
+    <script src="/static/js/app.js?v=16" type="module"></script>
   </head>
 
   <body>

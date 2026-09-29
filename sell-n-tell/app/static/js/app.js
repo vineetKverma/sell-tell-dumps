@@ -73,9 +73,54 @@ if (!userId) {
 // Regenerated whenever the campaign or planned topics change so the backend
 // seeds a fresh session with the new selection (in-memory sessions are keyed
 // by id and their seeded state is otherwise sticky).
-let sessionId = "sess-" + uuid();
+let sessionId = null;
 function newSessionId() {
-  sessionId = "sess-" + uuid();
+  sessionId = null;
+}
+
+async function ensureSession() {
+  if (sessionId) {
+    return sessionId;
+  }
+  const MAX_RETRIES = 3;
+  const DELAYS = [500, 1000, 1500];
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const planned = typeof selectedTopics !== "undefined" ? selectedTopics : [];
+      const campaign = typeof campaignSelect !== "undefined" && campaignSelect ? campaignSelect.value : "standard_sales";
+      const resp = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          planned_topics: planned,
+          campaign_type: campaign,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.status === "ok" && data.session_id) {
+          sessionId = String(data.session_id);
+          return sessionId;
+        }
+        console.warn(`Server returned non-ok status on session create (attempt ${attempt + 1}):`, data);
+      } else {
+        console.warn(`POST /api/sessions HTTP ${resp.status} on attempt ${attempt + 1}`);
+      }
+    } catch (err) {
+      console.warn(`POST /api/sessions network error on attempt ${attempt + 1}:`, err);
+    }
+    if (attempt < MAX_RETRIES - 1) {
+      await new Promise((resolve) => setTimeout(resolve, DELAYS[attempt]));
+    }
+  }
+
+  // Retries exhausted. Do NOT fall back to local client UUID --
+  // Vertex AI strictly rejects client-minted IDs with 4404 Session Not Found,
+  // which would wedge the client into an infinite reconnection loop.
+  sessionId = null;
+  return null;
 }
 
 // Client-side VAD tuning. The browser's VAD is the authoritative stop-trigger
@@ -103,6 +148,11 @@ let audioBackpressureWarned = false; // log the "uplink behind" warning once per
 let phase = "idle";          // idle | listening | processing | confirm | saved
 let committed = false;
 let agentTurnActive = false; // true while the agent is taking its turn
+let reconnectSameSession = false; // configured by server_config handshake event
+let autoCloseDelayS = 10;         // configured by server_config handshake or defaults to 10s
+let autoCloseTimer = null;        // countdown timer id for auto-closing websocket after commit
+let awaitingClosingAudio = false; // true once commit_visit_notes succeeds, until agent speaks closing
+let hasDeliveredClosingAudio = false; // true once audio chunks or closing text have arrived
 
 // The Live model reliably speaks a guessed filler/summary immediately after
 // the rep finishes a turn, BEFORE it has actually called the extraction tool
@@ -406,7 +456,7 @@ if (repIdInput) {
 // ---------------------------------------------------------------------------
 const PHASES = {
   idle: { cls: "phase-idle", icon: "🎤", text: "Press the mic and start dictating your visit notes." },
-  listening: { cls: "phase-listening", icon: "🔴", text: "Listening… speak your notes. I'll stop automatically when you pause." },
+  listening: { cls: "phase-listening", icon: "🔴", text: "Listening — you can speak now. I'll stop automatically when you pause." },
   processing: { cls: "phase-processing", icon: "⚙️", text: "Got it — extracting the structured record…" },
   confirm: { cls: "phase-confirm", icon: "🟢", text: "Review below. Say “Save” or tell me what to change." },
   saved: { cls: "phase-saved", icon: "✅", text: "Saved to CRM. Session complete." },
@@ -537,74 +587,10 @@ function resetCaptions() {
 // words as they speak. The model's own input transcription remains the
 // authoritative record (logged + committed to history on turn end).
 // ---------------------------------------------------------------------------
-const SpeechRecognitionCls =
-  window.SpeechRecognition || window.webkitSpeechRecognition;
-const useClientSpeech = !!SpeechRecognitionCls;
-let speechRecognition = null;
-let speechWantActive = false; // do we want the recognizer running right now?
-
-
-
-
-
-
-
-
-function startSpeechRecognition() {
-  if (!useClientSpeech) return;
-  speechWantActive = true;
-  if (speechRecognition) return; // already running
-  try {
-    const rec = new SpeechRecognitionCls();
-    rec.lang = "en-US";
-    rec.continuous = true;
-    rec.interimResults = true;
-
-    rec.onresult = (e) => {
-      // Build the full live transcript from all results in this session.
-      let text = "";
-      for (let i = 0; i < e.results.length; i++) {
-        text += e.results[i][0].transcript;
-      }
-      liveUserText = text;
-      userCaptionRow.classList.add("speaking");
-      agentCaptionRow.classList.remove("speaking");
-      setLiveDot(true);
-      renderCaption(userCaption, liveUserText, true);
-    };
-
-    rec.onerror = (e) => {
-      // "no-speech"/"aborted" are routine; only surface real failures.
-      if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
-        logEvent("error", `Speech recognition: ${e.error}`, null, "⚠️");
-      }
-    };
-
-    rec.onend = () => {
-      speechRecognition = null;
-      // The recognizer stops itself on pauses; restart while we still want it.
-      if (speechWantActive) startSpeechRecognition();
-    };
-
-    speechRecognition = rec;
-    rec.start();
-  } catch (err) {
-    // A start() while already starting throws; ignore.
-    speechRecognition = null;
-  }
-}
-
-function stopSpeechRecognition() {
-  speechWantActive = false;
-  if (speechRecognition) {
-    try {
-      speechRecognition.stop();
-    } catch (_) {
-      /* no-op */
-    }
-    speechRecognition = null;
-  }
-}
+// Browser SpeechRecognition removed (transcription handled via Gemini Live)
+// ---------------------------------------------------------------------------
+function startSpeechRecognition() {}
+function stopSpeechRecognition() {}
 
 // ---------------------------------------------------------------------------
 // Event console
@@ -758,7 +744,15 @@ function wsUrl() {
 }
 
 
-function connectWebsocket() {
+async function connectWebsocket() {
+  const sid = await ensureSession();
+  if (!sid) {
+    setConnected(false);
+    stopMicStreaming();
+    setPhase("error", "Couldn't start a session -- check your connection and try again.");
+    logEvent("error", "Failed to start session on server after retries", null, "⚠️");
+    return;
+  }
   const ws = new WebSocket(wsUrl());
   websocket = ws;
 
@@ -776,6 +770,29 @@ function connectWebsocket() {
   ws.onmessage = (event) => {
     if (websocket !== ws) return;
     const ev = JSON.parse(event.data);
+
+    if (ev.type === "server_config") {
+      reconnectSameSession = Boolean(ev.reconnect_same_session);
+      if (typeof ev.auto_close_delay_s === "number") {
+        autoCloseDelayS = ev.auto_close_delay_s;
+      }
+      logEvent(
+        "incoming",
+        `Server policy: reconnect_same_session=${reconnectSameSession}, auto_close_delay_s=${autoCloseDelayS}`,
+        ev,
+        "⚙️"
+      );
+      return;
+    }
+
+    if (ev.type === "live_ready") {
+      logEvent("incoming", "Gemini Live model connected and ready", ev, "🟢");
+      setPhase("listening", "Listening — you can speak now");
+      armVad();
+      micActive = true;
+      startSpeechRecognition();
+      return;
+    }
 
     if (ev.type === "ui_event" && ev.event === "tool_error") {
       const banner = document.createElement("div");
@@ -797,22 +814,58 @@ function connectWebsocket() {
     handleAdkEvent(ev);
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     // Ignore close events for sockets we've already replaced (reconnects).
     if (websocket !== ws) return;
     setConnected(false);
-    logEvent("error", "WebSocket closed", null, "🔌");
+    logEvent("error", "WebSocket closed", { code: event?.code, reason: event?.reason }, "🔌");
+
+    // Session not found on server (e.g. 4404 from Vertex AI or nonexistent session).
+    // Reset session ID and do not enter reconnection backoff loop on a dead session!
+    if (event?.code === 4404) {
+      logEvent("error", "Session expired or not found on server", null, "❌");
+      newSessionId();
+      reconnectAttempts = 0;
+      stopSpeechRecognition();
+      stopMicStreaming();
+      agentTurnActive = false;
+      setPhase("error", "Session expired or not found. Tap the mic to start again.");
+      return;
+    }
+
+    // Gemini Live connection timed out during cold start (code 4430).
+    // The server tore down the hung connection and freed the session slot.
+    // Reset session ID and show a clear message instead of entering reconnection loop.
+    if (event?.code === 4430) {
+      logEvent("error", "Gemini Live connection timed out", null, "❌");
+      newSessionId();
+      reconnectAttempts = 0;
+      stopSpeechRecognition();
+      stopMicStreaming();
+      agentTurnActive = false;
+      setPhase("error", "Couldn't connect to Gemini Live — please try again.");
+      return;
+    }
+
+    // AIML-2806: If rejected because the lock is temporarily held by previous teardown
+    // (code 4409 session_busy), back off and retry same session.
+    if (event?.code === 4409) {
+      logEvent("warning", "Session slot busy on server; retrying...", null, "⏳");
+      setTimeout(() => {
+        connectWebsocket();
+      }, 1000);
+      return;
+    }
 
     // Attempt WebSocket reconnection with exponential backoff.
-    // IMPORTANT: we generate a NEW sessionId on each attempt so the backend
-    // creates a fresh Gemini Live session rather than reusing the one that is
-    // still tearing down (which triggers APIError 1000 on the server).
     const backoffs = [800, 1200, 2000, 3500];
     if (reconnectAttempts < backoffs.length) {
       setPhase("processing", "Connection lost. Reconnecting...");
       setTimeout(() => {
         reconnectAttempts++;
-        newSessionId(); // fresh session so the server starts a clean Gemini Live session
+        if (!reconnectSameSession) {
+          newSessionId(); // fresh session so the server starts a clean Gemini Live session
+        }
         connectWebsocket();
       }, backoffs[reconnectAttempts]);
       return;
@@ -883,17 +936,10 @@ function handleAdkEvent(ev) {
   // streaming text and only use the model's FINAL transcription to lock in the
   // authoritative wording before the turn is committed to history.
   if (ev.inputTranscription) {
-    if (useClientSpeech) {
-      if (ev.inputTranscription.finished && ev.inputTranscription.text) {
-        liveUserText = ev.inputTranscription.text;
-        renderCaption(userCaption, liveUserText, false);
-      }
-    } else {
-      updateUserCaption(
-        ev.inputTranscription.text || "",
-        !!ev.inputTranscription.finished
-      );
-    }
+    updateUserCaption(
+      ev.inputTranscription.text || "",
+      !!ev.inputTranscription.finished
+    );
     // The rep just said something real -- arm the mute gate. Whatever the
     // agent says next is suppressed until a real tool call proves it's done
     // guessing (see the `suppressAgentSpeech` declaration above).
@@ -937,6 +983,7 @@ function handleAdkEvent(ev) {
         part.inlineData.mimeType.startsWith("audio/pcm") && audioPlayerNode) {
         if (!suppressAgentSpeech) {
           audioPlayerNode.port.postMessage(base64ToArray(part.inlineData.data));
+          if (committed) hasDeliveredClosingAudio = true;
         }
       }
       // Any real tool call means the agent is done guessing -- lift the mute
@@ -947,8 +994,13 @@ function handleAdkEvent(ev) {
       if (part.text && !part.thought) {
         // Half-cascade / text-only fallback: stream agent text into caption.
         updateAgentCaption(part.text, false);
+        if (committed) hasDeliveredClosingAudio = true;
       }
     }
+  }
+
+  if (ev.outputTranscription && ev.outputTranscription.text && committed) {
+    hasDeliveredClosingAudio = true;
   }
 
   if (ev.interrupted) {
@@ -967,8 +1019,27 @@ function handleAdkEvent(ev) {
     const agentResponded = !!agentActivity || !payloadCard.classList.contains("hidden");
 
     if (committed) {
-      // Notes saved -> end the session.
-      finishSession();
+      // If notes were committed and agent has not yet delivered the spoken closing statement,
+      // this turnComplete is for the commit_visit_notes tool response execution itself!
+      // Do NOT close the socket yet -- let the agent speak the closing statement aloud.
+      if (awaitingClosingAudio && !hasDeliveredClosingAudio) {
+        logEvent("status", "Notes committed; waiting for agent closing speech...", null, "⏳");
+        // Safety watchdog: if agent remains silent for 6s, start countdown anyway
+        setTimeout(() => {
+          if (committed && !autoCloseTimer && phase !== "idle") {
+            startAutoCloseCountdown(autoCloseDelayS);
+          }
+        }, 6000);
+        return;
+      }
+
+      // Agent has delivered closing speech (or safety fallback tripped) ->
+      // start the graceful auto-close countdown.
+      awaitingClosingAudio = false;
+      if (!autoCloseTimer) {
+        startAutoCloseCountdown(autoCloseDelayS);
+      }
+      return;
     } else if (!payloadCard.classList.contains("hidden")) {
       // Agent finished speaking the confirmation -> re-open the mic so the rep
       // can simply say "Save" or a correction.
@@ -1052,6 +1123,13 @@ function handleFunctionResponse(fr) {
     // turnComplete's fallback branch would just re-arm it forever.
 
     committed = true;
+    awaitingClosingAudio = true;
+    hasDeliveredClosingAudio = false;
+
+    // Stop mic streaming so rep background sounds do not interrupt the closing audio
+    stopMicStreaming();
+    micActive = false;
+
     payloadCard.classList.remove("hidden");
     // Output2 has no crm_record_id -- display session_id instead, the one
     // identifier Output2 actually carries.
@@ -1161,7 +1239,37 @@ function enterConfirmPhase() {
   startSpeechRecognition();
 }
 
+function startAutoCloseCountdown(seconds) {
+  if (autoCloseTimer) {
+    clearInterval(autoCloseTimer);
+    autoCloseTimer = null;
+  }
+  let remaining = seconds;
+  setPhase("saved");
+  silenceCountdown.classList.remove("counting");
+  silenceCountdown.textContent = `saved (closing in ${remaining}s)`;
+
+  autoCloseTimer = setInterval(() => {
+    remaining--;
+    if (remaining > 0) {
+      silenceCountdown.textContent = `saved (closing in ${remaining}s)`;
+    } else {
+      clearInterval(autoCloseTimer);
+      autoCloseTimer = null;
+      logEvent("status", "Auto-closing session after save", null, "🏁");
+      finishSession();
+    }
+  }, 1000);
+}
+
 function finishSession() {
+  if (autoCloseTimer) {
+    clearInterval(autoCloseTimer);
+    autoCloseTimer = null;
+  }
+  awaitingClosingAudio = false;
+  hasDeliveredClosingAudio = false;
+
   setPhase("saved");
   stopMicStreaming();
   stopSpeechRecognition();
@@ -1359,6 +1467,13 @@ function audioRecorderHandler(pcmData) {
 
 
 function endSession() {
+  if (autoCloseTimer) {
+    clearInterval(autoCloseTimer);
+    autoCloseTimer = null;
+  }
+  awaitingClosingAudio = false;
+  hasDeliveredClosingAudio = false;
+
   // Stop streaming and tear down the live session.
   stopMicStreaming();
   agentTurnActive = false;
@@ -1378,6 +1493,11 @@ function endSession() {
 // Controls
 // ---------------------------------------------------------------------------
 async function startDictation() {
+  if (autoCloseTimer) {
+    clearInterval(autoCloseTimer);
+    autoCloseTimer = null;
+    finishSession();
+  }
   if (selectedTopics.length === 0) {
     setPhase("error", "Select at least one planned topic before you start.");
     return;
@@ -1401,8 +1521,8 @@ async function startDictation() {
     // Drop any stale (closing/closed) socket before reconnecting so we never
     // wait on a dead connection.
     closeWebsocketIntentionally();
-    setPhase("processing", "Connecting…");
-    connectWebsocket();
+    setPhase("processing", "Connecting to Gemini Live…");
+    await connectWebsocket();
     const opened = await waitForOpen(8000);
     if (!opened) {
       setPhase("error", "Couldn't connect. Press the mic to try again.");
@@ -1410,10 +1530,11 @@ async function startDictation() {
       return;
     }
   }
-  armVad();
-  micActive = true;
-  startSpeechRecognition();
-  setPhase("listening");
+
+  // Keep mic inactive and status in "processing" until Gemini Live signals it is ready.
+  // This prevents any microphone audio from buffering before the upstream TLS handshake completes.
+  micActive = false;
+  setPhase("processing", "Connecting to Gemini Live…");
 }
 
 function waitForOpen(timeoutMs = 8000) {
@@ -1527,6 +1648,12 @@ function resetForNewDictation() {
 }
 
 function resetSession() {
+  if (autoCloseTimer) {
+    clearInterval(autoCloseTimer);
+    autoCloseTimer = null;
+  }
+  awaitingClosingAudio = false;
+  hasDeliveredClosingAudio = false;
   stopMicStreaming();
   committed = false;
   suppressAgentSpeech = false;

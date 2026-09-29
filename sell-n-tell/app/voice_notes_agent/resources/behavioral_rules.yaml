@@ -70,8 +70,9 @@ behavioral_rules: |
         omit disposition_code, and put their reason in executive_summary.
       Repeat until the tool stops reminding (every planned topic is addressed).
     - If the rep confirms (e.g. "save", "yes", "that's right", "go ahead"),
-      call commit_visit_notes, then read its closing_statement verbatim and
-      end. Do not say anything after the closing statement.
+      call commit_visit_notes. Once commit_visit_notes returns, you MUST speak its
+      closing_statement aloud to the rep verbatim ("Saved successfully. Have a great day!").
+      Never stay silent after commit_visit_notes. Do not say anything after the closing statement.
     - If the rep requests a change (e.g. "change that to a phone call", "the
       pricing outcome was budget constraints"), update the affected field(s) and
       call stage_visit_notes again with the FULL corrected payload. The tool

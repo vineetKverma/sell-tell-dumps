@@ -1,6 +1,6 @@
 # app/voice_notes_agent
 
-branch: `feature/AIML-2751-remove-guided`  commit: `6ffd86f`  files: 9
+branch: `development`  commit: `85b108c`  files: 8
 
 <!-- FILE: app/voice_notes_agent/__init__.py -->
 ````python
@@ -39,12 +39,25 @@ from pathlib import Path
 import yaml
 from google.adk.agents import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
+from google.adk.models import Gemini
 from google.genai import types
 
 from . import notes_workflow
+from .live_credentials import build_prewarmed_live_client
 from .tools import commit_visit_notes, stage_visit_notes
 
+
+
+
 logger = logging.getLogger(__name__)
+
+# Pre-warm Gemini Live credentials ONCE at import time (before `agent` below
+# is constructed) -- see BLOCKING_AUTH_FINDING.md for why this must happen
+# HERE, not in main.py: main.py imports this module (and therefore fully
+# constructs `agent`) before any code back in main.py could run, so building
+# the client any later would be too late to use it here.
+live_client = build_prewarmed_live_client()
+
 
 # Seeded at session creation from the rep's pre-call topic selection. This is
 # the only per-session state this module still reads -- campaign_type and
@@ -124,8 +137,11 @@ _GENERATION_CONFIG = types.GenerateContentConfig(
 
 agent = Agent(
     name="voice_notes_logger",
-    model=os.getenv(
-        "VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
+    model=Gemini(
+        model=os.getenv(
+            "VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
+        ),
+        client=live_client,
     ),
     instruction=voice_notes_instruction,
     tools=[stage_visit_notes, commit_visit_notes],
@@ -137,272 +153,6 @@ root_agent = agent
 ````
 <!-- END: app/voice_notes_agent/agent.py -->
 
-<!-- FILE: app/voice_notes_agent/agent_guided.py -->
-````python
-"""Guided (explicit turn-by-turn) Voice Notes Logger agent.
-
-Where the implicit flow (``agent.py``) extracts everything from freeform
-dictation in one deterministic "Mega-Payload" tool call, this agent follows a
-fixed, explicit script: dictate -> confirm/replay -> explicit event-type
-question -> one explicit disposition question per topic (deduce + confirm,
-max 3 attempts) -> commit. Campaign config loading, generation config, and
-the CRM commit path are shared with the implicit agent so both flows are
-directly comparable side by side (same ``/api/v1`` REST contract, same
-disposition registry).
-"""
-
-from __future__ import annotations
-
-import logging
-import os
-
-from google.adk.agents import Agent
-from google.adk.agents.readonly_context import ReadonlyContext
-
-from .agent import STATE_AGENT_CONFIG, STATE_PLANNED_TOPICS, _GENERATION_CONFIG
-from .agent import load_campaign_config
-from .tools_guided import (
-    capture_dictation,
-    choose_post_dictation_action,
-    commit_guided_notes,
-    record_topic_disposition,
-    set_event_type,
-)
-
-logger = logging.getLogger(__name__)
-
-
-# WHERE THE COMMIT ACTUALLY HAPPENS -- read before editing Stage 5 below.
-#
-# Stage 5 of this script tells the model to call `commit_guided_notes`. In
-# practice it usually does not need to: `tools_guided.record_topic_disposition`
-# commits inline once the last topic is dispositioned, and hands the model only
-# the closing statement to read.
-#
-# That is deliberate (Gap 6 / F5): asked to make a second tool call when it has
-# nothing left to say, the model reliably ends its turn instead -- the record is
-# complete and nothing is saved, with no signal that the save didn't happen.
-# Committing directly removes the hop.
-#
-# The consequence for anyone editing Stage 5: a prompt change around the commit
-# step -- e.g. asking for a spoken confirmation before saving -- will be
-# SILENTLY SHORT-CIRCUITED, because the tool has already committed before the
-# model gets a turn to act on the new instruction. Change
-# `record_topic_disposition` too, or the prompt edit will appear to do nothing.
-_GUIDED_SCRIPT = """
-# Your job
-You are a hands-free, EXPLICIT-script voice dictation assistant for a field
-sales rep. Unlike a freeform assistant, you follow this fixed script exactly,
-one explicit question at a time, and you NEVER skip ahead or silently infer
-an answer the rep didn't actually give.
-
-# Stage 0 -- Greeting
-Say exactly: "Hi, I'm your post-call summary assistant. I'll help you capture
-your visit notes and update the post-call summary. You can speak naturally,
-and you can replay or re-record your notes at any time. Ready to begin?"
-- "not now" / "cancel" -> say a brief goodbye and end. Do not save anything.
-- "yes" / "start" / "go ahead" with NOTHING else said -> go to Stage 1 and say
-  its prompt.
-- "yes" (or similar) FOLLOWED, in the same turn, by actual visit content
-  (e.g. "Yes, this was a meeting where we discussed...") -> they've already
-  started dictating. Do NOT say the Stage 1 prompt or ask them to start over.
-  Instead, silently treat everything after the "yes" as the first part of
-  their dictation and go straight into Stage 1's listening behavior with that
-  content already captured (accumulate it, wait for more or an end phrase,
-  same rules as Stage 1 below).
-- Actual visit content with NO "yes"/"start" at all (a rep who starts
-  dictating immediately, before you've even said the greeting, or answers
-  the greeting by diving straight into their notes) -> same as above: this
-  IS their consent, treat their entire utterance as the first part of the
-  dictation and go straight into Stage 1's listening behavior. Never respond
-  to real visit content by reciting the Stage 0 greeting or asking "ready to
-  begin?" -- only say the greeting when you have NOTHING else to go on yet
-  (silence, or a genuinely unrelated/unclear first utterance).
-
-# Stage 1 -- Note dictation
-Say exactly: "Great, please dictate your visit notes now. When you're done,
-say 'end notes.'" (Skip this line entirely if you already moved into Stage 1
-because they front-loaded dictation content in their Stage 0 answer -- in
-that case, say nothing and just keep listening.) Then listen. A pause after
-they stop talking is treated as
-them being finished (the same automatic pause-detection used everywhere else
-in this app) -- you do NOT need to hear an explicit end phrase to proceed. If
-they do say one ("end notes", "that's it", "done", "I'm finished", or a close
-variant), drop it from the transcript you pass on; otherwise pass everything
-they said as-is.
-
-Exception: if what they've said so far trails off mid-thought (ends with
-"and", "also", "um", "let me think", or similar unfinished-sounding filler),
-you may wait ONE additional pause for them to continue before calling
-capture_dictation. Never wait through a second consecutive pause -- if they
-were silent, then spoke again, then paused again (even on a word like "and"),
-that is your hard cutoff: call capture_dictation immediately with everything
-said so far as raw_transcript. You must never go more than one pause without
-either speaking or calling a tool -- silently waiting forever is not
-acceptable.
-
-When you finish listening, say and produce ABSOLUTELY NOTHING out loud before
-calling capture_dictation -- no filler, no "one moment", no narration, no
-partial or guessed summary, no mention of what you captured. Silence is the
-correct, expected behavior here; the rep is fine waiting. You do not know the
-final wording of the summary/menu until capture_dictation returns it -- do
-not say or guess ANY of it beforehand.
-
-  Example -- rep just said an end phrase or paused long enough to finish:
-    WRONG: "I've captured your visit notes, summarizing that the contract
-    renewal was successful and the client confirmed they'll be a preferred
-    vendor... You can save, play back, or re-record."  <- spoken BEFORE the
-    tool ran. Forbidden, even though it turned out roughly accurate -- it is
-    still a duplicate of what capture_dictation is about to have you say for
-    real, and the rep will hear the summary twice.
-    RIGHT: (nothing spoken at all) -- silently call capture_dictation with
-    the raw_transcript and your composed executive_summary, wait for it to
-    return, and only then speak using its instruction_for_model.
-
-When you call capture_dictation, also pass executive_summary: a real 2-3
-sentence summary of what the rep just dictated, written by you, in your own
-words. This is not a placeholder -- it must actually condense what they said
-(similar to a call summary), because you will speak it back to them next
-(after the tool returns, per the rule above) and may be asked to repeat it
-verbatim later.
-
-# Stage 2 -- Save / Play back / Re-record menu
-After capture_dictation, present the menu it tells you to (which speaks the
-executive_summary you just wrote), then call choose_post_dictation_action
-with the rep's choice ("save", "playback", or "rerecord"). Follow whatever
-instruction_for_model it returns next -- it may send you back to Stage 1
-(re-record, which discards everything captured so far including any event
-type/dispositions and the summary), keep you in this menu (playback, which
-repeats the same summary, NOT the raw verbatim dictation), or move you to
-Stage 3 (save).
-
-# Stage 3 -- Event type (single explicit question)
-Ask exactly: "Was this a meeting or an on-site visit?" Map the answer to
-exactly one of Meeting / On-site visit / Phone Call and call set_event_type.
-Never guess this from the earlier dictation -- always ask it explicitly.
-
-# Stage 4 -- Topic disposition (one topic at a time, deduce + confirm, max 3
-attempts)
-For the topic set_event_type (or record_topic_disposition) names as next:
-1. Ask exactly: "What was the outcome for [topic]?"
-2. Attempt 1: silently deduce the single best-fit disposition code from the
-   rep's answer (using the disposition registry/keywords below) and ask:
-   "I think you mean [label] -- is that correct?"
-   - "yes" -> call record_topic_disposition(topic, that code, a 1-2 sentence
-     summary, discussed=true, needs_manual_review=false). Then continue with
-     whatever topic it names next (repeat this Stage), or go to Stage 5 if it
-     says all topics are done.
-   - "no" -> Attempt 2: say "No problem, here are the outcome options:" and
-     read the full numbered list of the 10 disposition options from the
-     registry below, then ask "Which number best fits?"
-     - A valid number 1-10 -> confirm once ("Got it, marking that as
-       [label].") and call record_topic_disposition with that code,
-       needs_manual_review=false.
-     - Still no valid pick -> Attempt 3: repeat the numbered list ONE more
-       time and ask again.
-       - Still nothing valid after this 3rd attempt -> call
-         record_topic_disposition with disposition_code=null,
-         needs_manual_review=true, and executive_summary set to the rep's
-         raw answer (for a human to resolve later). Do NOT retry past 3
-         attempts, and do NOT cancel the whole session over one unresolved
-         topic -- move on.
-- If the rep says they didn't get to a topic (e.g. "skip that", "didn't cover
-  it", "ran out of time"), call record_topic_disposition immediately with
-  discussed=false, disposition_code=null, needs_manual_review=false, and
-  their reason as executive_summary. Do not run the deduce/confirm loop for a
-  skipped topic.
-- If there were no pre-call planned topics, set_event_type will tell you to
-  ask "What topics did you discuss?" instead -- take each topic the rep
-  names, run the same deduce/confirm loop for it, then ask "Any other
-  topics?" after each one until they say no, then proceed to Stage 5.
-
-# Stage 5 -- Commit + closing
-Once every topic is recorded (record_topic_disposition tells you when all
-are done), call commit_guided_notes, then speak its closing_statement
-verbatim and end the session. Do not say anything after the closing
-statement. If record_topic_disposition already returned a closing_statement,
-the record is saved -- just read it; calling commit_guided_notes again is
-safe and will replay the same result.
-
-# Speaking style
-Speak every question and confirmation at a measured, unhurried pace -- not
-rushed. Brief natural pause between sentences.
-
-# Hard rules
-- Never invent an answer the rep didn't give -- always ask explicitly, never
-  infer event type or disposition silently from the earlier dictation.
-- Never call record_topic_disposition with a fabricated disposition_code the
-  rep didn't confirm (or explicitly skip/discuss).
-- Only ever run the full script once per session.
-- Every question you ask ("is that correct?", "was this a meeting or an
-  on-site visit?", etc.) MUST be followed by actually stopping and waiting for
-  a new rep utterance. Never answer your own question, never assume a "yes",
-  and never call the next tool in the sequence until the rep has given a new,
-  real response since your question was asked. Speak ZERO words guessing at
-  an outcome before the relevant tool call -- only ask the exact scripted
-  question, then wait.
-"""
-
-
-def _format_config_block(config: dict) -> str:
-    """Render allowed event types + a numbered disposition list for retries."""
-    allowed = ", ".join(config.get("allowed_event_types", []))
-    registry_lines = [
-        f"  {rule['code']}. {rule['label']}"
-        for rule in config.get("disposition_registry", [])
-    ]
-    registry_block = "\n".join(registry_lines)
-    return (
-        f"# Allowed event types\n{allowed}\n\n"
-        f"# Disposition registry (read as a numbered list on retry)\n"
-        f"{registry_block}\n"
-    )
-
-
-def _format_planned_topics_block(planned_topics: list[str]) -> str:
-    """Render the rep's pre-call planned topics as the guided-loop anchor."""
-    if not planned_topics:
-        return (
-            "# Planned topics\nNone pre-selected -- ask the rep what topics "
-            "they discussed instead of anchoring to a planned list.\n"
-        )
-    lines = "\n".join(f"  - {t}" for t in planned_topics)
-    return f"# Planned topics (ask about each, in this order)\n{lines}\n"
-
-
-def voice_notes_guided_instruction(ctx: ReadonlyContext) -> str:
-    """Assemble the full system instruction from the dynamic config in state."""
-    config = ctx.state.get(STATE_AGENT_CONFIG)
-    if not config:
-        logger.debug("Agent config missing from state; using script only")
-        config = {}
-    planned_topics = ctx.state.get(STATE_PLANNED_TOPICS) or []
-    return (
-        f"{_GUIDED_SCRIPT}\n\n"
-        f"{_format_planned_topics_block(planned_topics)}\n"
-        f"{_format_config_block(config)}"
-    )
-
-
-agent_guided = Agent(
-    name="voice_notes_logger_guided",
-    model=os.getenv(
-        "VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
-    ),
-    instruction=voice_notes_guided_instruction,
-    tools=[
-        capture_dictation,
-        choose_post_dictation_action,
-        set_event_type,
-        record_topic_disposition,
-        commit_guided_notes,
-    ],
-    before_agent_callback=load_campaign_config,
-    generate_content_config=_GENERATION_CONFIG,
-)
-````
-<!-- END: app/voice_notes_agent/agent_guided.py -->
-
 <!-- FILE: app/voice_notes_agent/config.py -->
 ````python
 import os
@@ -410,6 +160,268 @@ import os
 API_BASE = os.getenv("VOICE_NOTES_API_BASE", "http://localhost:8000")
 ````
 <!-- END: app/voice_notes_agent/config.py -->
+
+<!-- FILE: app/voice_notes_agent/live_credentials.py -->
+````python
+"""Credential pre-warm + periodic background refresh for the Gemini Live
+WebSocket connection path.
+
+Intended location in the project: app/voice_notes_agent/live_credentials.py
+
+--------------------------------------------------------------------------
+Background (see BLOCKING_AUTH_FINDING.md for full evidence/writeup)
+--------------------------------------------------------------------------
+google/genai/live.py's `connect()` method contains a hardcoded, always-
+SYNCHRONOUS auth block:
+
+    if not self._api_client._credentials:
+        creds, _ = google.auth.default(scopes=[...])   # BLOCKING
+    else:
+        creds = self._api_client._credentials
+    if not (creds.token and creds.valid):
+        ...
+        creds.refresh(auth_req)                          # BLOCKING
+
+Both `google.auth.default()` and `Credentials.refresh(Request())` use the
+classic synchronous `requests`-based transport. Because this runs inside an
+`async def` function with no `await` wrapping it, it freezes asyncio's
+ENTIRE event loop for the length of the call -- observed as 5-11s per
+Gemini Live connection attempt in this project.
+
+This module skips BOTH blocking calls for every connection *after startup*
+by pre-supplying an already-valid, already-refreshed Credentials object on
+the `genai.Client` used for the live connection. `_api_client._credentials`
+is then truthy AND `creds.valid` is already True, so live.py's own `if`
+checks short-circuit before either blocking call is reached. Verified
+directly against the installed google-genai library (not just read from
+source) -- see scripts/verify_credential_prewarm_fix.py.
+
+The ONE blocking call this module cannot avoid is the very first
+`google.auth.default()` + `credentials.refresh()`, done once at server
+STARTUP, before any WebSocket connection is accepted -- that cost is paid
+once, off the request path, which is the whole point of the fix.
+
+--------------------------------------------------------------------------
+Usage (see main.py / agent.py wiring notes at the bottom of this file)
+--------------------------------------------------------------------------
+
+    from voice_notes_agent.live_credentials import (
+        build_prewarmed_live_client,
+        start_background_refresh,
+    )
+
+    @app.on_event("startup")
+    async def _prewarm_live_credentials():
+        client = build_prewarmed_live_client()
+        app.state.live_client = client
+        asyncio.ensure_future(start_background_refresh(client))
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from datetime import datetime, timezone
+
+import google.auth
+from google.auth.transport.requests import Request
+from google.genai import Client
+
+logger = logging.getLogger(__name__)
+
+_LIVE_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+# Google-issued OAuth2 access tokens are typically valid for ~3600s.
+# Refreshing well before expiry (rather than waiting for live.py's own
+# `creds.valid` check to catch an expired token) is what keeps EVERY live
+# connection's auth block a no-op. If we let a token actually expire before
+# refreshing, the very next connection attempt hits the blocking path again
+# for that one request -- defeating the fix for that request.
+_REFRESH_MARGIN_SECONDS = 300  # refresh 5 minutes before actual expiry
+_REFRESH_CHECK_INTERVAL_SECONDS = 60  # how often the background task wakes to check
+_RETRY_AFTER_FAILURE_SECONDS = 60  # backoff if a refresh attempt itself fails
+
+
+def _resolve_and_refresh_new_credentials(scopes: list[str]):
+    """Runs entirely on a worker thread via asyncio.to_thread -- this
+    function itself is plain synchronous code, deliberately.
+
+    Returns a BRAND NEW Credentials object each time (rather than mutating
+    an existing one in place). See the note on `_swap_credentials` below
+    for why that distinction matters for thread-safety.
+    """
+    credentials, project = google.auth.default(scopes=scopes)
+    credentials.refresh(Request())
+    return credentials, project
+
+
+def build_prewarmed_live_client() -> Client:
+    """One-time, startup-only credential resolution + refresh.
+
+    This DOES perform the same two calls that are blocking elsewhere in
+    this project -- but doing it ONCE here, at server startup (before any
+    WebSocket connection is accepted), costs nothing on the request path.
+    The payoff: every connection afterward reuses this already-valid
+    credential and skips both blocking calls inside
+    google/genai/live.py's connect().
+
+    Call this synchronously during startup (not inside a coroutine that
+    also needs to stay responsive) -- it is expected to block briefly,
+    exactly once, which is the intended tradeoff.
+    """
+    project = os.getenv("GOOGLE_CLOUD_PROJECT")
+    location = os.getenv("GOOGLE_CLOUD_LOCATION")
+
+    credentials, resolved_project = _resolve_and_refresh_new_credentials(_LIVE_SCOPES)
+
+    client = Client(
+        vertexai=True,
+        project=project or resolved_project,
+        location=location,
+        credentials=credentials,
+    )
+    logger.info(
+        "Pre-warmed Gemini Live credentials at startup (project=%s, "
+        "location=%s, token_expiry=%s)",
+        project or resolved_project,
+        location,
+        getattr(credentials, "expiry", None),
+    )
+    return client
+
+
+def _swap_credentials(client: Client, new_credentials) -> None:
+    """Replace the client's credentials with a freshly resolved object.
+
+    Deliberately a full OBJECT SWAP (reassigning the attribute to a new
+    Credentials instance), not an in-place mutation of the existing one.
+
+    Why this matters: `credentials.refresh()` sets several attributes
+    (token, expiry, ...) one at a time -- NOT atomically. If our background
+    refresh task called `.refresh()` on the SAME object that live.py's
+    connect() might be reading from concurrently (on the main event loop
+    thread, via asyncio.to_thread's worker thread doing the refresh), a
+    connect() call could theoretically observe a torn/partially-updated
+    credential (e.g. a new expiry paired with a stale token).
+
+    A plain attribute REASSIGNMENT (`client._api_client._credentials = X`)
+    is a single bytecode STORE_ATTR under CPython's GIL, so any other
+    thread reading `client._api_client._credentials` will see either the
+    OLD object or the NEW one in full -- never a half-updated hybrid. This
+    sidesteps the torn-read risk entirely, at the cost of resolving a fresh
+    credential from scratch each cycle rather than refreshing in place.
+
+    KNOWN COUPLING RISK: `client._api_client._credentials` is a PRIVATE
+    attribute of the google-genai SDK, not a public API. This will need
+    re-verification if google-genai is upgraded and happens to rename or
+    restructure `_api_client` / `_credentials`. There is no public
+    "replace the client's credentials" method as of the version this was
+    written against -- flagged here deliberately so it isn't missed on a
+    future dependency bump.
+    """
+    client._api_client._credentials = new_credentials  # noqa: SLF001
+
+
+async def start_background_refresh(client: Client) -> None:
+    """Runs forever (until the process exits), refreshing the client's
+    credentials shortly before they expire.
+
+    Uses asyncio.to_thread(...) for the actual (synchronous) refresh call
+    -- this IS a call site we control directly, unlike the ones buried
+    inside google/genai/live.py, so wrapping it here is straightforward
+    and genuinely effective: the blocking work happens on a worker thread,
+    never on the event loop that serves live WebSocket connections.
+
+    Must be scheduled once via asyncio.ensure_future(...) (or an
+    app-lifespan equivalent) during startup -- it does not return under
+    normal operation.
+    """
+    while True:
+        credentials = client._api_client._credentials  # noqa: SLF001
+        expiry = getattr(credentials, "expiry", None)
+
+        if expiry is None:
+            # No known expiry (uncommon, e.g. certain service-account key
+            # types) -- fall back to a fixed periodic refresh instead of
+            # computing a margin against an expiry we don't have.
+            await asyncio.sleep(_REFRESH_CHECK_INTERVAL_SECONDS * 30)  # ~30 min
+        else:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            seconds_until_expiry = (expiry - now).total_seconds()
+            seconds_until_due = seconds_until_expiry - _REFRESH_MARGIN_SECONDS
+
+            if seconds_until_due > _REFRESH_CHECK_INTERVAL_SECONDS:
+                # Not due yet. Wake periodically (rather than sleeping for
+                # the entire remaining duration in one shot) so a manual
+                # credential rotation/replacement would be picked up
+                # reasonably promptly if this module is ever extended to
+                # support that.
+                await asyncio.sleep(_REFRESH_CHECK_INTERVAL_SECONDS)
+                continue
+            if seconds_until_due > 0:
+                await asyncio.sleep(seconds_until_due)
+
+        try:
+            new_credentials, _ = await asyncio.to_thread(
+                _resolve_and_refresh_new_credentials, _LIVE_SCOPES
+            )
+            _swap_credentials(client, new_credentials)
+            logger.info(
+                "Background-refreshed Gemini Live credentials (new expiry=%s)",
+                getattr(new_credentials, "expiry", None),
+            )
+        except Exception:  # noqa: BLE001 -- must never crash the whole app
+            logger.exception(
+                "Background credential refresh failed -- will retry in "
+                "%ss. Live connections may hit the blocking refresh path "
+                "again until this succeeds.",
+                _RETRY_AFTER_FAILURE_SECONDS,
+            )
+            await asyncio.sleep(_RETRY_AFTER_FAILURE_SECONDS)
+
+
+# ---------------------------------------------------------------------------
+# Wiring notes (apply these two small edits by hand -- not included as a
+# full-file rewrite here, to avoid clobbering unrelated changes you may have
+# made to main.py / agent.py since this was written):
+#
+# In main.py, near the other startup-time setup (alongside the existing
+# `runner = Runner(...)` construction):
+#
+#     from voice_notes_agent.live_credentials import (
+#         build_prewarmed_live_client,
+#         start_background_refresh,
+#     )
+#
+#     _live_client = build_prewarmed_live_client()
+#
+#     @app.on_event("startup")
+#     async def _start_credential_refresh_task():
+#         asyncio.ensure_future(start_background_refresh(_live_client))
+#
+# In agent.py, thread `_live_client` into the Agent's model construction.
+# ADK's Gemini model class documents exactly this extension point:
+#
+#     from google.adk.models import Gemini
+#
+#     agent = Agent(
+#         name="voice_notes_logger",
+#         model=Gemini(
+#             model=os.getenv("VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"),
+#             client=_live_client,   # <-- the pre-warmed client from main.py
+#         ),
+#         ...
+#     )
+#
+# (Exact wiring may differ slightly depending on how `agent` is currently
+# constructed in your agent.py -- the key requirement is only that the SAME
+# `_live_client` object built once at startup is the one ultimately used by
+# `Gemini(client=...)`, so `_live_api_client` returns it via
+# `if self.client: return self.client` instead of building its own.)
+# ---------------------------------------------------------------------------
+````
+<!-- END: app/voice_notes_agent/live_credentials.py -->
 
 <!-- FILE: app/voice_notes_agent/notes_workflow.py -->
 ````python
@@ -438,13 +450,15 @@ Logging"):
   restarts. Durable audit logging is handled entirely by ADK's
   BigQueryAgentAnalyticsPlugin attached to the Runner (see main.py); this
   module has no writer of its own.
-- No guided-flow support. The guided flow is being retired separately;
-  agent_mode / per-flow branching has been removed from this workflow.
+- No guided-flow support. The guided flow is retired (AIML-2751); agent_mode
+  / per-flow branching has been removed from this workflow. The last code is
+  recoverable from the tag ``archive/guided-flow``.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -577,9 +591,18 @@ def validate_payload(payload: dict[str, Any]) -> tuple[list[str], dict[str, Any]
     for idx, topic in enumerate(payload.get("topics") or []):
         label = (topic.get("topic") or f"topic #{idx + 1}").strip()
         code = topic.get("disposition_code")
-        # Two cases legitimately carry no code: a planned topic the rep
-        # never got to, and (guided-flow only, now retired) a topic flagged
-        # for manual review. Anything else is a gap.
+        # A planned topic the rep never got to legitimately carries no
+        # code. Anything else is a gap.
+        #
+        # VESTIGIAL: the `needs_manual_review` half of this exemption is
+        # effectively dead. It existed for the retired guided flow's
+        # "3 failed confirm attempts" path, which set the flag with no code.
+        # The surviving flow only reaches needs_manual_review=True via
+        # disposition_code=99 (see stage_notes below), which is not None, so
+        # the exemption is never the reason a topic passes. Kept rather than
+        # removed because dropping it would newly REJECT a payload where the
+        # model sets the flag itself -- a behaviour change that belongs with
+        # the AIML-2705 flag-shape unification, not here.
         if code is None:
             if topic.get("discussed", True) and not topic.get(
                 "needs_manual_review", False
@@ -699,7 +722,9 @@ class SupersededRecordError(Exception):
     and because the idempotency check keys on session_id, committing both
     drafts looks like two unrelated saves for one visit.
 
-    Reproduced by scripts/repro_orphan_restage.py (AIML-2703).
+    Guarded by tests/test_notes_workflow_gates.py (AIML-2703). Note this
+    orphan shape needs DISTINCT session ids, so it is reachable only by a
+    caller that is not tools.py -- see that test module's docstring.
     """
 
     def __init__(self, session_id: str, superseded_by: str) -> None:
@@ -962,6 +987,15 @@ def get_staged(session_id: str) -> dict[str, Any] | None:
     return _STAGED_NOTES.get(session_id)
 
 
+def rehydrate_staged(session_id: str, record: dict[str, Any]) -> None:
+    """Restore a staged record into _STAGED_NOTES from external/session state.
+
+    Used when resuming an active session across process restarts or reconnects.
+    """
+    _STAGED_NOTES[session_id] = record
+    logger.debug("rehydrate_staged: restored session_id=%s into _STAGED_NOTES", session_id)
+
+
 def _build_commit_result(
     session_id: str, record: dict[str, Any], closing_statement: str
 ) -> CommitResult:
@@ -1091,6 +1125,78 @@ def commit_notes(session_id: str, confirmed: bool) -> CommitResult | dict[str, s
         session_id,
     )
     return result
+
+
+def cleanup_session(session_id: str) -> None:
+    """Clean up in-memory staged notes for a session on disconnect or completion."""
+    _STAGED_NOTES.pop(session_id, None)
+    logger.debug("notes_workflow._STAGED_NOTES cleaned up for session_id=%s", session_id)
+
+
+# Configurable retention TTLs for defense-in-depth in-memory dictionary pruning
+VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS = float(
+    os.getenv("VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS", "3600.0")
+)
+VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS = float(
+    os.getenv("VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS", "7200.0")
+)
+
+
+def prune_stale_staged_notes(
+    max_age_seconds: float | None = None,
+    committed_max_age_seconds: float | None = None,
+    uncommitted_max_age_seconds: float | None = None,
+) -> int:
+    """Prune stale records from _STAGED_NOTES as a defense-in-depth safety net.
+
+    Configurable via environment variables:
+    - VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS (default 3600s / 1 hr)
+    - VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS (default 7200s / 2 hrs)
+
+    - Committed or superseded records older than committed TTL are evicted
+      to prevent memory leaks while giving clients a generous window to retry.
+    - Active uncommitted records older than uncommitted TTL are evicted as abandoned.
+
+    Returns the count of evicted records.
+    """
+    if max_age_seconds is not None:
+        c_ttl = max_age_seconds
+        u_ttl = max_age_seconds * 2
+    else:
+        c_ttl = (
+            committed_max_age_seconds
+            if committed_max_age_seconds is not None
+            else VOICE_NOTES_COMMITTED_PRUNE_TTL_SECONDS
+        )
+        u_ttl = (
+            uncommitted_max_age_seconds
+            if uncommitted_max_age_seconds is not None
+            else VOICE_NOTES_UNCOMMITTED_PRUNE_TTL_SECONDS
+        )
+
+    now = datetime.now(timezone.utc)
+    to_delete = []
+    for sid, rec in list(_STAGED_NOTES.items()):
+        ts_str = rec.get("committed_at") or rec.get("staged_at")
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str)
+            age = (now - ts).total_seconds()
+        except (ValueError, TypeError):
+            continue
+
+        if rec.get("committed") or rec.get("superseded_by"):
+            if age > c_ttl:
+                to_delete.append(sid)
+        elif age > u_ttl:
+            to_delete.append(sid)
+
+    for sid in to_delete:
+        _STAGED_NOTES.pop(sid, None)
+    if to_delete:
+        logger.info("prune_stale_staged_notes evicted %d records", len(to_delete))
+    return len(to_delete)
 ````
 <!-- END: app/voice_notes_agent/notes_workflow.py -->
 
@@ -1160,9 +1266,14 @@ class DiscussionTopic(BaseModel):
     needs_manual_review: bool = Field(
         default=False,
         description=(
-            "Guided flow only: true if 3 disposition-confirm attempts "
-            "failed and the code had to be left unresolved for a human to "
-            "fix."
+            "True if the disposition code had to be left unresolved for a "
+            "human to fix. NOT partitioned by flow: stage_notes sets this "
+            "automatically whenever disposition_code == 99, so the surviving "
+            "flow produces both together. The retired guided flow set it "
+            "WITHOUT a code (after 3 failed disposition-confirm attempts), "
+            "which is the shape validate_payload's no-code exemption was "
+            "written for -- that exemption is now vestigial. Unifying the "
+            "two shapes is an open decision -- see AIML-2705."
         ),
     )
 
@@ -1269,6 +1380,7 @@ logger = logging.getLogger(__name__)
 # session = one commit) -- so there is nothing else to mint or track here.
 _STAGED_SESSION_KEY = "crm_staged_session_id"
 _LAST_CONFIRMATION_KEY = "crm_last_confirmation_text"
+_CLOSING_STATEMENT = notes_workflow._CLOSING_STATEMENT
 
 # The disposition registry is universal now (no campaign_type, no per-session
 # fetch) -- codes legal for a topic are just every code notes_workflow knows
@@ -1507,6 +1619,17 @@ async def stage_visit_notes(
     # Persist the staged session id so the commit tool can reference it
     # later (also handles the correction branch above, next time through).
     tool_context.state[_STAGED_SESSION_KEY] = data["session_id"]
+    # Dual-Sync (AIML-2807 & 2743): Persist full staged record to ADK session
+    # state so it survives process restarts and can rehydrate on reconnect.
+    raw_staged = notes_workflow.get_staged(data["session_id"])
+    if raw_staged:
+        tool_context.state["staged_record"] = dict(raw_staged)
+
+    # Clear prior commit tracking so a newly staged note in the same session
+    # is never blocked by or replays an earlier visit's commit result:
+    tool_context.state["commit_result"] = None
+    tool_context.state["committed"] = False
+
 
     missing = data.get("missing_topics") or []
     if missing:
@@ -1558,7 +1681,8 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
         before ending the session.
     """
     session_id = tool_context.state.get(_STAGED_SESSION_KEY)
-    if not session_id:
+    staged_record = tool_context.state.get("staged_record")
+    if not session_id and not staged_record:
         logger.warning("commit_visit_notes called with no staged session")
         return {
             "status": "error",
@@ -1568,6 +1692,19 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
                 "notes first."
             ),
         }
+    if not session_id and staged_record:
+        session_id = staged_record.get("session_id") or tool_context.session.id
+
+    # If the process restarted or redeployed, _STAGED_NOTES in RAM is empty,
+    # but tool_context.state["staged_record"] persisted in VertexAiSessionService.
+    # Rehydrate it back into _STAGED_NOTES now so gates and commits work seamlessly.
+    if notes_workflow.get_staged(session_id) is None and staged_record:
+        logger.info(
+            "commit_visit_notes: rehydrating _STAGED_NOTES for session_id=%s from session state",
+            session_id,
+        )
+        notes_workflow.rehydrate_staged(session_id, staged_record)
+
 
     # Hard backstop: refuse to commit unless a genuine NEW rep utterance has
     # arrived since the confirmation question was staged/asked. This blocks
@@ -1606,6 +1743,8 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
         }
 
     if not turn_guard.has_new_reply(tool_context):
+        # Arm the baseline so the upcoming rep confirmation will satisfy has_new_reply
+        turn_guard.snapshot(tool_context)
         logger.warning(
             "commit_visit_notes BLOCKED: no new rep reply since staging "
             "(session_id=%s) -- refusing to save.",
@@ -1704,14 +1843,31 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
             "ui_event": "tool_error",
         }
 
+    closing = getattr(result, "closing_statement", _CLOSING_STATEMENT) if not isinstance(result, dict) else result.get("closing_statement", _CLOSING_STATEMENT)
     if isinstance(result, dict):
         # confirmed=False path returns {"status": "cancelled", ...} instead
         # of a CommitResult -- not reachable from this tool (we always pass
         # confirmed=True), but handled rather than assumed away.
         return {
             **result,
-            "instruction_for_model": "Read the closing_statement to the user verbatim.",
+            "instruction_for_model": (
+                f"Say out loud to the user right now, verbatim: \"{closing}\". "
+                "Do not stay silent. You MUST speak this sentence aloud before ending."
+            ),
         }
+
+    commit_payload = (
+        result.model_dump() if hasattr(result, "model_dump") else dict(result)
+    )
+    # Persist commit result to tool_context.state so restarts and reconnects survive
+    tool_context.state["commit_result"] = commit_payload
+    tool_context.state["committed"] = True
+
+    # Dual-Sync: update staged_record in session state so rehydration across
+    # process restart carries committed=True and commit_result intact.
+    staged_rec = notes_workflow.get_staged(session_id)
+    if staged_rec:
+        tool_context.state["staged_record"] = dict(staged_rec)
 
     # Clear staged session so a fresh dictation starts clean.
     tool_context.state[_STAGED_SESSION_KEY] = None
@@ -1721,679 +1877,14 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
     # streamed tool-call arguments.
     return {
         "status": "success",
-        **result.model_dump(),
+        **commit_payload,
         "instruction_for_model": (
-            "Read the closing_statement to the user verbatim. The session is "
-            "now complete."
+            f"Say out loud to the user right now, verbatim: \"{closing}\". "
+            "Do not stay silent. You MUST speak this sentence aloud before ending."
         ),
     }
 ````
 <!-- END: app/voice_notes_agent/tools.py -->
-
-<!-- FILE: app/voice_notes_agent/tools_guided.py -->
-````python
-"""ADK function-call tools for the Guided (explicit turn-by-turn) Voice Notes
-agent.
-
-Unlike the implicit flow's single "Mega-Payload" call, the guided flow builds
-the CRM record incrementally across several small, explicit tool calls -- one
-per conversational stage -- mirroring the fixed script (dictation -> menu ->
-event type -> per-topic disposition -> commit). Like the implicit flow's
-tools, these call the real ``/api/v1`` REST endpoints rather than touching the
-store directly, so both flows commit through the identical CRM path.
-"""
-
-from __future__ import annotations
-
-import asyncio
-import logging
-import os
-
-import httpx
-from google.adk.tools import ToolContext
-
-from .mock_db import VALID_DISPOSITION_CODES, VALID_EVENT_TYPES
-from . import turn_guard
-
-logger = logging.getLogger(__name__)
-
-_API_BASE = os.getenv("VOICE_NOTES_API_BASE", "http://localhost:8000")
-_HTTP_TIMEOUT = 15.0
-
-# Session-state keys tracking progress through the guided script.
-_S_TRANSCRIPT = "guided_raw_transcript"
-_S_SUMMARY = "guided_executive_summary"
-_S_EVENT_TYPE = "guided_event_type"
-_S_TOPIC_RESULTS = "guided_topic_results"
-_S_PENDING_TOPICS = "guided_pending_topics"
-# Set once the record has actually been committed, so a second
-# commit_guided_notes call replays the original result instead of re-staging
-# and minting a duplicate CRM record. Needed because the last topic's
-# disposition now commits directly (see record_topic_disposition) -- the model
-# may still make the call it was previously instructed to make.
-_S_COMMIT_RESULT = "guided_commit_result"
-# Written by agent_guided's config callback (literal to avoid a circular import).
-_AGENT_CONFIG_KEY = "agent_config"
-_CAMPAIGN_TYPE_KEY = "campaign_type"
-
-
-def _campaign_rules(tool_context: ToolContext) -> tuple[list[str], set[int]]:
-    """Event types and disposition codes legal for THIS session's campaign.
-
-    Falls back to the global registry only if the dynamic config never loaded;
-    the REST layer re-validates campaign rules regardless, so a failed config
-    fetch cannot let an illegal value through to the CRM.
-    """
-    config = tool_context.state.get(_AGENT_CONFIG_KEY) or {}
-    events = list(config.get("allowed_event_types") or []) or list(
-        VALID_EVENT_TYPES
-    )
-    registry = config.get("disposition_registry") or []
-    codes = {int(rule["code"]) for rule in registry if "code" in rule}
-    return events, (codes or set(VALID_DISPOSITION_CODES))
-
-
-# One lock per live session, guarding the read-then-commit sequence in
-# commit_guided_notes. ADK's Live flow can dispatch several function calls from
-# a single model turn concurrently (asyncio.gather), and that sequence spans
-# two awaited HTTP round-trips -- long enough for a second invocation to read
-# _S_COMMIT_RESULT as unset and commit independently.
-#
-# Keyed by session id and never evicted; folds into B11's cleanup hook along
-# with turn_guard's dicts and mock_db._STAGED_NOTES.
-_COMMIT_LOCKS: dict[str, asyncio.Lock] = {}
-
-
-def _commit_lock(tool_context: ToolContext) -> asyncio.Lock:
-    """Return this session's commit lock, creating it if needed.
-
-    Safe without its own lock: there is no await between the lookup and the
-    insert, so no other task can run in between and create a second one.
-    """
-    key = tool_context.session.id
-    lock = _COMMIT_LOCKS.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _COMMIT_LOCKS[key] = lock
-    return lock
-
-
-def _reset_guided_state(tool_context: ToolContext) -> None:
-    """Discard everything captured so far (a full re-record restart)."""
-    tool_context.state[_S_TRANSCRIPT] = None
-    tool_context.state[_S_SUMMARY] = None
-    tool_context.state[_S_EVENT_TYPE] = None
-    tool_context.state[_S_TOPIC_RESULTS] = []
-    # Cleared with the rest: a commit result belongs to the record that was
-    # just discarded, and leaving it set makes the next commit replay a CRM id
-    # for a record this session no longer holds.
-    tool_context.state[_S_COMMIT_RESULT] = None
-    tool_context.state[_S_PENDING_TOPICS] = list(
-        tool_context.state.get("planned_topics") or []
-    )
-
-
-def _topic_matches(a: str, b: str) -> bool:
-    a, b = (a or "").strip().lower(), (b or "").strip().lower()
-    return bool(a) and bool(b) and (a == b or a in b or b in a)
-
-
-def _join_natural(items: list[str]) -> str:
-    items = [i for i in items if i]
-    if not items:
-        return ""
-    if len(items) == 1:
-        return items[0]
-    return f"{', '.join(items[:-1])} and {items[-1]}"
-
-
-async def capture_dictation(
-    raw_transcript: str, executive_summary: str, tool_context: ToolContext
-) -> dict:
-    """Call this exactly once the rep is done dictating -- either because they
-    said an explicit end phrase ("end notes", "that's it", "done", "I'm
-    finished") OR because they simply stopped talking and a pause was
-    detected (silence alone IS sufficient; do not wait indefinitely for an
-    explicit end phrase that may never come -- see Stage 1's trailing-off
-    cutoff rule for the one-extra-pause exception).
-
-    Args:
-        raw_transcript: The rep's full dictation, verbatim, up to (not
-            including) any end phrase they said.
-        executive_summary: A condensed, structured 2-3 sentence summary of
-            what the rep just dictated, written by you right now. This is
-            what gets spoken back to the rep next and played back verbatim
-            on request -- it must actually summarize the content, never a
-            generic placeholder like "visit log covering N topics."
-
-    Returns:
-        instruction_for_model describing what to say (including the
-        summary) and the Save / Play back / Re-record menu to present next.
-    """
-    # A dictation arriving when a commit result is already on the session means
-    # the rep has started their NEXT visit without the client having rotated
-    # session_id (it holds the socket open between dictations to skip Vertex's
-    # cold-start handshake). Without this reset that stale result is replayed at
-    # the next commit: the agent says "saved" and reads back the PREVIOUS
-    # visit's CRM id, while nothing for this visit was ever staged.
-    #
-    # The client also rotates session_id after a commit now, which makes this
-    # state empty by construction -- but the guarantee cannot depend on one
-    # client behaving. Any caller reusing a session gets it here.
-    if tool_context.state.get(_S_COMMIT_RESULT):
-        logger.info(
-            "capture_dictation: new dictation on a session that already "
-            "committed -- clearing guided state before capturing."
-        )
-        _reset_guided_state(tool_context)
-
-    tool_context.state[_S_TRANSCRIPT] = raw_transcript
-    tool_context.state[_S_SUMMARY] = executive_summary
-    if not tool_context.state.get(_S_PENDING_TOPICS):
-        tool_context.state[_S_PENDING_TOPICS] = list(
-            tool_context.state.get("planned_topics") or []
-        )
-    tool_context.state.setdefault(_S_TOPIC_RESULTS, [])
-    logger.info(
-        "capture_dictation: %d chars, summary: %d chars",
-        len(raw_transcript),
-        len(executive_summary),
-    )
-    # You're about to ask the Save/Playback/Re-record question -- the next
-    # choose_post_dictation_action call must be a genuine reply to it.
-    turn_guard.snapshot(tool_context)
-    return {
-        "status": "captured",
-        "instruction_for_model": (
-            "Say: 'Got it, here's your summary: ' then speak this "
-            f"executive_summary verbatim: {executive_summary!r}. Then ask: "
-            "'Would you like to Save, Play back what I captured, or "
-            "Re-record?' Wait for the rep's choice and call "
-            "choose_post_dictation_action with it."
-        ),
-    }
-
-
-async def choose_post_dictation_action(
-    action: str, tool_context: ToolContext
-) -> dict:
-    """Handle the rep's Save / Play back / Re-record choice after dictation.
-
-    Args:
-        action: One of "save", "playback", "rerecord" (map the rep's spoken
-            choice to exactly one of these; treat "continue" as "save").
-    """
-    action = (action or "").strip().lower()
-
-    # Hard backstop: this tool must only fire in direct response to a real
-    # rep reply to the Save/Playback/Re-record question (or a subsequent
-    # re-ask of it) -- never a self-answered guess.
-    if not turn_guard.has_new_reply(tool_context):
-        logger.warning("choose_post_dictation_action BLOCKED: no new reply")
-        return {
-            "status": "error",
-            "error": "no_reply_heard",
-            "instruction_for_model": (
-                "Do not call choose_post_dictation_action -- you have not "
-                "actually heard the rep answer yet. Ask again out loud: "
-                "'Sorry, would you like to Save, Play back, or Re-record?' "
-                "and wait for their answer. Never leave the rep in silence."
-            ),
-        }
-
-    if action == "rerecord":
-        _reset_guided_state(tool_context)
-        turn_guard.snapshot(tool_context)
-        return {
-            "status": "rerecord",
-            "instruction_for_model": (
-                "Say: 'Okay, let's re-record your notes.' Then say: 'Please "
-                "dictate your visit notes now. When you're done, say "
-                "\"end notes.\"' and wait for the new dictation."
-            ),
-        }
-    if action == "playback":
-        summary = tool_context.state.get(_S_SUMMARY) or ""
-        turn_guard.snapshot(tool_context)
-        return {
-            "status": "playback",
-            "summary": summary,
-            "instruction_for_model": (
-                "Say: 'Here's your summary again: ' Then speak this "
-                f"executive_summary verbatim: {summary!r}. Then ask: 'Would "
-                "you like to Save, Re-record, or continue as-is?' and wait, "
-                "calling choose_post_dictation_action again with their "
-                "answer (treat 'continue' the same as 'save')."
-            ),
-        }
-    if action in ("save", "continue"):
-        pending = tool_context.state.get(_S_PENDING_TOPICS) or []
-        turn_guard.snapshot(tool_context)
-        return {
-            "status": "proceed_to_event_type",
-            "instruction_for_model": (
-                "Ask exactly: 'Was this a meeting or an on-site visit?' Map "
-                "the rep's answer to one of Meeting / On-site visit / Phone "
-                "Call, then call set_event_type with it. (Pending topics to "
-                f"disposition afterward: {pending!r})"
-            ),
-        }
-    turn_guard.snapshot(tool_context)
-    return {
-        "status": "unrecognized",
-        "instruction_for_model": (
-            "That choice wasn't recognized. Ask again: 'Would you like to "
-            "Save, Play back, or Re-record?'"
-        ),
-    }
-
-
-async def set_event_type(event_type: str, tool_context: ToolContext) -> dict:
-    """Record the rep's answer to the explicit event-type question.
-
-    Args:
-        event_type: Must be one of "Meeting", "On-site visit", "Phone Call".
-    """
-    # Hard backstop: must be a genuine reply to the "was this a meeting or
-    # on-site visit?" question, never a self-answered guess.
-    if not turn_guard.has_new_reply(tool_context):
-        logger.warning("set_event_type BLOCKED: no new reply")
-        return {
-            "status": "error",
-            "error": "no_reply_heard",
-            "instruction_for_model": (
-                "Do not call set_event_type -- you have not actually heard "
-                "the rep answer yet. Ask again out loud: 'Sorry, was this a "
-                "meeting or an on-site visit?' and wait for their answer. "
-                "Never leave the rep in silence."
-            ),
-        }
-
-    allowed_events, _ = _campaign_rules(tool_context)
-    if event_type not in allowed_events:
-        turn_guard.snapshot(tool_context)
-        return {
-            "status": "invalid",
-            "instruction_for_model": (
-                f"'{event_type}' isn't allowed for this campaign. Ask again, "
-                "offering only the allowed options out loud, and map the "
-                f"answer to exactly one of {allowed_events}."
-            ),
-        }
-    tool_context.state[_S_EVENT_TYPE] = event_type
-    pending = tool_context.state.get(_S_PENDING_TOPICS) or []
-    logger.info("set_event_type=%s pending_topics=%s", event_type, pending)
-    turn_guard.snapshot(tool_context)
-
-    if not pending:
-        return {
-            "status": "no_planned_topics",
-            "instruction_for_model": (
-                "Got it. The rep had no pre-call planned topics, so ask: "
-                "'What topics did you discuss?' Take the first topic they "
-                "name and start the disposition loop for it (see topic "
-                "disposition rules), then ask 'Any other topics?' after each "
-                "one until they say no."
-            ),
-        }
-    first_topic = pending[0]
-    return {
-        "status": "event_type_set",
-        "next_topic": first_topic,
-        "instruction_for_model": (
-            f"Say 'Got it.' Then ask exactly: 'What was the outcome for "
-            f"{first_topic}?' and begin the disposition deduction/confirm "
-            "loop for that topic (max 3 attempts, per the disposition "
-            "rules), then call record_topic_disposition."
-        ),
-    }
-
-
-async def record_topic_disposition(
-    topic: str,
-    disposition_code: int | None,
-    executive_summary: str,
-    discussed: bool,
-    needs_manual_review: bool,
-    tool_context: ToolContext,
-) -> dict:
-    """Finalize the disposition for ONE topic and advance to the next.
-
-    Call this ONCE per topic, only after the rep has confirmed the deduced
-    disposition ("yes"), after they explicitly skip the topic, or after 3
-    failed confirm attempts (set needs_manual_review=True and
-    disposition_code=None in that case -- never fabricate a code the rep
-    didn't confirm).
-
-    Args:
-        topic: The exact topic label being dispositioned.
-        disposition_code: Confirmed code 1-10, or None if unresolved/skipped.
-        executive_summary: 1-2 sentence summary of this topic's outcome (or
-            the rep's raw answer / skip reason if unresolved).
-        discussed: True unless the rep explicitly skipped this topic.
-        needs_manual_review: True only if 3 attempts failed to get a
-            confirmed disposition.
-    """
-    # Hard backstop: must be a genuine reply since the outcome question (or
-    # its confirm/numbered-list follow-up) was asked, never a self-answered
-    # guess immediately followed by recording a fabricated result.
-    if not turn_guard.has_new_reply(tool_context):
-        logger.warning("record_topic_disposition BLOCKED: no new reply topic=%s", topic)
-        return {
-            "status": "error",
-            "error": "no_reply_heard",
-            "instruction_for_model": (
-                f"Do not call record_topic_disposition -- you have not "
-                f"actually heard the rep reply yet. Ask again out loud: "
-                f"'Sorry, what was the outcome for {topic}?' and wait for "
-                f"their answer. Never leave the rep in silence."
-            ),
-        }
-
-    _, valid_codes = _campaign_rules(tool_context)
-    if disposition_code is not None and int(disposition_code) not in valid_codes:
-        logger.warning(
-            "record_topic_disposition: code %s is not in this campaign's "
-            "registry %s -- flagging topic %r for manual review instead of "
-            "recording an invalid code.",
-            disposition_code,
-            sorted(valid_codes),
-            topic,
-        )
-        disposition_code = None
-        needs_manual_review = True
-
-    # Copy-then-replace, never append in place. Mutating the list held in
-    # session state edits the stored object directly, which ADK does not
-    # necessarily see as a state delta, and it makes the sequence order-
-    # dependent if an await is ever introduced between the read and the write.
-    # `pending` below already follows this pattern.
-    results = list(tool_context.state.get(_S_TOPIC_RESULTS) or [])
-    results.append(
-        {
-            "topic": topic,
-            "disposition_code": disposition_code,
-            "executive_summary": executive_summary,
-            "discussed": discussed,
-            "needs_manual_review": needs_manual_review,
-        }
-    )
-    tool_context.state[_S_TOPIC_RESULTS] = results
-
-    pending = list(tool_context.state.get(_S_PENDING_TOPICS) or [])
-    if pending and _topic_matches(pending[0], topic):
-        pending = pending[1:]
-    tool_context.state[_S_PENDING_TOPICS] = pending
-
-    logger.info(
-        "record_topic_disposition topic=%s code=%s manual_review=%s "
-        "remaining=%d",
-        topic,
-        disposition_code,
-        needs_manual_review,
-        len(pending),
-    )
-
-    note = (
-        "Say: 'Got it, I'll flag this one for manual review.' "
-        if needs_manual_review
-        else "Say: 'Got it.' "
-    )
-
-    # About to ask another question (next topic) or hand off to commit --
-    # either way, the NEXT tool call must follow a genuine new reply.
-    turn_guard.snapshot(tool_context)
-
-    if pending:
-        return {
-            "status": "next_topic",
-            "next_topic": pending[0],
-            "instruction_for_model": (
-                f"{note}Then ask exactly: 'What was the outcome for "
-                f"{pending[0]}?' and run the disposition loop again."
-            ),
-        }
-    # Every topic is dispositioned. Commit HERE rather than instructing the
-    # model to make a second tool call.
-    #
-    # THIS IS THE REAL COMMIT TRIGGER for the guided flow -- not Stage 5 of the
-    # prompt in agent_guided.py, which still tells the model to call
-    # commit_guided_notes. A matching note sits above _GUIDED_SCRIPT there.
-    # Anyone changing the prompt around the commit step (e.g. requiring a spoken
-    # confirmation first) has to change this call too, or the prompt edit is
-    # silently short-circuited: the record is already saved by the time the
-    # model gets a turn.
-    #
-    # Gap 6 / F5: asking for that second call is where guided mode stalls --
-    # the model emits `OUT_TX text='' finished=True`, closes its turn and
-    # never calls commit_guided_notes. The rep has answered everything, the
-    # record is complete, and nothing is saved, with no signal that the save
-    # didn't happen. Reproduced on demand via ws_smoke_test.
-    #
-    # The extra hop bought nothing: no further rep input is needed at this
-    # point, so the record can be committed directly and the model handed only
-    # the words to say. A prompt rule cannot fix this -- the model is being
-    # asked to act when it has nothing left to say, which is exactly when it
-    # ends the turn.
-    result = await commit_guided_notes(tool_context)
-    if result.get("status") not in ("blocked", "rejected", "error"):
-        result["instruction_for_model"] = (
-            f"{note}Read the closing_statement verbatim. The session is now "
-            "complete."
-        )
-    # blocked/rejected/error keep their own recovery instruction -- the model
-    # asks the rep, re-records, and calls commit_guided_notes itself.
-    return result
-
-
-async def commit_guided_notes(tool_context: ToolContext) -> dict:
-    """Assemble the completed guided record and commit it to the CRM.
-
-    Call this only after every topic has a recorded disposition (or
-    needs_manual_review flag).
-
-    Normally the last record_topic_disposition call commits directly and you
-    do not need to call this at all -- but calling it again is safe.
-    """
-    # Idempotency. The final disposition already commits, so a model that
-    # still makes this call would otherwise re-stage under a NEW session_id
-    # and mint a duplicate CRM record -- mock_db's own idempotency guard is
-    # keyed on session_id and cannot catch that.
-    #
-    # The check has to be an atomic claim, not get-then-set. The commit below
-    # spans two awaited HTTP round-trips, and ADK's Live flow can dispatch
-    # several function calls from one model turn concurrently: both invocations
-    # would read `prior` as unset, both would stage under their own new
-    # session_id, and both would commit. Two independent stagings, so neither
-    # the supersede gate nor mock_db's session-keyed idempotency sees anything
-    # wrong -- two CRM records for one visit.
-    #
-    # The lock serializes them; the loser then finds the winner's result on the
-    # re-check inside and replays it, which is exactly the intended behaviour
-    # for a duplicate call.
-    prior = tool_context.state.get(_S_COMMIT_RESULT)
-    if prior:
-        logger.info(
-            "commit_guided_notes: already committed as crm_record_id=%s -- "
-            "replaying the original result instead of re-staging",
-            prior.get("crm_record_id"),
-        )
-        return prior
-
-    async with _commit_lock(tool_context):
-        prior = tool_context.state.get(_S_COMMIT_RESULT)
-        if prior:
-            logger.info(
-                "commit_guided_notes: a concurrent call committed this record "
-                "as crm_record_id=%s -- replaying its result instead of "
-                "staging a duplicate",
-                prior.get("crm_record_id"),
-            )
-            return prior
-        return await _commit_guided_notes_locked(tool_context)
-
-
-async def _commit_guided_notes_locked(tool_context: ToolContext) -> dict:
-    """Assemble and commit the guided record. Caller holds the commit lock."""
-    event_type = tool_context.state.get(_S_EVENT_TYPE)
-    topics = tool_context.state.get(_S_TOPIC_RESULTS) or []
-    transcript = tool_context.state.get(_S_TRANSCRIPT) or ""
-    summary = tool_context.state.get(_S_SUMMARY) or (
-        f"Guided-flow visit log covering {len(topics)} topic(s)."
-    )
-    planned_topics = tool_context.state.get("planned_topics") or []
-
-    if not event_type or not topics:
-        return {
-            "status": "error",
-            "error": "incomplete_guided_record",
-            "instruction_for_model": (
-                "The record isn't complete yet (missing event type or "
-                "topics). Do not call commit_guided_notes until every "
-                "planned topic has a recorded disposition."
-            ),
-        }
-
-    payload = {
-        "event_type": event_type,
-        "executive_summary": summary,
-        "raw_transcript_backup": transcript,
-        "topics": [
-            {
-                "topic": t["topic"],
-                "disposition_code": t.get("disposition_code"),
-                "executive_summary": t.get("executive_summary") or "",
-                "discussed": t.get("discussed", True),
-                "needs_manual_review": t.get("needs_manual_review", False),
-            }
-            for t in topics
-        ],
-        "planned_topics": list(planned_topics),
-        # Without this the staging endpoint cannot tell which campaign's rules
-        # to enforce and falls back to allowing every event type / code.
-        "campaign_type": tool_context.state.get(_CAMPAIGN_TYPE_KEY)
-        or "standard_sales",
-    }
-    logger.info("commit_guided_notes payload: %s", payload)
-
-    try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            stage_resp = await client.post(
-                f"{_API_BASE}/api/v1/notes/stage",
-                params={"agent_mode": "guided"},
-                json=payload,
-            )
-            # A 422 here is a campaign-rule violation, not an outage -- handled
-            # below. Only genuine transport/5xx failures should reach the
-            # "try again in a moment" message.
-            if stage_resp.status_code not in (200, 422):
-                stage_resp.raise_for_status()
-
-            if stage_resp.status_code == 422:
-                try:
-                    detail = stage_resp.json()
-                except ValueError:
-                    detail = {}
-                problems = detail.get("problems") or [detail.get("detail", "")]
-                logger.warning("Guided staging rejected: %s", problems)
-                return {
-                    "status": "rejected",
-                    "problems": problems,
-                    "instruction_for_model": (
-                        "NOTHING was saved -- the record breaks this "
-                        "campaign's rules: "
-                        + "; ".join(p for p in problems if p)
-                        + ". Allowed event types: "
-                        + ", ".join(detail.get("allowed_event_types") or [])
-                        + ". Allowed disposition codes: "
-                        + ", ".join(
-                            str(c)
-                            for c in (
-                                detail.get("allowed_disposition_codes") or []
-                            )
-                        )
-                        + ". Ask the rep for the correct value out loud, "
-                        "re-record that topic's disposition, and try again. "
-                        "Never invent a code."
-                    ),
-                }
-
-            session_id = stage_resp.json()["session_id"]
-
-            commit_resp = await client.post(
-                f"{_API_BASE}/api/v1/notes/commit",
-                json={
-                    "session_id": session_id,
-                    "confirmed": True,
-                    "agent_mode": "guided",
-                    "campaign_type": tool_context.state.get(
-                        _CAMPAIGN_TYPE_KEY
-                    ),
-                    "ws_user_id": tool_context.user_id,
-                    "ws_session_id": tool_context.session.id,
-                },
-            )
-            if commit_resp.status_code == 409:
-                try:
-                    detail = commit_resp.json()
-                except ValueError:
-                    detail = {}
-                missing = detail.get("missing_topics") or []
-                logger.warning(
-                    "Guided commit blocked -- uncovered topics: %s", missing
-                )
-                return {
-                    "status": "blocked",
-                    "error": "incomplete_coverage",
-                    "missing_topics": missing,
-                    "instruction_for_model": (
-                        "NOTHING was saved. These planned topics still have "
-                        "no outcome: " + ", ".join(missing) + ". Ask the rep "
-                        "about each one out loud, call "
-                        "record_topic_disposition for each, then call "
-                        "commit_guided_notes again."
-                    ),
-                }
-            commit_resp.raise_for_status()
-    except httpx.HTTPError as exc:
-        logger.error("commit_guided_notes failed: %s", exc)
-        return {
-            "status": "error",
-            "error": "Could not reach the staging/commit endpoints.",
-            "instruction_for_model": (
-                "Tell the rep there was a temporary problem saving and to "
-                "try again in a moment."
-            ),
-        }
-
-    data = commit_resp.json()
-    manual_review_topics = [
-        t["topic"] for t in topics if t.get("needs_manual_review")
-    ]
-    review_clause = (
-        f", though {_join_natural(manual_review_topics)} will need a quick "
-        "manual review in the CRM"
-        if manual_review_topics
-        else ""
-    )
-    result = {
-        "status": data.get("status", "success"),
-        "crm_record_id": data.get("crm_record_id"),
-        "manual_review_topics": manual_review_topics,
-        "closing_statement": (
-            "All set. I've saved your post-call summary notes and updated "
-            f"the outcomes for your discussion topics{review_clause}. We're "
-            "all done here. Have a great day!"
-        ),
-        "instruction_for_model": (
-            "Read the closing_statement verbatim. The session is now "
-            "complete."
-        ),
-    }
-    tool_context.state[_S_COMMIT_RESULT] = result
-    return result
-````
-<!-- END: app/voice_notes_agent/tools_guided.py -->
 
 <!-- FILE: app/voice_notes_agent/turn_guard.py -->
 ````python
@@ -2455,8 +1946,14 @@ def snapshot(tool_context: ToolContext) -> None:
 def has_new_reply(tool_context: ToolContext) -> bool:
     """True if a genuine new user turn arrived since the last ``snapshot()``."""
     session_id = tool_context.session.id
+    if session_id not in _BASELINES:
+        logger.debug(
+            "turn_guard blocked: session_id=%s has no recorded baseline in this process",
+            session_id,
+        )
+        return False
     current = _TURN_COUNTS.get(session_id, 0)
-    baseline = _BASELINES.get(session_id, -1)
+    baseline = _BASELINES[session_id]
     result = current > baseline
     if not result:
         # The counter/baseline pair is the only way to explain a refused tool
@@ -2471,7 +1968,11 @@ def has_new_reply(tool_context: ToolContext) -> bool:
     return result
 
 
-def mark_awaiting_readback(session_id: str) -> None:
+# session_id -> tool name that triggered the awaiting readback (e.g. stage_visit_notes, commit_visit_notes)
+_AWAITING_TOOL: dict[str, str] = {}
+
+
+def mark_awaiting_readback(session_id: str, tool_name: str = "") -> None:
     """Call from the WS downstream loop when a tool whose result MUST be read
     aloud (e.g. stage_visit_notes) returns a response. Some native-audio
     Live model turns speak a guessed filler BEFORE the tool call and then, on
@@ -2480,7 +1981,13 @@ def mark_awaiting_readback(session_id: str) -> None:
     UX bug.
     """
     _AWAITING_READBACK[session_id] = True
+    _AWAITING_TOOL[session_id] = tool_name
     _NUDGE_SENT[session_id] = False
+
+
+def awaiting_tool_name(session_id: str) -> str:
+    """Return the tool name currently awaiting readback, if any."""
+    return _AWAITING_TOOL.get(session_id, "")
 
 
 def record_agent_speech(session_id: str, text: str) -> None:
@@ -2514,6 +2021,19 @@ def needs_readback_nudge(session_id: str) -> bool:
 def mark_nudge_sent(session_id: str) -> None:
     """Call right after injecting the auto-continue nudge for this session."""
     _NUDGE_SENT[session_id] = True
+
+
+def cleanup_session(session_id: str) -> None:
+    """Clean up in-memory turn_guard tracking state for a completed or disconnected session.
+
+    Evicts session_id from all process-local tracking dictionaries to prevent memory leaks.
+    """
+    _TURN_COUNTS.pop(session_id, None)
+    _BASELINES.pop(session_id, None)
+    _AWAITING_READBACK.pop(session_id, None)
+    _NUDGE_SENT.pop(session_id, None)
+    _AWAITING_TOOL.pop(session_id, None)
+    logger.debug("turn_guard state cleaned up for session_id=%s", session_id)
 ````
 <!-- END: app/voice_notes_agent/turn_guard.py -->
 
