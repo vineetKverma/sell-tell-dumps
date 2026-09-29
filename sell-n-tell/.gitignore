@@ -175,3 +175,6 @@ committed_notes.json
 # Golden dataset curation (AIML-2898): source exports and generated records
 # carry customer and contact names -- never commit them.
 evals/data/
+
+# Eval runs (AIML-2702): transcripts and scorecards quote customer notes.
+evals/runs/

@@ -101,12 +101,14 @@ answer key.
 (`gemini-live-2.5-flash-native-audio`). That model cannot answer an ordinary
 text request, and the ADK version on the test environment (2.1.0) has no live
 evaluation (`live_model_config` arrived in a later version). So the harness
-drives the real live agent itself, the same way `scripts/ws_smoke_test.py`
-already does. It uses ADK's own Runner, gives each case its session state
-(planned topics, descriptions, vertical), sends the note as the rep's turn, and
-captures the `stage_visit_notes` call. This tests the production model with no
-dependency change. The answer key is in ADK's eval-set format, so the same file
-loads into `adk eval` once ADK is upgraded.
+drives the running app through its own contract, the same way
+`scripts/ws_smoke_test.py` already does: `POST /api/sessions` with the case's
+planned topics, then the WebSocket with text turns. The rep's side is scripted:
+the note as the dictation, "I didn't get to that" when the agent reminds about
+a planned topic, then "Save it". The last `stage_visit_notes` call is the
+record that gets scored. This tests the production agent, model, turn guard and
+session service with no dependency change. The answer key is in ADK's eval-set
+format, so the same file loads into `adk eval` once ADK is upgraded.
 
 **How it is scored.** The scoring functions are plain Python, written with
 ADK's custom-metric signature, so they register with ADK unchanged later.
@@ -150,8 +152,8 @@ measures that build without any code change.
    with field-level scores also broken down by priority (P1 / P2 / P3).
 3. Every failure shows expected against actual: topic, disposition, event type,
    field values.
-4. The harness refuses to run if golden_v1 no longer matches its manifest
-   checksum. golden_v1 (90 cases) runs end to end and produces a recorded
+4. The harness refuses to run unless the eval set is the full golden_v1
+   (90 unique cases). golden_v1 runs end to end and produces a recorded
    baseline.
 5. Scores are comparable across runs. Run-to-run variance is measured by running
    the same config N times (N >= 3) and documented, so a real change can be told

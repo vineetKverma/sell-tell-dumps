@@ -182,3 +182,9 @@ golden/
 
 # AIML-2898 code bundle (transfer only)
 bundle-2898/
+
+# Golden dataset v1 (mirrors the dev branch layout; customer data -- never commit here)
+sell-n-tell/evals/v1/
+
+# AIML-2702 code bundle (transfer only)
+bundle-2702/
