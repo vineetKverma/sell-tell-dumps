@@ -148,6 +148,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Run and score the golden eval set.")
     ap.add_argument("--name", help="run name; output goes to evals/runs/<name>/")
     ap.add_argument("--base-url", default="http://localhost:8000")
+    ap.add_argument("--evalset", type=Path, default=EVALSET,
+                    help="another eval set, e.g. the field top-up (default: golden_v1)")
     ap.add_argument("--cases", help="comma-separated case ids (a trial run; not a baseline)")
     ap.add_argument("--repeat", type=int, default=1, help="run the set N times to measure variance")
     ap.add_argument("--judge", action="store_true", help="score summary faithfulness (model calls)")
@@ -155,7 +157,9 @@ def main() -> None:
     ap.add_argument("--rescore", type=Path, help="re-score a saved run instead of running the agent")
     args = ap.parse_args()
 
-    cases = load_cases(EVALSET)
+    # golden_v1 must be complete to count as a baseline; other sets only need
+    # unique ids (checked in load_cases).
+    cases = load_cases(args.evalset, strict=args.evalset == EVALSET)
     priorities = load_priorities()
     judge = None
     if args.judge:
@@ -196,8 +200,8 @@ def main() -> None:
         for k, results in enumerate(raw_runs, 1):
             _write_jsonl(out / f"run{k}.jsonl", results)
     rollups = [aggregate(s, priorities) for s in per_case]
-    meta = {"evalset": EVALSET.name, "cases": len(cases), "judge": judge and judge.model,
-            "full_set": len(cases) == 90, "scored_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    meta = {"evalset": args.evalset.name, "cases": len(cases), "judge": judge and judge.model,
+            "full_set": args.evalset == EVALSET and len(cases) == 90, "scored_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     (out / "scores.json").write_text(json.dumps(
         {"meta": meta, "runs": rollups, "variance": variance(rollups), "cases": per_case},
         indent=1, default=str) + "\n", encoding="utf-8")

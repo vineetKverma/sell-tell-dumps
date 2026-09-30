@@ -45,9 +45,12 @@ def steps(args) -> list[tuple[str, list[str]]]:
     py = [sys.executable, "-m"]
     loc = ["--location", args.location]
     common = ["--name", args.name, "--out", str(args.out)]
+    if args.sampler == "topup":
+        pick = [*py, "evals.dataset.sample_topup", *common, "--per-field", str(args.per_field)]
+    else:
+        pick = [*py, "evals.dataset.sample", *common, "--per-vertical", str(args.per_vertical)]
     return [
-        ("1/5 Pick notes", [*py, "evals.dataset.sample", *common,
-                            "--per-vertical", str(args.per_vertical)]),
+        ("1/5 Pick notes", pick),
         ("2/5 Model A answers", [*py, "evals.dataset.draft_labels", *common,
                                  "--model", args.model_a, *loc]),
         ("3/5 Model B answers (blind)", [*py, "evals.dataset.draft_labels", *common,
@@ -65,6 +68,7 @@ PIPELINE_MODULES = (
     "evals.dataset.text", "evals.dataset.fields", "evals.dataset.source",
     "evals.dataset.answers", "evals.dataset.draft_labels", "evals.dataset.sample",
     "evals.dataset.adjudicate", "evals.dataset.review", "evals.dataset.compare_keys",
+    "evals.dataset.sample_topup",
 )
 
 
@@ -92,6 +96,10 @@ def main() -> None:
     ap.add_argument("--name", default="pilot")
     ap.add_argument("--out", type=Path, default=OUT)
     ap.add_argument("--per-vertical", type=int, default=2)
+    # "topup": notes picked per missing vertical field (sample_topup.py)
+    # instead of per outcome. Same seed in both builds -> the same notes.
+    ap.add_argument("--sampler", choices=("outcome", "topup"), default="outcome")
+    ap.add_argument("--per-field", type=int, default=6)
     # The 3.x models exist only on the global endpoint (checked with
     # probe_models); global use for sampled, masked notes is approved.
     ap.add_argument("--location", default="global")

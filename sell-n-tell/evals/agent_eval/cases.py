@@ -80,9 +80,11 @@ def load_cases(path: Path = EVALSET, strict: bool = True) -> list[Case]:
     so a partial or edited file can never produce a baseline."""
     data = json.loads(path.read_text(encoding="utf-8"))
     cases = [_case(c) for c in data["eval_cases"]]
+    ids = [c.id for c in cases]
+    if not ids or len(set(ids)) != len(ids):
+        raise SystemExit(f"{path.name}: empty or duplicate case ids.")
     if strict:
-        ids = [c.id for c in cases]
-        if len(ids) != EXPECTED_CASES or len(set(ids)) != len(ids):
+        if len(ids) != EXPECTED_CASES:
             raise SystemExit(
                 f"{path.name}: expected {EXPECTED_CASES} unique cases, found "
                 f"{len(ids)} ({len(set(ids))} unique). Not the golden_v1 set."

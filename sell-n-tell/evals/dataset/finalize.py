@@ -106,6 +106,26 @@ def check_record(rec: dict, field_ids: dict[str, list[str]], codes: set[int]) ->
     return problems
 
 
+def keep_target_stated(merged: list[dict], per_field: int) -> tuple[list[dict], dict[str, int]]:
+    """Top-up sets only: keep a record picked for ``field:<ID>`` when both
+    builds agree that field is stated (a value, and not contested), at most
+    ``per_field`` per field. Returns the kept records and, per target field,
+    how many were kept -- 0 means no real note confirmed it."""
+    kept, count = [], Counter()
+    for rec in merged:
+        why = str(rec.get("picked_for") or "")
+        if not why.startswith("field:"):
+            continue
+        fid = why.split(":", 1)[1]
+        count.setdefault(fid, 0)
+        exp = rec["expected"]
+        stated = exp["fields"].get(fid) not in (None, "") and fid not in exp.get("contested", [])
+        if stated and count[fid] < per_field:
+            count[fid] += 1
+            kept.append(rec)
+    return kept, dict(count)
+
+
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -116,6 +136,9 @@ def main() -> None:
     ap.add_argument("--b", required=True, help="run name of the second, independent key")
     ap.add_argument("--version", required=True, help="e.g. v1 -- never overwritten once frozen")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--keep-target-stated", type=int, metavar="N",
+                    help="top-up sets: keep up to N records per target field, only where both "
+                         "builds agree the field is stated")
     args = ap.parse_args()
 
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.version):
@@ -135,6 +158,12 @@ def main() -> None:
     field_ids = {v: [f.field_id for f in catalog.fields_for(v)] for v in VERTICALS}
     codes = {int(d["code"]) for d in load_dispositions()}
     merged = [merge_record(key_a[rid], key_b[rid]) for rid in sorted(key_a)]
+    target_counts: dict[str, int] = {}
+    if args.keep_target_stated:
+        candidates = len(merged)
+        merged, target_counts = keep_target_stated(merged, args.keep_target_stated)
+        if not merged:
+            raise SystemExit(f"None of the {candidates} candidates confirmed its target field.")
     problems = [p for rec in merged for p in check_record(rec, field_ids, codes)]
 
     per_vertical = Counter(r["vertical"] for r in merged)
@@ -158,6 +187,10 @@ def main() -> None:
     lines += [f"    {v}  {per_vertical[v]}" for v in VERTICALS]
     lines += ["", "## Records per stratum", ""]
     lines += [f"    {n:>4}  {s}" for s, n in strata.most_common()]
+    if target_counts:
+        lines += ["", f"## Top-up: records kept per target field (max {args.keep_target_stated})", ""]
+        lines += [f"    {fid:<7} {n}" + ("   <- no real note confirmed it" if n == 0 else "")
+                  for fid, n in sorted(target_counts.items())]
     lines += ["", "## Fields never stated in any record (no positive example to test recall)", ""]
     lines += [f"    {fid}" for fid in never_stated] or ["    none"]
     lines += ["", "## Checks", ""]
