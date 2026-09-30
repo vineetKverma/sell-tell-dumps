@@ -259,3 +259,11 @@ def test_missing_topics_drives_the_coverage_reply():
     assert missing_topics(case, staged) == ["Q3 Paint, Primer"]
     staged["topics"].append({"topic": "Q3 Paint, Primer", "discussed": False})
     assert missing_topics(case, staged) == []
+    # First staging call: the app does not accept a skip the rep was never asked about.
+    assert missing_topics(case, staged, allow_skips=False) == ["Q3 Paint, Primer"]
+
+
+def test_missing_topics_uses_the_apps_substring_rule():
+    case = make_case(planned_topics=["HC Q2 Compact Appliances"])
+    staged = {"topics": [{"topic": "Compact Appliances", "discussed": True}]}
+    assert missing_topics(case, staged) == []  # covered for the app, so no reminder
