@@ -85,6 +85,17 @@ def test_draw_is_repeatable_so_both_builds_label_the_same_notes():
     assert draw_targets(_pool(), 2, 7, set()) == draw_targets(_pool(), 2, 7, set())
 
 
+def test_labeller_unwraps_a_one_item_list_and_rejects_other_shapes():
+    from evals.dataset.draft_labels import as_object
+    obj = {"event_type": "Meeting"}
+    assert as_object(obj) is obj
+    assert as_object([obj]) is obj
+    assert as_object([obj, obj]) is None
+    assert as_object(["x"]) is None
+    assert as_object([]) is None
+    assert as_object("text") is None
+
+
 def _rec(rid, fid, value, contested=()):
     return {"id": rid, "picked_for": f"field:{fid}",
             "expected": {"fields": {fid: value}, "contested": list(contested)}}

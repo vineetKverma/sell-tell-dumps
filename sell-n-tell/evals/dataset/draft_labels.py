@@ -256,6 +256,16 @@ def _generate(client, model: str, prompt: str) -> str:
     raise AssertionError("unreachable")
 
 
+def as_object(draft: object) -> dict | None:
+    """The answer object. Some replies wrap it in a one-item list (`[{...}]`),
+    which is the same answer; any other list is not."""
+    if isinstance(draft, dict):
+        return draft
+    if isinstance(draft, list) and len(draft) == 1 and isinstance(draft[0], dict):
+        return draft[0]
+    return None
+
+
 def draft_record(client, model: str, record: dict, catalog: Catalog, dispositions: list[dict]) -> dict:
     field_ids = [f.field_id for f in labelled_fields(catalog, record["vertical"])]
     codes = {int(d["code"]) for d in dispositions}
@@ -273,9 +283,12 @@ def draft_record(client, model: str, record: dict, catalog: Catalog, disposition
             last_problems = [f"{type(exc).__name__}: {exc}"]
             time.sleep(2 * attempt)
             continue
-        if not isinstance(draft, dict):
-            last_problems = [f"expected a JSON object, got {type(draft).__name__}"]
+        obj = as_object(draft)
+        if obj is None:
+            shape = f"list of {len(draft)}" if isinstance(draft, list) else type(draft).__name__
+            last_problems = [f"expected a JSON object, got {shape}"]
             continue
+        draft = obj
         problems, flags = check_draft(draft, record, field_ids, codes)
         if not problems:
             return {"draft": draft, "flags": flags, "problems": [], "attempts": attempt}
