@@ -46,7 +46,12 @@ def steps(args) -> list[tuple[str, list[str]]]:
     loc = ["--location", args.location]
     common = ["--name", args.name, "--out", str(args.out)]
     if args.sampler == "topup":
-        pick = [*py, "evals.dataset.sample_topup", *common, "--per-field", str(args.per_field)]
+        pick = [*py, "evals.dataset.sample_topup", *common, "--per-field", str(args.per_field),
+                "--id-prefix", args.id_prefix]
+        if args.fields:
+            pick += ["--fields", args.fields]
+        if args.skip_samples:
+            pick += ["--skip-samples", args.skip_samples]
     else:
         pick = [*py, "evals.dataset.sample", *common, "--per-vertical", str(args.per_vertical)]
     return [
@@ -100,6 +105,11 @@ def main() -> None:
     # instead of per outcome. Same seed in both builds -> the same notes.
     ap.add_argument("--sampler", choices=("outcome", "topup"), default="outcome")
     ap.add_argument("--per-field", type=int, default=6)
+    # A second top-up round: only these fields, skipping notes the first
+    # round already labelled, with ids that cannot collide with it.
+    ap.add_argument("--fields", help="topup: comma-separated field ids only")
+    ap.add_argument("--skip-samples", help="topup: earlier run names whose notes to skip")
+    ap.add_argument("--id-prefix", default="T-", help="topup: record id prefix")
     # The 3.x models exist only on the global endpoint (checked with
     # probe_models); global use for sampled, masked notes is approved.
     ap.add_argument("--location", default="global")

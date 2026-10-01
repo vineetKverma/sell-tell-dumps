@@ -80,13 +80,17 @@ def vertical_of(field_id: str) -> str:
     return field_id.split("-")[0]
 
 
-def draw_targets(pool, per_field: int, seed: int, exclude_rows: set[int]) -> list[tuple[int, str]]:
+def draw_targets(pool, per_field: int, seed: int, exclude_rows: set[int],
+                 fields: list[str] | None = None) -> list[tuple[int, str]]:
     """(row index, 'field:<ID>') for up to ``per_field`` candidates per field,
-    each note used once, notes already in golden_v1 skipped."""
+    each note used once, notes already in golden_v1 skipped. ``fields``
+    limits the draw to those field ids (a second round)."""
     rng = random.Random(seed)
     used: set[int] = set(exclude_rows)
     picked: list[tuple[int, str]] = []
     for fid, rx in PATTERNS.items():
+        if fields and fid not in fields:
+            continue
         sub = pool[pool["vertical"] == vertical_of(fid)]
         hits = [i for i, text in zip(sub.index, sub["note_clean"], strict=True)
                 if int(i) not in used and rx.search(text)]
@@ -96,9 +100,15 @@ def draw_targets(pool, per_field: int, seed: int, exclude_rows: set[int]) -> lis
     return picked
 
 
-def golden_source_rows(out: Path) -> set[int]:
+def golden_source_rows(out: Path, also: list[str] = ()) -> set[int]:
+    """Source rows already used: every frozen golden set, plus the samples of
+    the runs named in ``also`` (a later round skips notes an earlier round
+    already labelled, kept or not)."""
     rows: set[int] = set()
-    for path in out.glob("golden_*.jsonl"):
+    paths = [*out.glob("golden_*.jsonl"), *(out / f"sample_{n}.jsonl" for n in also)]
+    for path in paths:
+        if not path.exists():
+            raise SystemExit(f"{path.name} not found -- check the --skip-samples names")
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 rows.add(int(json.loads(line)["source_row"]))
@@ -112,13 +122,24 @@ def main() -> None:
     ap.add_argument("--name", default="topup")
     ap.add_argument("--per-field", type=int, default=6)
     ap.add_argument("--seed", type=int, default=2898)
+    ap.add_argument("--fields", help="comma-separated field ids to draw for (default: all 33)")
+    ap.add_argument("--skip-samples", help="comma-separated earlier run names whose notes to skip, e.g. topup_a")
+    ap.add_argument("--id-prefix", default="T-", help="e.g. T2- for a second round, so ids never collide")
     ap.add_argument("--per-vertical", type=int, help=argparse.SUPPRESS)  # passed by build.py; unused
     args = ap.parse_args()
 
+    fields = [f.strip() for f in (args.fields or "").split(",") if f.strip()]
+    unknown = sorted(set(fields) - set(PATTERNS))
+    if unknown:
+        raise SystemExit(f"no pattern for {unknown}; known: {', '.join(PATTERNS)}")
+    skip = [s.strip() for s in (args.skip_samples or "").split(",") if s.strip()]
+    if args.name in skip:
+        raise SystemExit("--skip-samples must not name this run itself")
+
     ev = load_events(args.raw)
     pool, _ = build_pool(ev, load_registry(args.raw), True, args.seed)
-    exclude = golden_source_rows(args.out)
-    picked = draw_targets(pool, args.per_field, args.seed, exclude)
+    exclude = golden_source_rows(args.out, skip)
+    picked = draw_targets(pool, args.per_field, args.seed, exclude, fields or None)
 
     counters: Counter = Counter()
     records = []
@@ -126,7 +147,7 @@ def main() -> None:
         v = pool.at[i, "vertical"]
         counters[v] += 1
         rec = to_record(pool.loc[i], counters[v], why)
-        rec["id"] = "T-" + rec["id"]
+        rec["id"] = args.id_prefix + rec["id"]
         records.append(rec)
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -139,6 +160,8 @@ def main() -> None:
              f"candidates drawn: {len(records)}  (up to {args.per_field} per field)", "",
              "    field   pool matches  drawn"]
     for fid, rx in PATTERNS.items():
+        if fields and fid not in fields:
+            continue
         n = int(pool[pool["vertical"] == vertical_of(fid)]["note_clean"].map(lambda t, r=rx: bool(r.search(t))).sum())
         lines.append(f"    {fid:<7} {n:>12,}  {found[f'field:{fid}']:>5}")
     (args.out / f"sample_{args.name}_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

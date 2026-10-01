@@ -85,6 +85,24 @@ def test_draw_is_repeatable_so_both_builds_label_the_same_notes():
     assert draw_targets(_pool(), 2, 7, set()) == draw_targets(_pool(), 2, 7, set())
 
 
+def test_second_round_draws_only_the_named_fields():
+    picked = draw_targets(_pool(), per_field=5, seed=1, exclude_rows=set(), fields=["MH-06"])
+    assert picked == [(14, "field:MH-06")]
+
+
+def test_second_round_skips_notes_from_earlier_samples(tmp_path):
+    import json
+
+    from evals.dataset.sample_topup import golden_source_rows
+    (tmp_path / "golden_v1.jsonl").write_text(json.dumps({"source_row": 1}) + "\n", encoding="utf-8")
+    (tmp_path / "sample_topup_a.jsonl").write_text(
+        "".join(json.dumps({"source_row": r}) + "\n" for r in (10, 11)), encoding="utf-8")
+    assert golden_source_rows(tmp_path) == {1}
+    assert golden_source_rows(tmp_path, ["topup_a"]) == {1, 10, 11}
+    with pytest.raises(SystemExit):
+        golden_source_rows(tmp_path, ["no_such_run"])
+
+
 def test_labeller_unwraps_a_one_item_list_and_rejects_other_shapes():
     from evals.dataset.draft_labels import as_object
     obj = {"event_type": "Meeting"}
