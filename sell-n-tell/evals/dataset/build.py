@@ -52,6 +52,10 @@ def steps(args) -> list[tuple[str, list[str]]]:
             pick += ["--fields", args.fields]
         if args.skip_samples:
             pick += ["--skip-samples", args.skip_samples]
+        if args.strict:
+            pick.append("--strict")
+        if args.allow_undescribed:
+            pick.append("--allow-undescribed")
     else:
         pick = [*py, "evals.dataset.sample", *common, "--per-vertical", str(args.per_vertical)]
     return [
@@ -73,7 +77,7 @@ PIPELINE_MODULES = (
     "evals.dataset.text", "evals.dataset.fields", "evals.dataset.source",
     "evals.dataset.answers", "evals.dataset.draft_labels", "evals.dataset.sample",
     "evals.dataset.adjudicate", "evals.dataset.review", "evals.dataset.compare_keys",
-    "evals.dataset.sample_topup",
+    "evals.dataset.sample_topup", "evals.dataset.scan_missing",
 )
 
 
@@ -110,6 +114,9 @@ def main() -> None:
     ap.add_argument("--fields", help="topup: comma-separated field ids only")
     ap.add_argument("--skip-samples", help="topup: earlier run names whose notes to skip")
     ap.add_argument("--id-prefix", default="T-", help="topup: record id prefix")
+    ap.add_argument("--strict", action="store_true", help="topup: detail patterns (STRICT)")
+    ap.add_argument("--allow-undescribed", action="store_true",
+                    help="topup: also notes whose topics have no Campaign Topics description")
     # The 3.x models exist only on the global endpoint (checked with
     # probe_models); global use for sampled, masked notes is approved.
     ap.add_argument("--location", default="global")

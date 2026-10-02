@@ -85,6 +85,29 @@ def test_draw_is_repeatable_so_both_builds_label_the_same_notes():
     assert draw_targets(_pool(), 2, 7, set()) == draw_targets(_pool(), 2, 7, set())
 
 
+@pytest.mark.parametrize("fid,text,ok", [
+    ("HS-08", "dropped off filters", False),                       # topic only
+    ("HS-08", "they have 140 PTACs, filters changed quarterly", True),
+    ("HL-05", "measured the window, 36\" x 48\"", True),
+    ("HL-05", "ordered 36 gloves", False),
+    ("MH-04", "Home Depot is cheaper", False),                    # no amount
+    ("MH-04", "Home Depot quoted $42 for the same unit", True),
+    ("HL-09", "no need, they already order through Amazon", True),
+    ("HL-09", "no need at this time", False),
+    ("TR-06", "talked about the job", False),
+    ("TR-06", "next job is the Elm St remodel, needs rough-in valves", True),
+    ("HS-09", "chief engineer is low on ballasts in the shop", True),
+])
+def test_strict_patterns_want_the_detail_not_the_topic(fid, text, ok):
+    from evals.dataset.sample_topup import matches
+    assert matches(fid, text, strict=True) is ok
+
+
+def test_strict_falls_back_to_broad_for_fields_without_a_strict_pattern():
+    from evals.dataset.sample_topup import matches
+    assert matches("HL-01", "orders through DSSI", strict=True)
+
+
 def test_second_round_draws_only_the_named_fields():
     picked = draw_targets(_pool(), per_field=5, seed=1, exclude_rows=set(), fields=["MH-06"])
     assert picked == [(14, "field:MH-06")]

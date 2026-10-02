@@ -75,25 +75,55 @@ TARGETS: dict[str, str] = {
 }
 PATTERNS = {fid: re.compile(p, re.IGNORECASE) for fid, p in TARGETS.items()}
 
+# Stricter patterns for the fields no keyword candidate confirmed: each looks
+# for the DETAIL the field definition asks for, not just the topic word
+# ("filters" alone does not state a PTAC population). Every listed pattern
+# must match. Used by scan_missing.py and by ``--strict``.
+_MEASURE = r"\b\d+(\.\d+)?\s*(\"|''|inch(es)?\b|in\.?\s|ft\b|feet\b|foot\b|cm\b|mm\b)|\b\d+(\.\d+)?\s*[x×]\s*\d+"
+_COMPETITOR = (r"home ?depot|\bhd\b|lowe'?s|amazon|grainger|ferguson|menards|sherwin|supply ?house|"
+               r"competitor|other vendor|another vendor|cheaper|price ?match|beat (the|their|our) price")
+_PRICE = r"\$\s?\d|\b\d+(\.\d+)?\s?(%|percent|cents?\b|dollars?\b)"
+STRICT: dict[str, list[str]] = {
+    "HL-05": [_MEASURE, r"blinds?|shades?|window|drape|curtain|cubicle|valance"],
+    "HL-09": [r"no (current )?need|(don'?t|do not|doesn'?t|does not) need|not needed|nothing (needed|at this time)",
+              r"already|order(s|ing)? (it |them )?(themselves|direct|online)|in[- ]house|own (supply|stock|vendor)"
+              r"|amazon|other vendor|another vendor|dormant|closed|not ordering|haven'?t ordered|no longer"],
+    "HS-08": [r"\bptacs?\b|\bfilters?\b",
+              r"\b\d+\s*(ptacs?|units?|rooms?|filters?)\b|quarterly|monthly|every \d+|schedule|\bpm\b|preventi"],
+    "HS-09": [r"\bshop\b|engineering|chief engineer|maintenance (room|stock|shop)",
+              r"stock|out of|missing|low on|running low|program list|par\b"],
+    "MH-04": [_COMPETITOR, _PRICE],
+    "TR-06": [r"\bjobs?\b|job ?sites?|\bprojects?\b",
+              r"\bnext\b|upcoming|starting|current(ly)?|working on|bidding|break(ing)? ground|rough[- ]in|new build"],
+}
+STRICT_PATTERNS = {fid: [re.compile(p, re.IGNORECASE) for p in ps] for fid, ps in STRICT.items()}
+
+
+def matches(fid: str, text: str, strict: bool) -> bool:
+    if strict and fid in STRICT_PATTERNS:
+        return all(rx.search(text) for rx in STRICT_PATTERNS[fid])
+    return bool(PATTERNS[fid].search(text))
+
 
 def vertical_of(field_id: str) -> str:
     return field_id.split("-")[0]
 
 
 def draw_targets(pool, per_field: int, seed: int, exclude_rows: set[int],
-                 fields: list[str] | None = None) -> list[tuple[int, str]]:
+                 fields: list[str] | None = None, strict: bool = False) -> list[tuple[int, str]]:
     """(row index, 'field:<ID>') for up to ``per_field`` candidates per field,
     each note used once, notes already in golden_v1 skipped. ``fields``
-    limits the draw to those field ids (a second round)."""
+    limits the draw to those field ids (a later round); ``strict`` uses the
+    detail patterns where a field has one."""
     rng = random.Random(seed)
     used: set[int] = set(exclude_rows)
     picked: list[tuple[int, str]] = []
-    for fid, rx in PATTERNS.items():
+    for fid in PATTERNS:
         if fields and fid not in fields:
             continue
         sub = pool[pool["vertical"] == vertical_of(fid)]
         hits = [i for i, text in zip(sub.index, sub["note_clean"], strict=True)
-                if int(i) not in used and rx.search(text)]
+                if int(i) not in used and matches(fid, text, strict)]
         for i in rng.sample(hits, min(per_field, len(hits))):
             used.add(int(i))
             picked.append((i, f"field:{fid}"))
@@ -125,6 +155,9 @@ def main() -> None:
     ap.add_argument("--fields", help="comma-separated field ids to draw for (default: all 33)")
     ap.add_argument("--skip-samples", help="comma-separated earlier run names whose notes to skip, e.g. topup_a")
     ap.add_argument("--id-prefix", default="T-", help="e.g. T2- for a second round, so ids never collide")
+    ap.add_argument("--strict", action="store_true", help="use the detail patterns (STRICT) where defined")
+    ap.add_argument("--allow-undescribed", action="store_true",
+                    help="also use notes whose planned topics have no Campaign Topics description")
     ap.add_argument("--per-vertical", type=int, help=argparse.SUPPRESS)  # passed by build.py; unused
     args = ap.parse_args()
 
@@ -137,9 +170,9 @@ def main() -> None:
         raise SystemExit("--skip-samples must not name this run itself")
 
     ev = load_events(args.raw)
-    pool, _ = build_pool(ev, load_registry(args.raw), True, args.seed)
+    pool, _ = build_pool(ev, load_registry(args.raw), not args.allow_undescribed, args.seed)
     exclude = golden_source_rows(args.out, skip)
-    picked = draw_targets(pool, args.per_field, args.seed, exclude, fields or None)
+    picked = draw_targets(pool, args.per_field, args.seed, exclude, fields or None, args.strict)
 
     counters: Counter = Counter()
     records = []
@@ -159,10 +192,11 @@ def main() -> None:
              f"excluded (already in a golden set): {len(exclude)} notes",
              f"candidates drawn: {len(records)}  (up to {args.per_field} per field)", "",
              "    field   pool matches  drawn"]
-    for fid, rx in PATTERNS.items():
+    for fid in PATTERNS:
         if fields and fid not in fields:
             continue
-        n = int(pool[pool["vertical"] == vertical_of(fid)]["note_clean"].map(lambda t, r=rx: bool(r.search(t))).sum())
+        n = int(pool[pool["vertical"] == vertical_of(fid)]["note_clean"].map(
+            lambda t, f=fid: matches(f, t, args.strict)).sum())
         lines.append(f"    {fid:<7} {n:>12,}  {found[f'field:{fid}']:>5}")
     (args.out / f"sample_{args.name}_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
