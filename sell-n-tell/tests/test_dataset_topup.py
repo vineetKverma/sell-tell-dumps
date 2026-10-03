@@ -108,6 +108,34 @@ def test_strict_falls_back_to_broad_for_fields_without_a_strict_pattern():
     assert matches("HL-01", "orders through DSSI", strict=True)
 
 
+def test_synthetic_records_are_marked_and_target_only_the_absent_fields():
+    from evals.dataset.make_synthetic import CASES, records
+
+    class Hit:
+        description, industry = "A campaign.", "HS - HOSPITALITY"
+
+    class Index:
+        def lookup(self, title, vertical):
+            return Hit()
+
+    recs = records(Index())
+    assert len(recs) == len(CASES) == 6
+    assert {r["picked_for"] for r in recs} == {"field:HS-08", "field:HS-09"}
+    assert all(r["synthetic"] and r["id"].startswith("S-") and r["source_row"] < 0 for r in recs)
+    assert all(r["industry"] == "HS - HOSPITALITY" and r["topics"] for r in recs)
+
+
+def test_synthetic_refuses_a_topic_missing_from_the_registry():
+    from evals.dataset.make_synthetic import records
+
+    class Index:
+        def lookup(self, title, vertical):
+            return None
+
+    with pytest.raises(SystemExit):
+        records(Index())
+
+
 def test_second_round_draws_only_the_named_fields():
     picked = draw_targets(_pool(), per_field=5, seed=1, exclude_rows=set(), fields=["MH-06"])
     assert picked == [(14, "field:MH-06")]

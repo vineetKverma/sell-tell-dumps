@@ -45,7 +45,9 @@ def steps(args) -> list[tuple[str, list[str]]]:
     py = [sys.executable, "-m"]
     loc = ["--location", args.location]
     common = ["--name", args.name, "--out", str(args.out)]
-    if args.sampler == "topup":
+    if args.sampler == "synthetic":
+        pick = [*py, "evals.dataset.make_synthetic", *common]
+    elif args.sampler == "topup":
         pick = [*py, "evals.dataset.sample_topup", *common, "--per-field", str(args.per_field),
                 "--id-prefix", args.id_prefix]
         if args.fields:
@@ -77,7 +79,7 @@ PIPELINE_MODULES = (
     "evals.dataset.text", "evals.dataset.fields", "evals.dataset.source",
     "evals.dataset.answers", "evals.dataset.draft_labels", "evals.dataset.sample",
     "evals.dataset.adjudicate", "evals.dataset.review", "evals.dataset.compare_keys",
-    "evals.dataset.sample_topup", "evals.dataset.scan_missing",
+    "evals.dataset.sample_topup", "evals.dataset.scan_missing", "evals.dataset.make_synthetic",
 )
 
 
@@ -107,7 +109,7 @@ def main() -> None:
     ap.add_argument("--per-vertical", type=int, default=2)
     # "topup": notes picked per missing vertical field (sample_topup.py)
     # instead of per outcome. Same seed in both builds -> the same notes.
-    ap.add_argument("--sampler", choices=("outcome", "topup"), default="outcome")
+    ap.add_argument("--sampler", choices=("outcome", "topup", "synthetic"), default="outcome")
     ap.add_argument("--per-field", type=int, default=6)
     # A second top-up round: only these fields, skipping notes the first
     # round already labelled, with ids that cannot collide with it.
