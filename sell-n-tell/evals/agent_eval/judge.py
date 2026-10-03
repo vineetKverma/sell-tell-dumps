@@ -12,10 +12,12 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_LOCATION = "global"
 RATE_LIMIT_WAITS = (15, 30, 60, 120)
+APP_ENV = Path(__file__).resolve().parents[2] / "app" / ".env"
 
 PROMPT = """You check a sales rep's visit record against what the rep actually said.
 
@@ -45,8 +47,13 @@ def summaries_of(staged: dict) -> str:
 
 class Judge:
     def __init__(self, model: str = DEFAULT_MODEL, location: str = DEFAULT_LOCATION):
-        from google import genai  # imported here: scoring and tests never need it
+        # Imported here: scoring and tests never need them.
+        from dotenv import load_dotenv
+        from google import genai
 
+        # Same Vertex settings as the app. The 3.x judge models are served on
+        # the global endpoint only, so location is passed explicitly.
+        load_dotenv(APP_ENV)
         self.model = model
         self.client = genai.Client(vertexai=True, location=location,
                                    project=os.environ.get("GOOGLE_CLOUD_PROJECT"))
