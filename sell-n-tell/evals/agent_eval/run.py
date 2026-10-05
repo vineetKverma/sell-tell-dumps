@@ -6,6 +6,11 @@ Start the app first (the same way you would for the smoke test), then:
     uv run python -m evals.agent_eval.run --name baseline --repeat 3 --judge
     uv run python -m evals.agent_eval.run --name try --cases HL-001,MH-004
     uv run python -m evals.agent_eval.run --rescore evals/runs/baseline --judge
+    uv run python -m evals.agent_eval.run --retry-errors evals/runs/baseline --judge
+
+A case that breaks before the agent produces a record (dropped socket, session
+not created) is not scored -- it says nothing about the agent -- and is listed
+on the scorecard; --retry-errors re-runs just those cases into the same run.
 
 Writes evals/runs/<name>/ (git-ignored -- it holds customer notes):
   run<k>.jsonl     per case: the staged record, whether it was committed,
@@ -43,6 +48,11 @@ def scorecard(name: str, runs: list[dict], per_case: list[list[dict]], meta: dic
     lines = [f"# Eval scorecard: {name}", "",
              f"eval set: `{meta['evalset']}`  cases: {meta['cases']}  repeats: {len(runs)}  "
              f"judge: {meta['judge'] or 'off'}", ""]
+    skipped = meta.get("infra_errors") or []
+    if any(skipped):
+        lines += ["**Not scored (connection or setup errors, not agent behaviour):** "
+                  + "; ".join(f"repeat {k}: {', '.join(ids)}" for k, ids in enumerate(skipped, 1) if ids)
+                  + ". Re-run them with `--retry-errors`.", ""]
 
     lines += ["## Overall and per vertical" + (" (last repeat)" if len(runs) > 1 else ""), "",
               "| group | cases | not staged | event type | topic status | disposition "
@@ -112,10 +122,21 @@ def _failures(scores: list[dict]) -> list[str]:
     return out
 
 
+def infra_error(res: dict) -> bool:
+    """The run broke before the agent produced anything -- a dropped socket,
+    a session that could not be created. That says nothing about the agent,
+    so the case is left out of the scores (and can be re-run with
+    --retry-errors). An error AFTER the agent staged a record is still scored:
+    the record exists."""
+    return bool(res.get("error")) and not res.get("final")
+
+
 def _score_run(cases, results: list[dict], judge) -> list[dict]:
     by_id = {c.id: c for c in cases}
     scores = []
     for res in results:
+        if infra_error(res):
+            continue
         case = by_id[res["id"]]
         s = score_case(case, res.get("final"))
         if judge and res.get("final"):
@@ -155,6 +176,8 @@ def main() -> None:
     ap.add_argument("--judge", action="store_true", help="score summary faithfulness (model calls)")
     ap.add_argument("--judge-model", default=None)
     ap.add_argument("--rescore", type=Path, help="re-score a saved run instead of running the agent")
+    ap.add_argument("--retry-errors", type=Path, metavar="RUN_DIR",
+                    help="re-run only the cases that hit a connection/setup error, then re-score")
     args = ap.parse_args()
 
     # golden_v1 must be complete to count as a baseline; other sets only need
@@ -166,13 +189,25 @@ def main() -> None:
         from evals.agent_eval.judge import DEFAULT_MODEL, Judge
         judge = Judge(model=args.judge_model or DEFAULT_MODEL)
 
-    if args.rescore:
-        out = args.rescore
+    if args.rescore or args.retry_errors:
+        out = args.rescore or args.retry_errors
+        paths = sorted(out.glob("run*.jsonl"))
         raw_runs = [[json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-                    for p in sorted(out.glob("run*.jsonl"))]
+                    for p in paths]
         if not raw_runs:
             raise SystemExit(f"no run*.jsonl in {out}")
         name = out.name
+        if args.retry_errors:
+            by_id = {c.id: c for c in cases}
+            for path, results in zip(paths, raw_runs, strict=True):
+                redo = [i for i, r in enumerate(results) if infra_error(r)]
+                if not redo:
+                    continue
+                print(f"{path.name}: re-running {len(redo)} case(s) against {args.base_url}")
+                fresh = asyncio.run(_drive([by_id[results[i]["id"]] for i in redo], args.base_url, print))
+                for i, res in zip(redo, fresh, strict=True):
+                    results[i] = res
+                _write_jsonl(path, results)
     else:
         if not args.name:
             raise SystemExit("--name is required (or use --rescore)")
@@ -201,6 +236,7 @@ def main() -> None:
             _write_jsonl(out / f"run{k}.jsonl", results)
     rollups = [aggregate(s, priorities) for s in per_case]
     meta = {"evalset": args.evalset.name, "cases": len(cases), "judge": judge and judge.model,
+            "infra_errors": [[r["id"] for r in results if infra_error(r)] for results in raw_runs],
             "full_set": args.evalset == EVALSET and len(cases) == 90, "scored_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     (out / "scores.json").write_text(json.dumps(
         {"meta": meta, "runs": rollups, "variance": variance(rollups), "cases": per_case},

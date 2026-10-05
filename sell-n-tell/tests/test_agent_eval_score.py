@@ -250,6 +250,27 @@ def test_scorecard_says_fields_not_captured_and_lists_failures():
     assert "event type: expected 'Meeting', got 'Phone Call'" in card
 
 
+# --- connection / setup errors -----------------------------------------------
+
+def test_errors_before_any_record_are_not_scored_but_agent_misses_are():
+    from evals.agent_eval.run import _score_run, infra_error
+    case = make_case()
+    dropped = {"id": case.id, "error": "ConnectionClosedError: no close frame", "final": None}
+    no_record = {"id": case.id, "final": None}                  # agent never staged: a real miss
+    late_drop = {"id": case.id, "error": "ConnectionClosedError", "final": perfect(case)}
+    assert infra_error(dropped) and not infra_error(no_record) and not infra_error(late_drop)
+    assert _score_run([case], [dropped], judge=None) == []
+    assert [s["staged"] for s in _score_run([case], [no_record, late_drop], judge=None)] == [False, True]
+
+
+def test_scorecard_lists_cases_not_scored_because_of_errors():
+    case = make_case()
+    scores = [score_case(case, perfect(case))]
+    card = scorecard("t", [aggregate(scores, PRIO)], [scores],
+                     {"evalset": "x.json", "cases": 2, "judge": None, "infra_errors": [["MH-007"]]})
+    assert "Not scored (connection or setup errors" in card and "repeat 1: MH-007" in card
+
+
 # --- the rep's scripted side -------------------------------------------------
 
 def test_missing_topics_drives_the_coverage_reply():
