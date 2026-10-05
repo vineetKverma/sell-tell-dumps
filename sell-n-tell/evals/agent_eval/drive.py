@@ -119,29 +119,51 @@ async def _say(ws, tx: Transcript, text: str, quiet: float = QUIET_PERIOD_S) -> 
     return await _settle(ws, tx, quiet)
 
 
+SESSION_ATTEMPTS = 3
+SESSION_RETRY_WAIT_S = 10
+
+
+async def _create_session(base_url: str, case: Case) -> str:
+    """POST /api/sessions, retried: the app reports a failed Vertex call (e.g.
+    a token fetch timing out) as status "error", which is worth one more try."""
+    last = ""
+    for attempt in range(1, SESSION_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(base_url=base_url, timeout=150) as http:
+                r = await http.post("/api/sessions", json={
+                    "user_id": USER_ID,
+                    "planned_topics": case.planned_topics,  # a list: titles may contain commas
+                    "campaign_type": CAMPAIGN_TYPE,
+                })
+                r.raise_for_status()
+                body = r.json()
+            if body.get("status") == "ok":
+                return body["session_id"]
+            last = str(body.get("error"))
+        except httpx.HTTPError as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        if attempt < SESSION_ATTEMPTS:
+            await asyncio.sleep(SESSION_RETRY_WAIT_S)
+    raise RuntimeError(f"session not created after {SESSION_ATTEMPTS} tries: {last}")
+
+
 async def run_case(case: Case, base_url: str) -> dict:
     """One case end to end. Never raises: a failure is recorded on the result
     so one bad case cannot stop a 90-case run."""
     tx = Transcript()
     result = {"id": case.id, "vertical": case.vertical}
     try:
-        async with httpx.AsyncClient(base_url=base_url, timeout=60) as http:
-            r = await http.post("/api/sessions", json={
-                "user_id": USER_ID,
-                "planned_topics": case.planned_topics,  # a list: titles may contain commas
-                "campaign_type": CAMPAIGN_TYPE,
-            })
-            r.raise_for_status()
-            body = r.json()
-            if body.get("status") != "ok":
-                raise RuntimeError(f"session not created: {body.get('error')}")
-            session_id = body["session_id"]
+        session_id = await _create_session(base_url, case)
 
         ws_base = base_url.replace("http", "ws", 1).rstrip("/")
         query = urllib.parse.urlencode({"planned_topics": ",".join(case.planned_topics),
                                         "campaign_type": CAMPAIGN_TYPE})
         url = f"{ws_base}/ws/{USER_ID}/{session_id}?{query}"
-        async with websockets.connect(url, max_size=None) as ws:
+        # No client keepalive: while the app waits on a slow Google token
+        # refresh it cannot answer pings, and the default 20 s ping timeout
+        # dropped the socket mid-case ("no close frame received or sent").
+        # TURN_TIMEOUT_S still bounds every turn.
+        async with websockets.connect(url, max_size=None, ping_interval=None) as ws:
             await _say(ws, tx, case.note)
             for _ in range(MAX_COVERAGE_ROUNDS):
                 if not missing_topics(case, tx.final, allow_skips=len(tx.stage_calls) > 1):
