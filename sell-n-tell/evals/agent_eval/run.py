@@ -155,6 +155,8 @@ def _score_run(cases, results: list[dict], judge) -> list[dict]:
         s = score_case(case, res.get("final"))
         if judge and res.get("final"):
             cached = res.get("judge") if res.get("judge", {}).get("v") == JUDGE_INPUT_VERSION else None
+            if cached is None:
+                print(f"  judging {res['id']} ...", flush=True)
             verdict = cached or {**judge.check(rep_said(case, res), res["final"]), "v": JUDGE_INPUT_VERSION}
             res["judge"] = verdict
             s["faithful"] = verdict.get("faithful")
@@ -245,7 +247,13 @@ def main() -> None:
 
     ran = {r["id"] for r in raw_runs[0]}
     cases = [c for c in cases if c.id in ran]
-    per_case = [_score_run(cases, results, judge) for results in raw_runs]
+    per_case = []
+    for k, results in enumerate(raw_runs, 1):
+        if judge:
+            todo = sum(1 for r in results if r.get("final") and not infra_error(r)
+                       and r.get("judge", {}).get("v") != JUDGE_INPUT_VERSION)
+            print(f"scoring repeat {k}/{len(raw_runs)}: {todo} summaries to judge", flush=True)
+        per_case.append(_score_run(cases, results, judge))
     if judge:  # keep the verdicts so a later --rescore does not pay for them again
         for k, results in enumerate(raw_runs, 1):
             _write_jsonl(out / f"run{k}.jsonl", results)
