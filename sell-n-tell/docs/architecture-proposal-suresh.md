@@ -107,13 +107,3 @@ contract document has to state each one:
 | 12 | Who owns reference-data updates (new campaign topics each quarter)? | The business owner of Campaign Topics. We load new versions without a deploy |
 | 13 | Which region, given that the 3.x text models are global only, and what margin counts as "better than today" for `extract()`? | Live in `us-central1`; `extract()` on global if a 3.x model wins, else a regional model. Agree the margin before building it |
 | 14 | Does a planned campaign count as discussed only when the rep talks about its offer or products? | Yes. It is how the golden set is labelled, and the alternative (any visit counts) makes topic status meaningless |
-
-## 6. Comments
-
-<!-- Name: comment -->
-
-## 7. Decisions
-
-| # | Decision | By |
-|---|---|---|
-| | | |
