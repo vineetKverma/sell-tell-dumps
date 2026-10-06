@@ -72,7 +72,7 @@ session capture: Agent Engine sessions · Cloud Logging/Trace · log sink → Bi
 | 10 | **The frontend is removed and replaced by a client contract document** (§4) | A client owned by another team calls us. Our browser app does work today that the contract must spell out |
 | 11 | **Failure handling is defined.** If extract(), Model Armor or Pub/Sub fails: one retry with backoff, then the rep hears a fixed "couldn't save, your notes are kept" line. The transcript stays in session state for recovery. An unscreened record is never published. Google auth and token refresh never block the event loop | Nothing has retries today (AIML-2651). The eval saw Google token fetches time out and sockets drop on the test environment, so these failures are real, not theoretical |
 | 12 | **Reference data is versioned in Cloud Storage**: campaign topics with descriptions, the must-capture field catalog, the event-type rules, and the disposition mapping if kept (from `dispositions.yaml`). Loaded at startup; each record stores the versions used | Extraction needs topic descriptions and the vertical's fields, and the eval must use the same versions. New campaign topics each quarter need no deploy |
-| 13 | **The eval is part of the product.** The golden set (`evals/v1`: 90 real notes, 65 real top-up notes for rare fields, 5 synthetic cases kept separate) and the harness (`evals/agent_eval`) gate every release. Phase 1 scores `extract()` directly on the transcripts; the end-to-end harness is updated to the new typed events and session inputs (`drive.py` reads today's raw ADK events and `stage_visit_notes` calls, which both go) | Quality drops are caught before deploy. The golden set holds customer notes, so it stays internal with an agreed retention |
+| 13 | **The eval is part of the product.** The golden set (`evals/v1`: 90 real notes, 65 real top-up notes for rare fields, 5 synthetic cases kept separate) and the harness (`evals/agent_eval`) gate every release. `extract()` is first scored directly on the transcripts; the end-to-end harness is updated to the new typed events and session inputs (`drive.py` reads today's raw ADK events and `stage_visit_notes` calls, which both go) | Quality drops are caught before deploy. The golden set holds customer notes, so it stays internal with an agreed retention |
 
 ## 4. Client contract (what the other team's client must do)
 
@@ -89,21 +89,7 @@ contract document has to state each one:
 | End of session | The server closes after the closing line and `saved`. That replaces the client-side auto-close timer |
 | Errors | Typed error codes (`session_busy`, `not_found`, `save_failed`, …) with retry advice |
 
-## 5. Rollout
-
-| Phase | Work | Done when |
-|---|---|---|
-| 0 | Optional quick win on today's agent: remove the "EACH planned topic" wording, add the approved event-type rule, align code 1's cue words with the 99 guidance. Re-run the harness | Gives a fairer baseline for Phase 1, and may lift topic status and event type within days |
-| 1 | Build `extract()` and score it on the golden set (golden v1 + top-up + synthetic, each reported separately). **Go/no-go** | It beats the AIML-2702 baseline (or the Phase 0 one) on topic status, event type and faithfulness by the agreed margin, and meets agreed absolute targets for must-capture fields (P1 recall, invented-value rate), since today captures none |
-| 2 | Dialogue steps, `interpret()`, save rules, failure handling. Retire `turn_guard` and the two Live tools. Move `test_notes_workflow_gates.py` with the rules. Retire the scripts that test removed code | Scripted scenarios pass in text mode |
-| 3 | `/sessions` inputs, CRM keys, Pub/Sub topic, schema and BigQuery copy. Model Armor templates. Disposition mapping if kept | One de-identified record per session, with CRM keys, surviving a restart |
-| 4 | Client contract and typed events; harness updated to them. Tracing, log sink, dashboards. Remove the frontend | The other team can build against the contract alone. Any session can be traced end to end |
-| 5 | Terraform, Cloud Build release gate, lockfile-based image, own Agent Engine, three environments | A release with an eval drop is blocked |
-
-Phase 1 is cheap. It reuses the harness and golden set we already have, and
-it decides whether the rest is worth doing.
-
-## 6. Pending questions
+## 5. Pending questions
 
 | # | Question | Our recommendation |
 |---|---|---|
@@ -115,18 +101,18 @@ it decides whether the rest is worth doing.
 | 6 | Can Model Armor screen Gemini Live audio directly? | Not sure. We assume no and screen the transcript. Needs confirming |
 | 7 | Which Gemini model for `extract()`? The golden set was labelled with gemini-3.8-flash and gemini-3.1-pro-preview (global only) | A different model or version, or the scores flatter us |
 | 8 | Which ADK version do we standardise on? Newer ADK may support live evaluation | Pin one version in `uv.lock`, then re-check live eval support |
-| 9 | When do we get our own Agent Engine, and can it act as a lock across instances or host the WebSocket instead of Cloud Run? | Own engine before Phase 3 (with Dharun). Stay on Cloud Run, one instance |
+| 9 | When do we get our own Agent Engine, and can it act as a lock across instances or host the WebSocket instead of Cloud Run? | Own engine before records are published (with Dharun). Stay on Cloud Run, one instance |
 | 10 | What retention for transcripts (sessions, logs, BigQuery) and for the golden set, and do we keep raw audio? | Short retention for transcripts. No raw audio unless needed for debugging |
-| 11 | Should our code, not Live, decide when dictation has ended? | Try it in Phase 2. It removes the silence watchdog if it works |
+| 11 | Should our code, not Live, decide when dictation has ended? | Try it once extraction works. It removes the silence watchdog if it works |
 | 12 | Who owns reference-data updates (new campaign topics each quarter)? | The business owner of Campaign Topics. We load new versions without a deploy |
-| 13 | Which region, given that the 3.x text models are global only, and what margin counts as "beats" in Phase 1? | Live in `us-central1`; `extract()` on global if a 3.x model wins, else a regional model. Agree the margin before Phase 1 |
+| 13 | Which region, given that the 3.x text models are global only, and what margin counts as "better than today" for `extract()`? | Live in `us-central1`; `extract()` on global if a 3.x model wins, else a regional model. Agree the margin before building it |
 | 14 | Does a planned campaign count as discussed only when the rep talks about its offer or products? | Yes. It is how the golden set is labelled, and the alternative (any visit counts) makes topic status meaningless |
 
-## 7. Comments
+## 6. Comments
 
 <!-- Name: comment -->
 
-## 8. Decisions
+## 7. Decisions
 
 | # | Decision | By |
 |---|---|---|
