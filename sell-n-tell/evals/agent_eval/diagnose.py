@@ -62,7 +62,8 @@ def main() -> None:
             low = u.lower()
             kinds["mentions not getting to / skipping a topic" if any(
                 k in low for k in ("did not get", "didn't get", "not discussed", "did not discuss",
-                                   "skipp", "time constraint", "not covered", "no time")) else
+                                   "skipp", "time constraint", "not covered", "no time",
+                                   "out of time", "ran out", "didn't have time", "did not have time")) else
                   "other"] += 1
         print("  unsupported statements by kind: " + ", ".join(f"{k}: {n}" for k, n in kinds.items()))
     for u in unsupported[: args.show_unsupported]:
