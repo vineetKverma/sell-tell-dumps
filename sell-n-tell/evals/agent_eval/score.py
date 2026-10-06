@@ -29,6 +29,13 @@ DISCUSSED, NOT_DISCUSSED, DUPLICATE = "discussed", "not discussed", "duplicate r
 NOT_STAGED = "not staged"
 
 
+NO_PERSON_EVENT = "On-site visit"
+
+# "4 by 4", "4 x 4", "4X4" -> "4x4" (approved rule: store dimensions like 4x4,
+# keeping whatever unit the rep gave).
+_DIMENSION = re.compile(r"(\d+(?:\.\d+)?)\s*(?:by|x|×)\s*(?=\d)", re.IGNORECASE)
+
+
 def norm(text: str | None) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip().casefold()
 
@@ -41,7 +48,7 @@ def value_agrees(expected: str, actual: str) -> bool:
     """Same after normalising, or one contains the other ("12 units" and
     "12 units a month") -- the rule the two answer-key builds were compared
     with, so the agent is held to the same bar as the key itself."""
-    a, b = norm(expected), norm(actual)
+    a, b = (_DIMENSION.sub(r"\1x", norm(x)) for x in (expected, actual))
     a, b = re.sub(r"[^\w$%./-]+", " ", a).strip(), re.sub(r"[^\w$%./-]+", " ", b).strip()
     return a == b or (min(len(a), len(b)) >= 3 and (a in b or b in a))
 
@@ -59,11 +66,14 @@ def score_case(case: Case, actual: dict | None) -> dict:
                  "event_type": None, "topics": [], "off_plan": [], "fields": [],
                  "fields_captured": "must_capture" in actual, "faithful": None}
 
-    # Event type
-    if case.event_type is not None and "event_type" not in case.contested:
+    # Event type. The key leaves it null when the note mentions no person and
+    # no call; the business-approved rule (Jeremy, AIML-1537 thread) makes
+    # that On-site visit: "if the seller mentions interacting with a person,
+    # Meeting; otherwise On-Site Visit".
+    if "event_type" not in case.contested:
+        want = case.event_type or NO_PERSON_EVENT
         got = actual.get("event_type")
-        out["event_type"] = {"expected": case.event_type, "actual": got,
-                             "ok": norm(got) == norm(case.event_type)}
+        out["event_type"] = {"expected": want, "actual": got, "ok": norm(got) == norm(want)}
 
     # Topics
     rows = [t for t in (actual.get("topics") or []) if isinstance(t, dict)]

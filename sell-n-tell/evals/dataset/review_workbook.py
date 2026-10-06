@@ -110,7 +110,8 @@ def build(golden_dir: Path) -> Path:
                             "Green = stated; blank = not stated; orange = contested."),
              ("'not stated'", "The note does not say it. The agent should leave it empty; filling it "
                               "counts as invented."),
-             ("Event type blank", "The note gives no clue how the contact happened; not scored."),
+             ("Event type blank", "The note mentions no person and no call. Scored as On-site visit, per the "
+                                  "approved rule: a person -> Meeting, otherwise On-site visit."),
              ("Campaign type", "Not in the source data; every record carries the placeholder standard_sales."),
              ("", ""), ("Contains customer notes and contact names -- internal only.", "")]
     for row in rows:

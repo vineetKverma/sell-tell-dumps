@@ -40,7 +40,7 @@ def make_case(**kw) -> Case:
 
 
 def perfect(case: Case, with_fields: bool = True) -> dict:
-    args = {"event_type": case.event_type, "executive_summary": "s",
+    args = {"event_type": case.event_type or "On-site visit", "executive_summary": "s",
             "topics": [{"topic": t["topic"], "discussed": t["discussed"],
                         "disposition_code": t["disposition_code"]} for t in case.topics]}
     if with_fields:
@@ -169,8 +169,17 @@ def test_discussed_topic_marked_not_discussed_fails():
     assert t["actual"] == NOT_DISCUSSED and not t["status_ok"] and not t["code_ok"]
 
 
-def test_event_type_skipped_when_key_has_no_clue():
-    assert score_case(make_case(event_type=None), {"event_type": "Meeting"})["event_type"] is None
+def test_no_person_mentioned_means_on_site_visit():
+    # Approved rule: a person -> Meeting, otherwise On-site visit. The key's
+    # null ("no person, no call") is scored as On-site visit.
+    case = make_case(event_type=None)
+    assert score_case(case, {"event_type": "On-site visit"})["event_type"]["ok"]
+    assert not score_case(case, {"event_type": "Meeting"})["event_type"]["ok"]
+
+
+def test_contested_event_type_is_still_skipped():
+    case = make_case(event_type=None, contested=frozenset({"event_type"}))
+    assert score_case(case, {"event_type": "Meeting"})["event_type"] is None
 
 
 def test_contested_items_are_skipped():
@@ -210,6 +219,9 @@ def test_captured_but_wrong_value():
     ("Quote created: $3000", "quote created $3000", True),
     ("Bill", "Bob", False),
     ("a", "ab", False),  # too short to count as containment
+    ("4 by 4 ft", "4x4 ft", True),  # approved: dimensions stored like 4x4
+    ("36 X 48 in", "36x48 in", True),
+    ("4x4", "4x6", False),
 ])
 def test_value_agrees(expected, actual, ok):
     assert value_agrees(expected, actual) is ok
