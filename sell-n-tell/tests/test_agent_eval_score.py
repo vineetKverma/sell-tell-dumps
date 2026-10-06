@@ -271,6 +271,37 @@ def test_scorecard_lists_cases_not_scored_because_of_errors():
     assert "Not scored (connection or setup errors" in card and "repeat 1: MH-007" in card
 
 
+def test_judge_sees_the_reps_scripted_replies_not_just_the_note():
+    from evals.agent_eval.run import rep_said
+    case = make_case()
+    res = {"transcript": [("rep (sent)", case.note), ("agent", "Anything on paint?"),
+                          ("rep (sent)", "I didn't get to that on this visit."),
+                          ("rep (sent)", "Yes, that's right. Save it.")]}
+    said = rep_said(case, res)
+    assert said.startswith(case.note)
+    assert "Later the rep said: I didn't get to that on this visit." in said
+    assert "Anything on paint?" not in said
+
+
+def test_old_judge_verdicts_are_not_reused():
+    from evals.agent_eval.run import _score_run
+
+    class Judge:
+        calls = 0
+
+        def check(self, note, staged):
+            Judge.calls += 1
+            return {"faithful": True, "unsupported": []}
+
+    case = make_case()
+    res = {"id": case.id, "final": perfect(case), "transcript": [],
+           "judge": {"faithful": False, "unsupported": ["x"]}}          # v1 verdict
+    s = _score_run([case], [res], Judge())[0]
+    assert Judge.calls == 1 and s["faithful"] is True
+    _score_run([case], [res], Judge())                                  # now cached as v2
+    assert Judge.calls == 1
+
+
 # --- the rep's scripted side -------------------------------------------------
 
 def test_missing_topics_drives_the_coverage_reply():

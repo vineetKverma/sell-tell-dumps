@@ -21,7 +21,7 @@ APP_ENV = Path(__file__).resolve().parents[2] / "app" / ".env"
 
 PROMPT = """You check a sales rep's visit record against what the rep actually said.
 
-WHAT THE REP SAID (the only source of truth):
+WHAT THE REP SAID (the only source of truth) -- the dictation, then any later replies:
 <<<
 {note}
 >>>

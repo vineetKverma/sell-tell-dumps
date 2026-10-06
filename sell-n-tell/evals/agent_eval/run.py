@@ -122,6 +122,20 @@ def _failures(scores: list[dict]) -> list[str]:
     return out
 
 
+# Bumped whenever what the judge is shown changes, so verdicts made from the
+# old input are re-judged instead of reused. v2: the rep's scripted replies
+# ("I didn't get to that ...") are included -- v1 showed only the note, and
+# every summary repeating a reply was wrongly marked as invented.
+JUDGE_INPUT_VERSION = 2
+
+
+def rep_said(case, res: dict) -> str:
+    """Everything the rep side said: the note, then each scripted reply."""
+    replies = [text for who, text in res.get("transcript") or []
+               if who == "rep (sent)" and text != case.note]
+    return "\n".join([case.note, *(f"Later the rep said: {t}" for t in replies)])
+
+
 def infra_error(res: dict) -> bool:
     """The run broke before the agent produced anything -- a dropped socket,
     a session that could not be created. That says nothing about the agent,
@@ -140,11 +154,12 @@ def _score_run(cases, results: list[dict], judge) -> list[dict]:
         case = by_id[res["id"]]
         s = score_case(case, res.get("final"))
         if judge and res.get("final"):
-            verdict = res.get("judge") or judge.check(case.note, res["final"])
+            cached = res.get("judge") if res.get("judge", {}).get("v") == JUDGE_INPUT_VERSION else None
+            verdict = cached or {**judge.check(rep_said(case, res), res["final"]), "v": JUDGE_INPUT_VERSION}
             res["judge"] = verdict
             s["faithful"] = verdict.get("faithful")
             s["unsupported"] = verdict.get("unsupported")
-        elif res.get("judge"):
+        elif res.get("judge", {}).get("v") == JUDGE_INPUT_VERSION:
             s["faithful"] = res["judge"].get("faithful")
             s["unsupported"] = res["judge"].get("unsupported")
         scores.append(s)
