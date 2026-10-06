@@ -17,6 +17,7 @@ from pathlib import Path
 DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_LOCATION = "global"
 RATE_LIMIT_WAITS = (15, 30, 60, 120)
+CALL_TIMEOUT_MS = 60_000
 APP_ENV = Path(__file__).resolve().parents[2] / "app" / ".env"
 
 PROMPT = """You check a sales rep's visit record against what the rep actually said.
@@ -55,8 +56,14 @@ class Judge:
         # the global endpoint only, so location is passed explicitly.
         load_dotenv(APP_ENV)
         self.model = model
+        from google.genai import types
+
+        # A per-call timeout: on a flaky connection a call can otherwise hang
+        # for minutes. A timed-out call is recorded as "not judged" for that
+        # case and the run moves on.
         self.client = genai.Client(vertexai=True, location=location,
-                                   project=os.environ.get("GOOGLE_CLOUD_PROJECT"))
+                                   project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+                                   http_options=types.HttpOptions(timeout=CALL_TIMEOUT_MS))
 
     def check(self, note: str, staged: dict) -> dict:
         from google.genai import errors, types
@@ -76,4 +83,6 @@ class Judge:
                 time.sleep(wait)
             except (ValueError, KeyError, TypeError) as exc:
                 return {"faithful": None, "error": f"unreadable judge reply: {exc}"}
+            except Exception as exc:  # network: timeout, dropped connection, token fetch
+                return {"faithful": None, "error": f"{type(exc).__name__}: {exc}"}
         return {"faithful": None, "error": "rate limited"}

@@ -157,7 +157,11 @@ def _score_run(cases, results: list[dict], judge) -> list[dict]:
             cached = res.get("judge") if res.get("judge", {}).get("v") == JUDGE_INPUT_VERSION else None
             if cached is None:
                 print(f"  judging {res['id']} ...", flush=True)
-            verdict = cached or {**judge.check(rep_said(case, res), res["final"]), "v": JUDGE_INPUT_VERSION}
+            verdict = cached or judge.check(rep_said(case, res), res["final"])
+            if verdict.get("faithful") is not None:  # a failed call is retried on the next --rescore
+                verdict["v"] = JUDGE_INPUT_VERSION
+            else:
+                print(f"    not judged: {verdict.get('error', '')[:120]}", flush=True)
             res["judge"] = verdict
             s["faithful"] = verdict.get("faithful")
             s["unsupported"] = verdict.get("unsupported")

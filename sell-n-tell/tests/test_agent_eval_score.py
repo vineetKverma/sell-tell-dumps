@@ -314,6 +314,20 @@ def test_old_judge_verdicts_are_not_reused():
     assert Judge.calls == 1
 
 
+def test_a_failed_judge_call_is_not_cached():
+    from evals.agent_eval.run import JUDGE_INPUT_VERSION, _score_run
+
+    class Flaky:
+        def check(self, note, staged):
+            return {"faithful": None, "error": "ConnectTimeout"}
+
+    case = make_case()
+    res = {"id": case.id, "final": perfect(case), "transcript": []}
+    s = _score_run([case], [res], Flaky())[0]
+    assert s["faithful"] is None
+    assert res["judge"].get("v") != JUDGE_INPUT_VERSION  # retried next time
+
+
 # --- the rep's scripted side -------------------------------------------------
 
 def test_missing_topics_drives_the_coverage_reply():
