@@ -254,8 +254,7 @@ def main() -> None:
                        and r.get("judge", {}).get("v") != JUDGE_INPUT_VERSION)
             print(f"scoring repeat {k}/{len(raw_runs)}: {todo} summaries to judge", flush=True)
         per_case.append(_score_run(cases, results, judge))
-    if judge:  # keep the verdicts so a later --rescore does not pay for them again
-        for k, results in enumerate(raw_runs, 1):
+        if judge:  # save verdicts now, so stopping later does not lose this repeat's judging
             _write_jsonl(out / f"run{k}.jsonl", results)
     rollups = [aggregate(s, priorities) for s in per_case]
     meta = {"evalset": args.evalset.name, "cases": len(cases), "judge": judge and judge.model,
