@@ -46,11 +46,34 @@ skipped topics ("ran out of time").
 4. Code 1's cue words include "interested" and "send a quote", which conflicts
    with the prompt's guidance to use 99 when nothing fits.
 
+## Do we still need disposition codes?
+
+The codes (1 to 10, plus 99) predate the must-capture sheet. They were meant to
+give each planned topic one countable outcome for a Salesforce sync. Today:
+
+- **Nothing uses them.** No downstream system reads the code, and the source
+  data has no code column; reps do not record one today.
+- **They overlap the must-capture fields.** U-04 (commercial outcome: order
+  placed, quote created, pending, return, none) and U-06 (objection and
+  competitor) record the same outcomes, so the same fact is captured twice and
+  the two can disagree.
+- **They have gaps.** No code exists for quote created (about 15% of notes),
+  no contact made (about 10%) or renewal agreed.
+- **They cause errors.** Because the agent must pick one, it forces a code
+  where none fits. That is every disposition miss above, and some of the
+  unfaithful summaries.
+
+**Suggestion:** drop the per-topic codes and let the agent capture the facts
+(U-02 contact outcome, U-04 commercial outcome, U-06 objection/competitor). If
+a code is ever needed downstream, derive it from those fields with a small
+business-owned mapping (e.g. U-04 "order placed" gives 2, U-06 "pricing" gives
+8, nothing matching gives 99) rather than having the model choose one.
+
 ## Suggested next steps
 
 - Fix 1 to 3 in the prompt and re-run the eval (about an hour per run).
-- Decide whether disposition codes are needed at all; the must-capture fields
-  U-04 and U-06 cover the same outcomes.
+- Decide on disposition codes (above): drop them, or derive them from the
+  must-capture fields.
 - Build must-capture field extraction (the vertical work); the eval already
   scores it.
 
