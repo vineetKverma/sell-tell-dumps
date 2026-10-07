@@ -1,165 +1,205 @@
 # SellNTell — session handoff
 
 Resume with no prior context. Read this first — it says where things stand and
-what to do next. Then `AIML-2702-pivot.md` for the current two stories, and
-`change-log.md` for older history.
+what to do next. Then `architecture-proposal-suresh.md` for the design we are
+moving to, `AIML-2702-baseline.md` for what the agent scores today, and
+`evals/README.md` for how to run the eval.
 
 ---
 
-## ✅ START HERE — the eval work (AIML-2898 → AIML-2702)
+## ✅ START HERE
 
-AIML-2751 (remove the guided flow) is **merged** into `development`
-(`85b108c`). The work now is measuring the agent: a golden dataset
-(AIML-2898) and the harness that scores the agent against it (AIML-2702).
-Both follow Suresh's direction: capture everything on the must-capture sheet
-(`must-capture-fields.xlsx`, 65 fields, P1–P3) and report accuracy by
-priority.
+**AIML-2898 (golden dataset) is done and AIML-2702 (eval harness) is in a PR.**
+Both close when that PR merges. The next piece of work is the new architecture,
+which is waiting on Suresh, and two stories that can start before he answers.
 
-### AIML-2898 — golden dataset v1: in review with Suresh
+### 1. The open PR: `feature/AIML-2702-eval-harness` → `development`
 
-**Branch `feature/AIML-2898-golden-dataset`** (off `development`), pushed.
-Holds the data only, in `evals/v1/`:
+One PR closes both stories. No application code changes. Contents:
 
-| File | What it is |
+| Path | What it is |
 |---|---|
-| `golden_v1.jsonl` | 90 real FAR notes, 15 per vertical, with the expected answers |
-| `golden_v1.evalset.json` | the same 90 as ADK EvalCases — what the harness reads |
-| `golden_v1.manifest.json` | counts and which models built it |
-| `finalize_v1_summary.md` | counts only |
-| `universal_fields.csv`, `vertical_fields.csv` | the 65 fields with priority, from the must-capture sheet |
+| `evals/v1/` | the golden set: `golden_v1.evalset.json` (90 real FAR notes, 15 per vertical, with expected answers) plus `universal_fields.csv` / `vertical_fields.csv` (the 65 must-capture fields with priority). **Customer notes and names — internal only; to be moved out of the repo later** |
+| `evals/agent_eval/` | the regression harness: drives the running app as the client does and scores the saved record |
+| `evals/adk_eval/` | the same scores through ADK's own evaluation service (custom metrics + ADK's built-in tool-use judge, live mode) |
+| `evals/baselines/golden_v1.json` | the committed baseline: aggregate numbers only |
+| `evals/README.md` | how to run both |
+| `tests/test_agent_eval_score.py`, `tests/test_agent_eval_regression.py`, `tests/test_adk_eval_metrics.py` | offline scoring tests |
 
-**The set contains customer notes and contact names — internal only.**
+**Merge with "Squash".** The branch history still contains data files that the
+final commit removed (top-ups, synthetic cases, the review workbook); a squash
+merge brings only the final state into `development`. Last full test run on
+the branch: 54 passed, 1 skipped (the ADK test module, which skips under the
+project's ADK 2.1.0).
 
-How it was built: notes sampled per vertical across outcome strata (order,
-quote, no contact, multi-topic, short, plan restatement). Each note labelled
-by two independent builds with the models' roles swapped
-(gemini-3.8-flash / gemini-3.1-pro-preview, global endpoint), a judge settling
-disagreements. 96.5% agreement; the 67 contested answers are marked in each
-record's `contested` list and are not scored. U-03 is derived from the topic
-answers, never labelled. "Not stated" is `null`; an event type of `null` means
-the note gives no clue. The files were built as "v1.1" (topic descriptions
-cleaned, every answer identical to the first build) and renamed to v1 on the
-branch.
+**After the merge:** post the closing comments on AIML-2898 and AIML-2702, and
+change AIML-2702's AC4 from "seven-scenario seed set" to "the AIML-2898 golden
+set (90 cases) runs end to end and produces a recorded baseline".
 
-The curation pipeline (`evals/dataset/`) is **not** in the repo — only the
-data is. Suresh's review copy is `golden_v1.1_review.xlsx` (Read me / Records /
-Fields tabs).
+### 2. The two evals — what they are and how to run them
 
-**Suresh's answers so far:**
+Both use the same golden set and the same scoring rules (the ADK metrics call
+the harness's scorer), so a rule change applies to both.
 
-1. Campaign type — keep it as a placeholder (`standard_sales`). It is not in
-   the source data, and the agent ignores it anyway. Closed.
-2. The top-up set — he asked what it means; a plain explanation was sent. No
-   decision yet. The work below is going ahead so the reply can carry results.
-
-### The top-up set — in progress on the dev machine
-
-33 of the 54 vertical fields (16 of them P1) never appear in the 90 notes, so
-for those the eval can only check that the agent does not invent them. The
-fields are rare, not absent: the sheet's Evidence Base tab counts hundreds to
-thousands of matching notes in the full export (e.g. HL-01 procurement channel
-731, MH-01 turns 6,918). Fifteen notes per vertical just missed them.
-
-The top-up picks notes per missing field, labels them the same two-build way,
-and keeps only notes where both builds agree the field is stated. A keyword
-hit is only a candidate: MH-02 matches "HVAC" in 22% of notes, but a note has
-to say *repair or replace* to state the field.
-
-Pieces (local, committed, covered by the offline tests):
-
-- `evals/dataset/sample_topup.py` — one keyword pattern per missing field,
-  up to 6 candidates each from that field's own vertical, v1 notes skipped,
-  ids prefixed `T-`.
-- `build.py --sampler topup` — same pipeline, new sampler.
-- `finalize.py --keep-target-stated 3` — keeps at most 3 confirmed notes per
-  field and reports which fields no real note confirmed.
-
-**State:** build A has drafted all 197 candidates with both models; one note
-(`T-MH-040`) failed in model B (the reply came back as a list, not an object).
-Re-run the same build command **without** `--fresh` — it retries only the
-failed note — then build B with the roles swapped, then:
+**Regression harness** — the gate developers run:
 
 ```powershell
-uv run python -m evals.dataset.finalize --a topup_a --b topup_b --version topup_v1 --keep-target-stated 3
-uv run python -m evals.dataset.export_adk --version topup_v1
+uv run python -m evals.agent_eval.run quick    # 18 cases (3 per vertical), about 20 minutes
+uv run python -m evals.agent_eval.run full     # 90 cases, about 1.5 hours
 ```
 
-Bring back `sample_topup_a_summary.md` and `finalize_topup_v1_summary.md`
-(counts only). Next: tell Suresh which fields now have real examples, which
-have none, and propose short written dictations for the rest. If `T-MH-040`
-fails again, make `draft_labels.py` unwrap a one-element list.
+- Starts the app if nothing answers on port 8000, sends each note over the
+  WebSocket as text turns, answers the agent's topic reminders ("I didn't get
+  to that"), confirms ("Yes, that's right. Save it."), and scores the last
+  `stage_visit_notes` call.
+- Writes `evals/runs/<mode>-<time>/final_scores.json` with a verdict and exit
+  code: **PASS** (0), **REGRESSION** (1, a score worse than the baseline by more
+  than 3 × its run-to-run spread, never less than 5 points), **INVALID** (2,
+  more than 10% connection errors, no baseline, or the golden set changed).
+- Every result records the app commit, the agent and judge models and the
+  dataset checksum. Connection errors are retried once, then left out.
+- Scoring rules: contested answers are skipped; a note that mentions no
+  person is scored as On-site visit (the approved rule: a person → Meeting,
+  otherwise On-site visit); dimensions compare as `4x4`; the faithfulness judge
+  (gemini-3.8-flash, global) sees the note plus the rep's scripted replies.
+- New baseline after an accepted change: run `full` three times, then
+  `uv run python -m evals.agent_eval.baseline export <run folders>`.
+- `uv run python -m evals.agent_eval.diagnose evals/runs/<name>` breaks the
+  misses into expected → got patterns (counts only).
 
-### AIML-2702 — eval harness: built, first trial not yet run
-
-**Branch `feature/AIML-2702-eval-harness`**, cut from the AIML-2898 branch
-(it needs `evals/v1/`). Code in `evals/agent_eval/`:
-
-| File | Role |
-|---|---|
-| `cases.py` | loads the eval set and field priorities; refuses anything but the full 90 cases for a baseline |
-| `drive.py` | runs one case against the **running app** through its own contract: `POST /api/sessions`, then the WebSocket with text turns — the same path as `scripts/ws_smoke_test.py` |
-| `score.py` | pure scoring of the last `stage_visit_notes` call against the key |
-| `judge.py` | summary faithfulness, the only metric with model calls (`--judge`) |
-| `run.py` | the command: runs, scores, writes the scorecard |
-
-The rep's side is scripted: the note as the dictation; "I didn't get to that"
-when the agent reminds about a planned topic; then "Yes, that's right. Save
-it." The reminder decision mirrors `notes_workflow.compute_missing_topics`
-(substring match; skips count only after the first staging call), so the rep
-answers exactly when the app asks.
-
-Scored: event type, topic status (discussed / not / duplicate rows, off-plan
-rows reported), disposition code, faithfulness, and per must-capture field
-recall / precision / fabrication / value accuracy, rolled up per vertical and
-per priority. Contested items are skipped; a field with no stated example
-reports n/a, not 0. `--repeat N` gives run-to-run variance, `--rescore`
-re-scores a saved run, `--evalset` points at another set (the top-up).
-Output goes to `evals/runs/<name>/`, which is git-ignored — it quotes notes.
-
-**The agent captures no must-capture fields today** (no `must_capture`
-argument on `stage_visit_notes`), so the first baseline shows fields as "Not
-captured". That is the gap the vertical build closes; the same harness then
-measures it unchanged.
-
-**Next:** start the app, then
+**ADK eval** — the framework to grow into (simulated users, audio later):
 
 ```powershell
-uv run python -m evals.agent_eval.run --name trial --cases HL-001,MH-001,IS-001
+uv run --with "google-adk[eval]==2.10.0" --with google-cloud-aiplatform python -m evals.adk_eval.run quick
 ```
 
-Check the transcript in `evals/runs/trial/run1.jsonl` — did the scripted
-conversation reach a commit? — before spending about an hour per repeat on the
-full 90. Then `--name baseline --repeat 3 --judge`.
+- Loads the agent in-process; ADK's `LocalEvalService` drives it in live mode
+  **one session at a time** (`AgentEvaluator` always opens 4 at once, which timed
+  out on the opening handshake). Failed sessions retry once.
+- Needs ADK with live evaluation. The project pins **2.1.0** (`uv.lock`), which
+  has custom metrics but no live evaluation — hence `--with` until the ADK upgrade.
+- It sends only the note, so after staging the agent tries to save without a
+  reply and the app logs `commit_visit_notes BLOCKED: no new rep reply since
+  staging` until the live timeout. Expected; the score uses the staged record.
+  It is also a live view of the "saves without a yes" problem.
+- Two quick runs so far: topic status 55.6% / 50.0%, event type 52.9%,
+  disposition 42.9%, ADK rubric judge 74.5%; about 107 model events and 11
+  tool calls per case (mostly those blocked save attempts). Not comparable
+  decimal-for-decimal with the harness (first staged record, per-case means).
 
-The story text in `AIML-2702-pivot.md` matches what was built (drives the app
-over its API rather than ADK's Runner in-process; AC4 requires the full
-90-case set). The Jira description still needs the same update.
+### 3. What the agent scores today (AIML-2702 baseline)
 
-### Open, not ticketed
+Full set, 90 cases × 3 runs (`AIML-2702-baseline.md`):
 
-- **F7** — `compute_missing_topics` matches by substring containment, so an
-  inflected label ("Appliance Contract Renewal" vs planned "Appliances") can
-  leave a topic "uncovered" and produce two rows for one discussion. The
-  harness reports duplicate and off-plan rows, so it will measure this.
-- **Invented skip reasons** — the agent still writes "due to time constraints"
-  when the rep gave no reason. Prompt wording made no difference over six runs;
-  needs a server-side fix. The faithfulness judge will measure it.
-- **Registry content gap** — no code expresses "renewal agreed", "quote
-  created" or "no contact made"; roughly a quarter of real visits.
-  `note-disposition-registry-gap.md`. The must-capture fields U-02 (contact
-  outcome) and U-04 (commercial outcome) cover the same ground.
-- **Supersede gate unreachable in the live flow** — `tools.py` passes the same
-  `session_id` on every stage, so the AIML-2703 gate never fires; the
-  single-draft invariant is what delivers the guarantee.
-  `tests/test_notes_workflow_gates.py` tests both, split into
-  `TestLiveCallPattern` and `TestSupersedeGate`. Whether to keep the gate is
-  still an open question with Suresh.
-- **Vestigial BigQuery DDL** — `scripts/bigquery_create_tables.sql` and
-  `bigquery_schema.json` still define `guided_flow_calls` and `agent_mode`;
-  nothing writes them.
-- **The sync tool never deletes.** `tools/import-repo-md.ps1` only writes
-  files, so anything removed upstream survives locally and has to be deleted
-  by hand.
+| Measure | Score | Main pattern |
+|---|---|---|
+| Event type | 59.7% | Meeting and On-site visit mixed up both ways; Phone Call chosen with no call |
+| Topic status | 48.7% | 65% of campaigns the rep never mentioned marked discussed (190 of 293); discussed ones right 97% |
+| Disposition | 72.2% | every miss is a specific code where the key says 99, mostly code 1 |
+| Faithfulness | 22.0% | summaries for campaigns not discussed; invented skip reasons |
+| Must-capture fields | 0% | not built |
+
+Causes, all in the prompt or code list: `agent.py` and `behavioral_rules.yaml`
+say "extract a disposition for EACH planned topic"; the agent sees only
+campaign titles; there are no event-type rules; code 1's cue words
+("interested", "send a quote") contradict the "use 99" guidance. Quick-set
+baseline (18 cases): event type 62.0%, topic status 66.2%, disposition 65.7%
+(range 44.4–77.8, so quick mode only catches large disposition drops),
+faithfulness 30.2%.
+
+### 4. The dataset (AIML-2898, done)
+
+- 90 real notes, two independent model builds with roles swapped, 96.5%
+  agreement; contested answers excluded from scoring.
+- Field top-up: 65 more real notes found by searching the full export. Every
+  must-capture field now has an example: all universal fields and 52 of 54
+  vertical fields from real notes. HS-08 (PTAC population) and HS-09 (shop
+  stock gaps) are stated in no note in the export, so they have 5 written
+  cases, marked synthetic. 19 vertical fields have a single real example.
+- Only the 90-case eval set ships in the PR. The top-up and synthetic sets,
+  their summaries and the review workbook Suresh got stay on
+  `feature/AIML-2898-golden-dataset`.
+- The curation pipeline (`evals/dataset/`) is not in the repo; it lives in the
+  local copy and as untracked files on the dev machine.
+
+### 5. Dev-machine workarounds (until fixed on `development`)
+
+- **Agent Engine:** `app/.env` needs `VERTEX_AI_AGENT_ENGINE_ID` (the URN Dharun
+  gave, ending `reasoningEngines:2221633612665585664`) and
+  `VERTEX_AI_AGENT_ENGINE_LOCATION=us-central1`. It is a borrowed, unused
+  engine; sell-n-tell needs its own.
+- **Missing dependency:** the session service needs `google-cloud-aiplatform`,
+  which `pyproject.toml` does not declare, so a fresh install fails at startup.
+  Start the app with `uv run --with google-cloud-aiplatform uvicorn app.main:app --port 8000`.
+  The fix is `google-adk[gcp]` (a message to Dharun was drafted; also part of the ADK upgrade).
+- **Unreliable connection to Google:** token fetches to `oauth2.googleapis.com`
+  time out and sockets drop during long runs. The harness tolerates it (no
+  client keepalive, retries, errors excluded and reported); worth raising with
+  whoever looks after that machine, because real reps would hit it too.
+
+### 6. The new architecture (waiting on Suresh)
+
+`architecture-proposal-suresh.md` is the version to send him: why change
+(the baseline above), the picture, 14 changes, the client contract and
+17 questions (business and technical). It includes the useful parts of
+Dharun's review. `architecture-proposal.md` is the fuller internal version
+(component-by-component kept / removed list, rollout phases, risks); it does
+not yet have the review merged in.
+
+The design in short:
+
+- Gemini Live keeps the voice. Extraction moves to a text Gemini call with a
+  fixed JSON schema (`extract()`); every must-capture field is optional.
+  Whether that is one call or several in parallel is decided by the eval.
+- Written business rules (approved event-type rule, `4x4` dimensions, trucks
+  count as units in Trades; "discussed only when the rep talks about the
+  offer" still to confirm).
+- Disposition codes stop being a model choice: derived from U-02 / U-04 / U-06
+  by a business-owned mapping, or dropped (nothing consumes them today).
+- Our code decides when to save, through **dialogue steps** kept in the session
+  (listening → extracting → asking about a missed topic → reading back →
+  waiting for a yes → saving). Saving is only reachable from "waiting for a
+  yes", by a reply to the latest readback, so `turn_guard` and the commit
+  watchdog go. `interpret()` labels the reply yes / correction / unclear.
+- `POST /sessions` takes account id, visit id, vertical and planned topics (by
+  registry id, or by title — only 26% of real topic mentions are in the
+  registry); the rep comes from the token. The record goes to the client as a
+  `saved` event and to Pub/Sub (consumer + BigQuery copy). Model Armor, managed
+  logging, versioned reference data in Cloud Storage, failure handling.
+- The eval in two tiers: text cases on every change, real recordings before a
+  release (none collected yet).
+
+**To send Suresh:** the proposal (it also asks whether the disposition codes are needed at all), and the ADK upgrade case — the project's
+versions disagree (`uv.lock` 2.1.0, `requirements.txt` 2.5.0, `pyproject.toml`
+≥1.32, and the Dockerfile ignores the lockfile); 2.1.0 has no live evaluation;
+a trial on 2.10 ran ADK's live eval on our agent with no app changes. Proposal:
+2.10 with `google-adk[gcp,eval]`, pinned, `requirements.txt` dropped, Dockerfile
+installing from the lockfile.
+
+### 7. The next stories (can start before Suresh answers)
+
+**Story 1 — Fix the agent's prompt for topic mapping, event type and
+disposition (3 points).** Remove the "EACH planned topic" wording and add "a
+campaign counts as discussed only when the rep talks about its offer or
+products" (`agent.py`, `behavioral_rules.yaml`); add the approved event-type
+rule; align code 1's cue words with the 99 guidance (`dispositions.yaml`); add
+`google-adk[gcp]` to `pyproject.toml`. AC: the three prompt changes are in; a
+fresh `uv sync` starts the app; `run full` (×3) beats the baseline on topic
+status, event type and disposition by more than the noise, with nothing else
+dropping; unit tests pass.
+
+**Story 2 — Text extraction with a fixed schema: the go/no-go (5 points).**
+Build `extract()` (dictation text + planned topics with short descriptions +
+vertical → one schema-valid record: event type, topic status, the vertical's
+20 fields, the facts behind dispositions) and score it directly on the golden
+set, without the live app. AC: schema-valid JSON for every case with no repair
+step; one command writes a scorecard in the harness format; a model different
+from the two that labelled the golden set; spread measured over 3 runs; it
+beats the baseline (or Story 1's) on topic status, event type and faithfulness
+by the agreed margin and meets agreed field targets — the result decides
+whether the rest of the redesign goes ahead.
+
+Also likely: a small **ADK upgrade** story if Suresh agrees.
 
 ### Guided is preserved
 
@@ -175,8 +215,10 @@ git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
 
 | Ticket | Title | Status |
 |---|---|---|
-| **AIML-2898** | Curate the vertical golden dataset | **In review with Suresh.** v1 on `feature/AIML-2898-golden-dataset`; top-up set being built |
-| **AIML-2702** | Eval harness (rewritten for ADK-native evaluation) | **Built, not yet run on the dev machine.** `feature/AIML-2702-eval-harness` |
+| **AIML-2702** | Eval harness | **PR open** (`feature/AIML-2702-eval-harness`). Closes on merge |
+| **AIML-2898** | Curate the vertical golden dataset | **Done**; the full set was sent to Suresh for review as `golden_v1_review.xlsx`. Closes with the AIML-2702 PR |
+| Story 1 (to create) | Prompt fixes for topic mapping, event type, disposition | Drafted (§7 above) |
+| Story 2 (to create) | Text extraction go/no-go | Drafted (§7 above) |
 | **AIML-2751** | Remove the guided flow | **Merged** into `development` |
 | **AIML-2741** | — | Marked not needed |
 | **AIML-2845** | No-speech turns leave the agent's recovery message suppressed | **Backlog.** `suppressAgentSpeech` is only lifted by a tool call, and the no-speech path has none |
@@ -201,10 +243,9 @@ summary), reads it back, and commits on verbal approval.
 outcome codes, hands-free, with no screen.
 
 **Where it is going:** the must-capture sheet asks the agent to also extract
-up to 20 fields per call (11 universal + 9 for the account's vertical), when
-present — the agent does not ask for missing ones. Topic name, description,
-vertical and campaign type are assumed to arrive as API inputs. Not built yet;
-the harness above is what will measure it.
+up to 20 fields per call (11 universal + 9 for the account's vertical), only
+when stated. The new architecture (§6 of START HERE) is how; the eval is how
+we know it worked.
 
 ---
 
@@ -310,6 +351,9 @@ PCM noise. Watch for `commit_visit_notes BLOCKED:` (turn_guard),
 
 ---
 
+
+---
+
 ## 5. Tests
 
 **Offline, deterministic** — no server, no model, no credentials:
@@ -321,17 +365,18 @@ uv run pytest tests/ -q
 - `tests/test_notes_workflow_gates.py` (8 tests) — the staging/commit gates,
   on `development`. `tests/conftest.py` imports `notes_workflow` under a
   private package name so the ADK agent is never built.
-- `tests/test_agent_eval_score.py` (28 tests) — the AIML-2702 scoring, on
-  the harness branch. Adds the repo root to `sys.path` itself; no
-  `pyproject.toml` change.
+- `tests/test_agent_eval_score.py` (37 tests) — the harness's scoring, on hand-built records.
+- `tests/test_agent_eval_regression.py` (9 tests) — quick subset, baseline,
+  noise thresholds and the PASS / REGRESSION / INVALID verdicts.
+- `tests/test_adk_eval_metrics.py` (7 tests) — the ADK custom metrics and
+  config. Skips as a whole under an ADK without live evaluation (2.1.0).
+- Tests that read the golden set skip when it is absent.
 - `tests/test_dataset_*.py` — the curation pipeline; local only, like the
   pipeline.
 
-**Model-level** — the eval harness (AIML-2702) above is the scored check.
-`scripts/ws_smoke_test.py` still works for a quick look (7 scenarios, mints a
-session via `POST /api/sessions` first); its only output is the transcript.
-`correction_summary` is intermittent — re-run before calling a failure a
-regression.
+**Model-level** — the eval (START HERE §2) is the scored check.
+`scripts/ws_smoke_test.py` still works for a quick look (7 scenarios); its only
+output is the transcript, and the proposal retires it.
 
 ---
 
@@ -349,7 +394,16 @@ topic produced "due to time constraints". Every must-capture field must allow
 the per-field counts and the test totals in this file were all measured, not
 copied — several first guesses were wrong (the Campaign Topics export is
 Windows-1252, not UTF-8; a fourth Replace-All substitution, "gov", was found
-late).
+late; "two fields with one example" was really 19).
+
+**A framework does not make numbers meaningful — the checks around it do.**
+Checked answers, a tested scorer, measured noise, recorded provenance, and
+broken runs excluded rather than scored.
+
+**Search for the detail, not the topic word.** Keyword searches for rare
+fields ("filters", "competitor") returned thousands of notes that mention the
+topic without the fact; patterns requiring the detail (a count, a price) found
+the real examples.
 
 **Verify a documented command exactly as written, in a clean environment.**
 Stale state has fooled this project three times (`crypto.randomUUID` on
@@ -363,15 +417,17 @@ localhost, a smoke count zeroed by a restart, pytest "working" from a stale
 
 ## 7. Open decisions
 
-1. **Top-up set** — worth adding before the vertical build? Results pending
-   (see START HERE).
-2. **Vertical build** — making the agent capture the must-capture fields is
-   not ticketed yet. The harness is ready to measure it.
-3. **Registry content** — "no contact", "quote created", "renewal agreed" have
-   no code; U-02/U-04 overlap. Which is authoritative?
-4. **`needs_manual_review`** — nothing sets or reads it now that guided is
-   gone, but the coverage gate still honours it. Delete it or use it.
-5. **Supersede gate** — keep as defence, or delete as unreachable?
+All are also questions in the proposal:
+
+1. **The new architecture** — Suresh's review of `architecture-proposal-suresh.md`.
+2. **ADK upgrade** to 2.10, pinned in `uv.lock`.
+3. **"Discussed" threshold** — a campaign counts as discussed only when the rep
+   talks about its offer or products? The golden set is labelled that way.
+4. **Disposition codes** — does anything downstream need a per-topic code? If
+   not, drop them; if yes, derive them from U-02 / U-04 / U-06.
+5. **Golden data in the repo** — kept for now; move it out later (retention
+   and location to agree).
+6. **Own Agent Engine** for sell-n-tell (the current one is borrowed).
 
 ---
 
@@ -380,7 +436,10 @@ localhost, a smoke count zeroed by a restart, pytest "working" from a stale
 | File | Contents |
 |---|---|
 | `HANDOFF.md` | this file — start here |
-| `AIML-2702-pivot.md` | **current work**: the AIML-2898 and AIML-2702 story text as built |
+| `architecture-proposal-suresh.md` | **next work**: the architecture proposal for Suresh, with the review merged in |
+| `architecture-proposal.md` | the fuller internal proposal (kept/removed components, rollout, risks) |
+| `AIML-2702-baseline.md` | the eval baseline: scores, patterns, causes, the disposition-code question |
+| `AIML-2702-pivot.md` | the AIML-2898 and AIML-2702 story text as built |
 | `plan-after-implicit-decision.md` | the plan after choosing implicit: remove guided, then Jeremy's two requirements |
 | `stories-after-guided-removal.md` | the six follow-up stories, re-scoped |
 | `architecture-notes.md` | Live API vs our layers; what BigQuery is for |
