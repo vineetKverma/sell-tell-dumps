@@ -60,6 +60,22 @@ not speech; quick mode (18 cases) only catches large drops; per-vertical
 numbers rest on 15 cases each; faithfulness is judged by a model whose
 agreement with a human reviewer has not been measured yet.
 
+## The same eval on ADK's framework (`adk eval`)
+
+`evals/adk_eval/` runs the golden set through ADK's own evaluation service
+instead of the app's WebSocket. Our scores are registered as ADK custom
+metrics, and ADK's built-in judge (`rubric_based_tool_use_quality_v1`) checks
+the summaries against rubrics. It needs an ADK version with live evaluation,
+newer than the one the project pins, so for now:
+
+```powershell
+uv run --with "google-adk[eval]==2.10.0" --with google-cloud-aiplatform python -m evals.adk_eval.run quick
+```
+
+It loads the agent in-process (no app needed) and writes
+`evals/runs/adk-<mode>-<time>/summary.json`. This is where audio-based testing
+will go later; the WebSocket run above stays the regression gate.
+
 ## Updating the baseline (when a change is accepted as the new normal)
 
 Run `full` three times, then export the scores (numbers only) to
