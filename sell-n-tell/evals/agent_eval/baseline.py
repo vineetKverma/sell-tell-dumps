@@ -15,19 +15,22 @@ every developer compares against the same reference.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals.agent_eval.cases import load_cases, load_priorities, quick_subset
+from evals.agent_eval.cases import EVALSET, load_cases, load_priorities, quick_subset
 from evals.agent_eval.score import aggregate
 
 BASELINE = Path(__file__).resolve().parents[1] / "baselines" / "golden_v1.json"
-# A score must fall by more than this many points (or the invented-value rate
-# rise by more) to count as a regression. AIML-2702 measured the run-to-run
-# spread at 1 to 5 points, so smaller moves are noise.
+# How far a score must move to count. The same cases are re-run, so the noise
+# that matters is run-to-run model randomness, measured by the baseline's own
+# repeats: a change counts when it exceeds 3 x that metric's stdev, and never
+# less than DEFAULT_THRESHOLD points (AIML-2702 measured a 1 to 5 point spread).
 DEFAULT_THRESHOLD = 5.0
+NOISE_MULTIPLIER = 3.0
 
 # (name, how to read it from a rollup, higher_is_better)
 METRICS = [
@@ -55,18 +58,29 @@ def summarise(rollups: list[dict]) -> dict:
     return out
 
 
-def export(run_dir: Path, out: Path = BASELINE) -> dict:
-    data = json.loads((run_dir / "scores.json").read_text(encoding="utf-8"))
+def export(run_dirs: list[Path] | Path, out: Path = BASELINE) -> dict:
+    """From one or more scored full runs (each may hold several repeats)."""
+    run_dirs = [run_dirs] if isinstance(run_dirs, Path) else list(run_dirs)
+    repeats, metas = [], []
+    for d in run_dirs:
+        data = json.loads((d / "scores.json").read_text(encoding="utf-8"))
+        metas.append(data["meta"])
+        repeats += data["cases"]
+    if any(len(r) < 80 for r in repeats):
+        raise SystemExit("a baseline needs full runs (90 cases); one of these runs is partial")
     priorities = load_priorities()
     quick_ids = {c.id for c in quick_subset(load_cases())}
-    full = [aggregate(scores, priorities) for scores in data["cases"]]
-    quick = [aggregate([s for s in scores if s["id"] in quick_ids], priorities) for scores in data["cases"]]
+    full = [aggregate(scores, priorities) for scores in repeats]
+    quick = [aggregate([s for s in scores if s["id"] in quick_ids], priorities) for scores in repeats]
     baseline = {
-        "evalset": data["meta"]["evalset"],
-        "source_run": run_dir.name,
-        "judge": data["meta"].get("judge"),
+        "evalset": metas[0]["evalset"],
+        "source_run": ", ".join(d.name for d in run_dirs),
+        "repeats": len(repeats),
+        "judge": metas[0].get("judge"),
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "threshold_points": DEFAULT_THRESHOLD,
+        "dataset_sha256": hashlib.sha256(EVALSET.read_bytes()).hexdigest(),
+        "min_threshold_points": DEFAULT_THRESHOLD,
+        "noise_multiplier": NOISE_MULTIPLIER,
         "full": summarise(full),
         "quick": summarise(quick),
     }
@@ -75,29 +89,36 @@ def export(run_dir: Path, out: Path = BASELINE) -> dict:
     return baseline
 
 
+def threshold_for(ref_metric: dict) -> float:
+    return max(DEFAULT_THRESHOLD, NOISE_MULTIPLIER * ref_metric.get("stdev", 0.0))
+
+
 def compare(rollups: list[dict], baseline: dict, mode: str,
-            threshold: float = DEFAULT_THRESHOLD) -> tuple[list[str], list[str]]:
-    """(report lines, regressed metric names) for a run against the baseline."""
+            skip: list[str] = ()) -> tuple[list[str], list[str]]:
+    """(report lines, regressed metric names) for a run against the baseline.
+    ``skip`` lists metrics shown but left out of the verdict."""
     ref = baseline.get(mode) or {}
     now = summarise(rollups)
-    lines = [f"## Against the baseline ({mode} set, run '{baseline.get('source_run')}', "
-             f"regression = worse by more than {threshold:g} points)", "",
-             "| metric | baseline | this run | change | verdict |", "|---|---|---|---|---|"]
+    lines = [f"## Against the baseline ({mode} set, run '{baseline.get('source_run')}')", "",
+             "| metric | baseline | this run | change | counts if beyond | verdict |",
+             "|---|---|---|---|---|---|"]
     regressed = []
     for name, _read, higher in METRICS:
         if name not in ref or name not in now:
             continue
         b, c = ref[name]["mean"], now[name]["mean"]
-        delta = c - b
+        delta, limit = c - b, threshold_for(ref[name])
         worse = -delta if higher else delta
-        if worse > threshold:
+        if name in skip:
+            verdict = "not judged (too many judge failures)"
+        elif worse > limit:
             verdict = "REGRESSION"
             regressed.append(name)
-        elif -worse > threshold:
+        elif -worse > limit:
             verdict = "improved"
         else:
             verdict = "same (within noise)"
-        lines.append(f"| {name} | {b:.1f}% | {c:.1f}% | {delta:+.1f} | {verdict} |")
+        lines.append(f"| {name} | {b:.1f}% | {c:.1f}% | {delta:+.1f} | ±{limit:.1f} | {verdict} |")
     return lines, regressed
 
 
@@ -109,11 +130,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Export or show the committed baseline.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     ex = sub.add_parser("export", help="write evals/baselines/golden_v1.json from a scored run")
-    ex.add_argument("run_dir", type=Path)
+    ex.add_argument("run_dirs", type=Path, nargs="+", help="one or more full runs")
     sub.add_parser("show", help="print the committed baseline")
     args = ap.parse_args()
     if args.cmd == "export":
-        b = export(args.run_dir)
+        b = export(args.run_dirs)
         print(f"written: {BASELINE}")
     else:
         b = load()

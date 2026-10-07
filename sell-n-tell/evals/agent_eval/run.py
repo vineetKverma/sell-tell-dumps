@@ -1,23 +1,19 @@
-"""Run the golden eval set against the live agent and write the scorecard.
+"""Score the voice agent on the golden set. Two modes:
 
-Start the app first (the same way you would for the smoke test), then:
+    uv run python -m evals.agent_eval.run quick     # 18 cases, about 20 minutes
+    uv run python -m evals.agent_eval.run full      # 90 cases, about 1.5 hours
 
-    uv run python -m evals.agent_eval.run --name baseline
-    uv run python -m evals.agent_eval.run --name baseline --repeat 3 --judge
-    uv run python -m evals.agent_eval.run --name try --cases HL-001,MH-004
-    uv run python -m evals.agent_eval.run --rescore evals/runs/baseline --judge
-    uv run python -m evals.agent_eval.run --retry-errors evals/runs/baseline --judge
+The app is started automatically if nothing answers on --base-url. Every run
+writes evals/runs/<mode>-<time>/ (git-ignored -- it quotes customer notes):
 
-A case that breaks before the agent produces a record (dropped socket, session
-not created) is not scored -- it says nothing about the agent -- and is listed
-on the scorecard; --retry-errors re-runs just those cases into the same run.
+  final_scores.json  the verdict (PASS / REGRESSION / INVALID), what was run
+                     (app commit, models, dataset checksum), the scores and
+                     the comparison with the committed baseline. Numbers only.
+  scorecard.md       the same, plus every miss as expected vs actual
+  scores.json        every per-item outcome
+  run1.jsonl         per case: the saved record and the full transcript
 
-Writes evals/runs/<name>/ (git-ignored -- it holds customer notes):
-  run<k>.jsonl     per case: the staged record, whether it was committed,
-                   tool errors, and the full transcript
-  scores.json      every per-item outcome plus the rollups
-  scorecard.md     per vertical and overall, fields by priority, variance
-                   across repeats, and every failure as expected vs actual
+Exit code: 0 PASS, 1 REGRESSION, 2 INVALID (the run can't be trusted).
 """
 
 from __future__ import annotations
@@ -35,14 +31,15 @@ from pathlib import Path
 
 from evals.agent_eval.baseline import compare as compare_to_baseline
 from evals.agent_eval.baseline import load as load_baseline
+from evals.agent_eval.baseline import summarise
 from evals.agent_eval.cases import (
     EVALSET,
-    EXPECTED_CASES,
-    QUICK_PER_VERTICAL,
     load_cases,
     load_priorities,
     quick_subset,
 )
+from evals.agent_eval.judge import DEFAULT_MODEL as JUDGE_MODEL
+from evals.agent_eval.judge import Judge
 from evals.agent_eval.score import aggregate, score_case, variance
 
 RUNS = Path(__file__).resolve().parents[1] / "runs"
@@ -199,142 +196,163 @@ async def _drive(cases, base_url: str, log) -> list[dict]:
     return results
 
 
+MODES = ("quick", "full")
+# A run where more than this share of cases hit connection/setup errors (even
+# after one automatic retry) says too little about the agent to judge.
+MAX_INFRA_ERROR_RATE = 0.10
+# The same for the judge: above this share of unjudged summaries, faithfulness
+# is reported but left out of the verdict.
+MAX_UNJUDGED_RATE = 0.10
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _git_commit() -> str:
+    root = Path(__file__).resolve().parents[2]
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True,
+                             text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--", "app"], cwd=root, capture_output=True,
+                               text=True, check=True).stdout.strip()
+        return sha + ("+uncommitted-app-changes" if dirty else "")
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def _agent_model() -> str:
+    import os
+
+    from dotenv import dotenv_values
+    env = dotenv_values(Path(__file__).resolve().parents[2] / "app" / ".env")
+    return (os.getenv("VOICE_NOTES_AGENT_MODEL") or env.get("VOICE_NOTES_AGENT_MODEL")
+            or "gemini-live-2.5-flash-native-audio")
+
+
+def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref: dict | None) -> dict:
+    """The one file every run produces: what was run, whether the run is valid,
+    the scores, and the verdict against the baseline. Numbers only."""
+    n = len(cases)
+    infra = [r["id"] for r in raw if infra_error(r)]
+    judged = [r for r in raw if r.get("final") and not infra_error(r)]
+    unjudged = sum(1 for r in judged if (r.get("judge") or {}).get("faithful") is None)
+    data_hash = _sha256(EVALSET)
+    problems = []
+    if len(infra) > MAX_INFRA_ERROR_RATE * n:
+        problems.append(f"{len(infra)} of {n} cases hit connection/setup errors (limit "
+                        f"{MAX_INFRA_ERROR_RATE:.0%}); fix the environment and run again")
+    skip = []
+    if judged and unjudged > MAX_UNJUDGED_RATE * len(judged):
+        skip.append("faithfulness")
+    comparison, regressed = [], []
+    if ref is None:
+        problems.append("no committed baseline")
+    elif ref.get("dataset_sha256") != data_hash:
+        problems.append("the golden set differs from the one the baseline was made on")
+    elif not problems:
+        comparison, regressed = compare_to_baseline([rollup], ref, mode, skip=skip)
+    verdict = "INVALID" if problems else ("REGRESSION" if regressed else "PASS")
+    return {
+        "verdict": verdict,
+        "problems": problems,
+        "regressed": regressed,
+        "mode": mode, "run": name,
+        "scored_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "app_commit": _git_commit(),
+        "agent_model": _agent_model(),
+        "judge_model": JUDGE_MODEL,
+        "dataset": EVALSET.name, "dataset_sha256": data_hash,
+        "cases": n, "scored": n - len(infra), "connection_errors": infra,
+        "unjudged_summaries": unjudged,
+        "excluded_from_verdict": skip,
+        "scores": summarise([rollup]),
+        "baseline_run": ref and ref.get("source_run"),
+        "comparison": comparison,
+    }
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Run and score the golden eval set.")
-    ap.add_argument("--name", help="run name; output goes to evals/runs/<name>/")
-    ap.add_argument("--base-url", default="http://localhost:8000")
-    ap.add_argument("--evalset", type=Path, default=EVALSET,
-                    help="another eval set, e.g. the field top-up (default: golden_v1)")
-    ap.add_argument("--cases", help="comma-separated case ids (a trial run; not a baseline)")
-    ap.add_argument("--repeat", type=int, default=1, help="run the set N times to measure variance")
-    ap.add_argument("--judge", action="store_true", help="score summary faithfulness (model calls)")
-    ap.add_argument("--judge-model", default=None)
-    ap.add_argument("--rescore", type=Path, help="re-score a saved run instead of running the agent")
-    ap.add_argument("--retry-errors", type=Path, metavar="RUN_DIR",
-                    help="re-run only the cases that hit a connection/setup error, then re-score")
-    ap.add_argument("--quick", action="store_true",
-                    help=f"fixed {QUICK_PER_VERTICAL}-per-vertical subset (18 cases, ~20 min) for a fast check")
-    ap.add_argument("--start-app", action="store_true",
-                    help="start the app on --base-url's port for the run, and stop it afterwards")
-    ap.add_argument("--fail-on-regression", action="store_true",
-                    help="exit 1 if any score is worse than the committed baseline by more than the threshold")
+    ap = argparse.ArgumentParser(
+        description="Score the voice agent on the golden set: 'quick' (18 cases) or 'full' (90).")
+    ap.add_argument("mode", choices=MODES)
+    ap.add_argument("--base-url", default="http://localhost:8000",
+                    help="the app; started automatically if nothing answers there")
+    ap.add_argument("--rescore", type=Path, help=argparse.SUPPRESS)  # maintainers: re-score a saved run
     args = ap.parse_args()
 
-    # golden_v1 must be complete to count as a baseline; other sets only need
-    # unique ids (checked in load_cases).
-    cases = load_cases(args.evalset, strict=args.evalset == EVALSET)
+    all_cases = load_cases(EVALSET)
+    cases = quick_subset(all_cases) if args.mode == "quick" else all_cases
     priorities = load_priorities()
-    judge = None
-    if args.judge:
-        from evals.agent_eval.judge import DEFAULT_MODEL, Judge
-        judge = Judge(model=args.judge_model or DEFAULT_MODEL)
+    judge = Judge(model=JUDGE_MODEL)
 
-    if args.rescore or args.retry_errors:
-        out = args.rescore or args.retry_errors
-        paths = sorted(out.glob("run*.jsonl"))
-        raw_runs = [[json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-                    for p in paths]
-        if not raw_runs:
-            raise SystemExit(f"no run*.jsonl in {out}")
+    if args.rescore:
+        out = args.rescore
+        raw = [json.loads(l) for l in (out / "run1.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
         name = out.name
-        if args.retry_errors:
-            by_id = {c.id: c for c in cases}
-            for path, results in zip(paths, raw_runs, strict=True):
-                redo = [i for i, r in enumerate(results) if infra_error(r)]
-                if not redo:
-                    continue
-                print(f"{path.name}: re-running {len(redo)} case(s) against {args.base_url}")
-                with app_running(args.base_url, args.start_app):
-                    fresh = asyncio.run(_drive([by_id[results[i]["id"]] for i in redo], args.base_url, print))
-                for i, res in zip(redo, fresh, strict=True):
-                    results[i] = res
-                _write_jsonl(path, results)
     else:
-        if not args.name:
-            raise SystemExit("--name is required (or use --rescore)")
-        if args.cases:
-            wanted = {c.strip() for c in args.cases.split(",") if c.strip()}
-            unknown = wanted - {c.id for c in cases}
-            if unknown:
-                raise SystemExit(f"unknown case ids: {sorted(unknown)}")
-            cases = [c for c in cases if c.id in wanted]
-        elif args.quick:
-            cases = quick_subset(cases)
-        name, out = args.name, RUNS / args.name
-        if out.exists():
-            raise SystemExit(f"{out} exists -- pick a new --name, or --rescore it")
+        name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        out = RUNS / name
         out.mkdir(parents=True)
-        raw_runs = []
-        with app_running(args.base_url, args.start_app):
-            for k in range(1, args.repeat + 1):
-                print(f"repeat {k}/{args.repeat}: {len(cases)} cases against {args.base_url}")
-                results = asyncio.run(_drive(cases, args.base_url, print))
-                _write_jsonl(out / f"run{k}.jsonl", results)
-                raw_runs.append(results)
+        with app_running(args.base_url, start=not _healthy(args.base_url)):
+            print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
+            raw = asyncio.run(_drive(cases, args.base_url, print))
+            redo = [i for i, r in enumerate(raw) if infra_error(r)]
+            if redo:  # one automatic retry for connection/setup errors
+                print(f"retrying {len(redo)} case(s) that hit connection errors")
+                by_id = {c.id: c for c in cases}
+                fresh = asyncio.run(_drive([by_id[raw[i]["id"]] for i in redo], args.base_url, print))
+                for i, res in zip(redo, fresh, strict=True):
+                    raw[i] = res
+        _write_jsonl(out / "run1.jsonl", raw)
 
-    ran = {r["id"] for r in raw_runs[0]}
-    cases = [c for c in cases if c.id in ran]
-    per_case = []
-    for k, results in enumerate(raw_runs, 1):
-        if judge:
-            todo = sum(1 for r in results if r.get("final") and not infra_error(r)
-                       and r.get("judge", {}).get("v") != JUDGE_INPUT_VERSION)
-            print(f"scoring repeat {k}/{len(raw_runs)}: {todo} summaries to judge", flush=True)
-        per_case.append(_score_run(cases, results, judge))
-        if judge:  # save verdicts now, so stopping later does not lose this repeat's judging
-            _write_jsonl(out / f"run{k}.jsonl", results)
-    rollups = [aggregate(s, priorities) for s in per_case]
-    meta = {"evalset": args.evalset.name, "cases": len(cases), "judge": judge and judge.model,
-            "infra_errors": [[r["id"] for r in results if infra_error(r)] for results in raw_runs],
-            "full_set": args.evalset == EVALSET and len(cases) == 90, "scored_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    todo = sum(1 for r in raw if r.get("final") and not infra_error(r)
+               and (r.get("judge") or {}).get("v") != JUDGE_INPUT_VERSION)
+    print(f"scoring: {todo} summaries to judge", flush=True)
+    per_case = _score_run(cases, raw, judge)
+    _write_jsonl(out / "run1.jsonl", raw)
+    rollup = aggregate(per_case, priorities)
+
+    final = final_scores(args.mode, name, cases, raw, rollup, load_baseline())
+    (out / "final_scores.json").write_text(json.dumps(final, indent=1) + "\n", encoding="utf-8")
+    meta = {"evalset": EVALSET.name, "cases": len(cases), "judge": JUDGE_MODEL,
+            "infra_errors": [final["connection_errors"]]}
     (out / "scores.json").write_text(json.dumps(
-        {"meta": meta, "runs": rollups, "variance": variance(rollups), "cases": per_case},
-        indent=1, default=str) + "\n", encoding="utf-8")
-    card = scorecard(name, rollups, per_case, meta)
-
-    # Compare with the committed baseline when this run is one of the two
-    # fixed case sets (the full golden set or the --quick subset).
-    ids = {c.id for c in cases}
-    golden = args.evalset == EVALSET
-    mode = ("full" if golden and len(ids) == EXPECTED_CASES else
-            "quick" if golden and ids == {c.id for c in quick_subset(load_cases(EVALSET))} else None)
-    regressed: list[str] = []
-    ref = load_baseline()
-    if mode and ref:
-        lines, regressed = compare_to_baseline(rollups, ref, mode)
-        card = card.replace("## Must-capture fields", "\n".join(lines) + "\n\n## Must-capture fields", 1)
-    elif mode:
-        card += "\n(no committed baseline yet -- see evals/README.md)\n"
-
+        {"meta": meta, "runs": [rollup], "cases": [per_case]}, indent=1, default=str) + "\n", encoding="utf-8")
+    card = scorecard(name, [rollup], [per_case], meta)
+    if final["comparison"]:
+        card = card.replace("## Must-capture fields", "\n".join(final["comparison"]) + "\n\n## Must-capture fields", 1)
+    card = card.replace("# Eval scorecard", f"# Verdict: {final['verdict']}\n\n# Eval scorecard", 1)
+    if final["problems"]:
+        card = card.replace("# Eval scorecard", "Not judged: " + "; ".join(final["problems"]) + "\n\n# Eval scorecard", 1)
     (out / "scorecard.md").write_text(card, encoding="utf-8")
+
     print(card.split("## Failures")[0])
-    print(f"written: {out}")
-    if regressed:
-        print(f"REGRESSION in: {', '.join(regressed)}")
-        if args.fail_on_regression:
-            raise SystemExit(1)
+    print(f"VERDICT: {final['verdict']}" + (f" ({', '.join(final['regressed'])})" if final["regressed"] else "")
+          + (f" -- {'; '.join(final['problems'])}" if final["problems"] else ""))
+    print(f"written: {out / 'final_scores.json'}")
+    raise SystemExit({"PASS": 0, "REGRESSION": 1, "INVALID": 2}[final["verdict"]])
 
 
 APP_START_TIMEOUT_S = 180
 
 
+def _healthy(base_url: str) -> bool:
+    import httpx
+    try:
+        return httpx.get(f"{base_url.rstrip('/')}/healthz", timeout=5).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
 @contextlib.contextmanager
 def app_running(base_url: str, start: bool):
     """With ``start``, run the app (uvicorn, same Python) for the duration and
-    stop it afterwards; wait until /healthz answers before driving cases.
-    Without it, check the app the developer started is reachable."""
-    import httpx
-
-    def healthy() -> bool:
-        try:
-            return httpx.get(f"{base_url.rstrip('/')}/healthz", timeout=5).status_code == 200
-        except httpx.HTTPError:
-            return False
-
+    stop it afterwards, waiting until /healthz answers before driving cases.
+    Otherwise use the app that is already running."""
     proc = None
     if start:
-        if healthy():
-            raise SystemExit(f"Something is already serving {base_url}; stop it or drop --start-app.")
         port = urllib.parse.urlsplit(base_url).port or 8000
         root = Path(__file__).resolve().parents[2]
         RUNS.mkdir(parents=True, exist_ok=True)
@@ -342,14 +360,12 @@ def app_running(base_url: str, start: bool):
         proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)],
                                 cwd=root, stdout=log, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + APP_START_TIMEOUT_S
-        while not healthy():
+        while not _healthy(base_url):
             if proc.poll() is not None or time.monotonic() > deadline:
                 proc.kill()
                 raise SystemExit(f"The app did not start. See {RUNS / 'app.log'}")
             time.sleep(2)
         print(f"app started (pid {proc.pid}); log: {RUNS / 'app.log'}")
-    elif not healthy():
-        raise SystemExit(f"No app at {base_url}. Start it first, or add --start-app.")
     try:
         yield
     finally:

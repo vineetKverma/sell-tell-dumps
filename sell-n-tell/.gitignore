@@ -179,5 +179,3 @@ evals/data/
 # Eval runs (AIML-2702): transcripts and scorecards quote customer notes.
 evals/runs/
 
-# Golden eval data (customer notes): kept outside the repo, see evals/README.md
-evals/v1/

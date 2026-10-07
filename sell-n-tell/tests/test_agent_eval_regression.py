@@ -73,6 +73,47 @@ def test_more_invented_values_is_a_regression_fewer_is_not():
     assert regressed == []                               # improvements never fail
 
 
+def test_threshold_follows_the_measured_noise():
+    noisy = {"source_run": "b", "full": bl.summarise(
+        [_rollup(e, 0.49, 0.22, 0.0, 0.0) for e in (0.50, 0.60, 0.70)])}   # stdev 10 points
+    assert bl.threshold_for(noisy["full"]["event_type"]) == pytest.approx(30.0)
+    _, regressed = bl.compare([_rollup(0.45, 0.49, 0.22, 0.0, 0.0)], noisy, "full")
+    assert regressed == []                    # 15 points down, but within 3 x stdev
+    assert bl.threshold_for(BASE["full"]["event_type"]) == 5.0  # never below 5 points
+
+
+def test_skipped_metrics_are_shown_but_never_fail():
+    lines, regressed = bl.compare([_rollup(0.60, 0.49, 0.0, 0.0, 0.0)], BASE, "full", skip=["faithfulness"])
+    assert regressed == [] and any("not judged" in l for l in lines)
+
+
+def _final(raw, ref, n=10):
+    from evals.agent_eval.run import final_scores
+    cases = [_case(f"MH-{i:03d}", "MH") for i in range(n)]
+    return final_scores("full", "t", cases, raw, _rollup(0.60, 0.49, 0.22, 0.0, 0.0), ref)
+
+
+@needs_data
+def test_verdicts_pass_regression_and_invalid():
+    import hashlib
+    ok = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(10)]
+    ref = dict(BASE, dataset_sha256=hashlib.sha256(EVALSET.read_bytes()).hexdigest())
+    assert _final(ok, ref)["verdict"] == "PASS"
+
+    worse = dict(ref, full=bl.summarise([_rollup(0.90, 0.49, 0.22, 0.0, 0.0)]))
+    f = _final(ok, worse)
+    assert f["verdict"] == "REGRESSION" and f["regressed"] == ["event_type"]
+
+    broken = [dict(r, final=None, error="ConnectionClosedError") for r in ok[:2]] + ok[2:]
+    assert _final(broken, ref)["verdict"] == "INVALID"          # 2 of 10 > 10% errors
+
+    assert _final(ok, dict(ref, dataset_sha256="other"))["verdict"] == "INVALID"
+    assert _final(ok, None)["verdict"] == "INVALID"
+    f = _final(ok, ref)
+    assert {"app_commit", "agent_model", "judge_model", "dataset_sha256"} <= set(f)
+    assert "MH-0" not in json.dumps({k: v for k, v in f.items() if k != "connection_errors"})
+
+
 def test_compare_skips_a_mode_the_baseline_does_not_have():
     lines, regressed = bl.compare([_rollup(0.1, 0.1, 0.1, 0.0, 0.0)], BASE, "quick")
     assert regressed == [] and len(lines) == 4  # header only
