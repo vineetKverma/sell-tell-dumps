@@ -1,0 +1,61 @@
+{
+  "criteria": {
+    "event_type_accuracy": 0.0,
+    "topic_status_accuracy": 0.0,
+    "disposition_accuracy": 0.0,
+    "field_recall_p1": 0.0,
+    "field_not_invented": 0.0,
+    "rubric_based_tool_use_quality_v1": {
+      "threshold": 0.0,
+      "judge_model_options": {
+        "judge_model": "gemini-2.5-flash",
+        "num_samples": 1
+      },
+      "rubrics": [
+        {
+          "rubric_id": "summaries_grounded",
+          "rubric_content": {
+            "text_property": "Every executive_summary in the stage_visit_notes call (the call summary and each topic summary) states only facts, reasons, outcomes, numbers and names that the user actually said. Leaving something out is fine; adding anything the user did not say is not."
+          }
+        },
+        {
+          "rubric_id": "no_invented_skip_reason",
+          "rubric_content": {
+            "text_property": "No topic summary gives a reason for a topic not being discussed (such as running out of time) unless the user stated that reason."
+          }
+        },
+        {
+          "rubric_id": "only_discussed_topics_marked_discussed",
+          "rubric_content": {
+            "text_property": "A planned topic is marked discussed only if the user talked about that campaign's offer or products."
+          }
+        }
+      ]
+    }
+  },
+  "custom_metrics": {
+    "event_type_accuracy": {
+      "code_config": {"name": "evals.adk_eval.metrics.event_type_accuracy"},
+      "description": "Event type matches the answer key (approved rule: a person mentioned is a Meeting, otherwise On-site visit)."
+    },
+    "topic_status_accuracy": {
+      "code_config": {"name": "evals.adk_eval.metrics.topic_status_accuracy"},
+      "description": "Share of planned topics correctly marked discussed or not."
+    },
+    "disposition_accuracy": {
+      "code_config": {"name": "evals.adk_eval.metrics.disposition_accuracy"},
+      "description": "Share of discussed topics given the right disposition code."
+    },
+    "field_recall_p1": {
+      "code_config": {"name": "evals.adk_eval.metrics.field_recall_p1"},
+      "description": "Share of stated P1 must-capture fields the agent captured."
+    },
+    "field_not_invented": {
+      "code_config": {"name": "evals.adk_eval.metrics.field_not_invented"},
+      "description": "Share of not-stated must-capture fields the agent left empty."
+    }
+  },
+  "live_model_config": {
+    "timeout_seconds": 120
+  }
+}
