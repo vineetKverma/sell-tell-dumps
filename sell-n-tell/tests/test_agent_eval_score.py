@@ -13,7 +13,11 @@ _ROOT = str(Path(__file__).resolve().parents[1])
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from evals.agent_eval.cases import Case, load_cases, load_priorities  # noqa: E402
+from evals.agent_eval.cases import EVALSET, Case, load_cases, load_priorities  # noqa: E402
+
+# Tests that read the golden set skip when it is not present (it holds customer
+# data and may live outside the repo -- see evals/README.md).
+needs_data = pytest.mark.skipif(not EVALSET.exists(), reason="golden eval data not present")
 from evals.agent_eval.drive import missing_topics  # noqa: E402
 from evals.agent_eval.run import scorecard  # noqa: E402
 from evals.agent_eval.score import (  # noqa: E402
@@ -50,6 +54,7 @@ def perfect(case: Case, with_fields: bool = True) -> dict:
 
 # --- the real golden set -----------------------------------------------------
 
+@needs_data
 def test_golden_set_loads_all_90_cases():
     cases = load_cases()
     assert len(cases) == 90
@@ -58,6 +63,7 @@ def test_golden_set_loads_all_90_cases():
     assert all(len(c.fields) == 20 for c in cases)
 
 
+@needs_data
 def test_priorities_cover_all_65_fields():
     prio = load_priorities()
     assert len(prio) == 65
@@ -66,6 +72,7 @@ def test_priorities_cover_all_65_fields():
     assert used <= set(prio)
 
 
+@needs_data
 def test_a_perfect_agent_scores_100_on_the_golden_set():
     cases = load_cases()
     roll = aggregate([score_case(c, perfect(c)) for c in cases], load_priorities())["all"]
@@ -76,6 +83,7 @@ def test_a_perfect_agent_scores_100_on_the_golden_set():
     assert f["recall"] == 1.0 and f["fabrication"] == 0.0 and f["value_accuracy"] == 1.0
 
 
+@needs_data
 def test_partial_set_is_refused_as_a_baseline(tmp_path):
     import json
 

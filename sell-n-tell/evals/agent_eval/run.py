@@ -24,12 +24,25 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
+import subprocess
+import sys
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals.agent_eval.cases import EVALSET, load_cases, load_priorities
+from evals.agent_eval.baseline import compare as compare_to_baseline
+from evals.agent_eval.baseline import load as load_baseline
+from evals.agent_eval.cases import (
+    EVALSET,
+    EXPECTED_CASES,
+    QUICK_PER_VERTICAL,
+    load_cases,
+    load_priorities,
+    quick_subset,
+)
 from evals.agent_eval.score import aggregate, score_case, variance
 
 RUNS = Path(__file__).resolve().parents[1] / "runs"
@@ -199,6 +212,12 @@ def main() -> None:
     ap.add_argument("--rescore", type=Path, help="re-score a saved run instead of running the agent")
     ap.add_argument("--retry-errors", type=Path, metavar="RUN_DIR",
                     help="re-run only the cases that hit a connection/setup error, then re-score")
+    ap.add_argument("--quick", action="store_true",
+                    help=f"fixed {QUICK_PER_VERTICAL}-per-vertical subset (18 cases, ~20 min) for a fast check")
+    ap.add_argument("--start-app", action="store_true",
+                    help="start the app on --base-url's port for the run, and stop it afterwards")
+    ap.add_argument("--fail-on-regression", action="store_true",
+                    help="exit 1 if any score is worse than the committed baseline by more than the threshold")
     args = ap.parse_args()
 
     # golden_v1 must be complete to count as a baseline; other sets only need
@@ -225,7 +244,8 @@ def main() -> None:
                 if not redo:
                     continue
                 print(f"{path.name}: re-running {len(redo)} case(s) against {args.base_url}")
-                fresh = asyncio.run(_drive([by_id[results[i]["id"]] for i in redo], args.base_url, print))
+                with app_running(args.base_url, args.start_app):
+                    fresh = asyncio.run(_drive([by_id[results[i]["id"]] for i in redo], args.base_url, print))
                 for i, res in zip(redo, fresh, strict=True):
                     results[i] = res
                 _write_jsonl(path, results)
@@ -238,16 +258,19 @@ def main() -> None:
             if unknown:
                 raise SystemExit(f"unknown case ids: {sorted(unknown)}")
             cases = [c for c in cases if c.id in wanted]
+        elif args.quick:
+            cases = quick_subset(cases)
         name, out = args.name, RUNS / args.name
         if out.exists():
             raise SystemExit(f"{out} exists -- pick a new --name, or --rescore it")
         out.mkdir(parents=True)
         raw_runs = []
-        for k in range(1, args.repeat + 1):
-            print(f"repeat {k}/{args.repeat}: {len(cases)} cases against {args.base_url}")
-            results = asyncio.run(_drive(cases, args.base_url, print))
-            _write_jsonl(out / f"run{k}.jsonl", results)
-            raw_runs.append(results)
+        with app_running(args.base_url, args.start_app):
+            for k in range(1, args.repeat + 1):
+                print(f"repeat {k}/{args.repeat}: {len(cases)} cases against {args.base_url}")
+                results = asyncio.run(_drive(cases, args.base_url, print))
+                _write_jsonl(out / f"run{k}.jsonl", results)
+                raw_runs.append(results)
 
     ran = {r["id"] for r in raw_runs[0]}
     cases = [c for c in cases if c.id in ran]
@@ -268,9 +291,74 @@ def main() -> None:
         {"meta": meta, "runs": rollups, "variance": variance(rollups), "cases": per_case},
         indent=1, default=str) + "\n", encoding="utf-8")
     card = scorecard(name, rollups, per_case, meta)
+
+    # Compare with the committed baseline when this run is one of the two
+    # fixed case sets (the full golden set or the --quick subset).
+    ids = {c.id for c in cases}
+    golden = args.evalset == EVALSET
+    mode = ("full" if golden and len(ids) == EXPECTED_CASES else
+            "quick" if golden and ids == {c.id for c in quick_subset(load_cases(EVALSET))} else None)
+    regressed: list[str] = []
+    ref = load_baseline()
+    if mode and ref:
+        lines, regressed = compare_to_baseline(rollups, ref, mode)
+        card = card.replace("## Must-capture fields", "\n".join(lines) + "\n\n## Must-capture fields", 1)
+    elif mode:
+        card += "\n(no committed baseline yet -- see evals/README.md)\n"
+
     (out / "scorecard.md").write_text(card, encoding="utf-8")
     print(card.split("## Failures")[0])
     print(f"written: {out}")
+    if regressed:
+        print(f"REGRESSION in: {', '.join(regressed)}")
+        if args.fail_on_regression:
+            raise SystemExit(1)
+
+
+APP_START_TIMEOUT_S = 180
+
+
+@contextlib.contextmanager
+def app_running(base_url: str, start: bool):
+    """With ``start``, run the app (uvicorn, same Python) for the duration and
+    stop it afterwards; wait until /healthz answers before driving cases.
+    Without it, check the app the developer started is reachable."""
+    import httpx
+
+    def healthy() -> bool:
+        try:
+            return httpx.get(f"{base_url.rstrip('/')}/healthz", timeout=5).status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    proc = None
+    if start:
+        if healthy():
+            raise SystemExit(f"Something is already serving {base_url}; stop it or drop --start-app.")
+        port = urllib.parse.urlsplit(base_url).port or 8000
+        root = Path(__file__).resolve().parents[2]
+        RUNS.mkdir(parents=True, exist_ok=True)
+        log = (RUNS / "app.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)],
+                                cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + APP_START_TIMEOUT_S
+        while not healthy():
+            if proc.poll() is not None or time.monotonic() > deadline:
+                proc.kill()
+                raise SystemExit(f"The app did not start. See {RUNS / 'app.log'}")
+            time.sleep(2)
+        print(f"app started (pid {proc.pid}); log: {RUNS / 'app.log'}")
+    elif not healthy():
+        raise SystemExit(f"No app at {base_url}. Start it first, or add --start-app.")
+    try:
+        yield
+    finally:
+        if proc is not None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

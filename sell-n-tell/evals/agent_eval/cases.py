@@ -15,13 +15,17 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GOLDEN_DIR = Path(__file__).resolve().parents[1] / "v1"
+# The golden data holds customer notes, so it may live outside the repo: set
+# SELLNTELL_EVAL_DATA to its folder. Default: evals/v1 next to this package.
+GOLDEN_DIR = Path(os.environ.get("SELLNTELL_EVAL_DATA") or Path(__file__).resolve().parents[1] / "v1")
 EVALSET = GOLDEN_DIR / "golden_v1.evalset.json"
 EXPECTED_CASES = 90
+QUICK_PER_VERTICAL = 3   # --quick: the first 3 cases of each vertical, 18 in all
 
 # U-03 restates the topic outcomes, which are scored as topics. Scoring it as a
 # field too would count every topic answer twice.
@@ -78,6 +82,12 @@ def load_cases(path: Path = EVALSET, strict: bool = True) -> list[Case]:
     """All cases in the eval set. ``strict`` refuses a set that is not the
     full golden_v1 (wrong count, duplicate ids, a case with no expected call)
     so a partial or edited file can never produce a baseline."""
+    if not path.exists():
+        raise SystemExit(
+            f"Golden eval data not found: {path}\n"
+            "Get the golden set folder (see evals/README.md) and either place it at "
+            "evals/v1/ or set SELLNTELL_EVAL_DATA to its path."
+        )
     data = json.loads(path.read_text(encoding="utf-8"))
     cases = [_case(c) for c in data["eval_cases"]]
     ids = [c.id for c in cases]
@@ -90,3 +100,13 @@ def load_cases(path: Path = EVALSET, strict: bool = True) -> list[Case]:
                 f"{len(ids)} ({len(set(ids))} unique). Not the golden_v1 set."
             )
     return cases
+
+
+def quick_subset(cases: list[Case], per_vertical: int = QUICK_PER_VERTICAL) -> list[Case]:
+    """A fixed, repeatable subset for fast regression checks: the first
+    ``per_vertical`` case ids of each vertical. Always the same cases, so a
+    quick run compares like with like against the quick baseline."""
+    picked: list[Case] = []
+    for vertical in sorted({c.vertical for c in cases}):
+        picked += sorted((c for c in cases if c.vertical == vertical), key=lambda c: c.id)[:per_vertical]
+    return picked
