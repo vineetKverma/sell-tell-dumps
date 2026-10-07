@@ -65,8 +65,15 @@ def _preflight(config) -> None:
         except (ImportError, AttributeError) as exc:
             missing.append(f"{name}: {c.code_config.name} ({exc})")
     if missing:
-        raise SystemExit("Custom metrics not found -- copy the whole evals/adk_eval folder:\n  "
-                         + "\n  ".join(missing))
+        here = Path(__file__).resolve().parent
+        pkg = sys.modules.get("evals.adk_eval")
+        raise SystemExit(
+            "Custom metrics not found:\n  " + "\n  ".join(missing)
+            + f"\n\nrun.py is in:          {here}"
+            + f"\nfiles next to it:      {sorted(p.name for p in here.iterdir() if p.is_file())}"
+            + f"\nmetrics.py next to it: {(here / 'metrics.py').exists()}"
+            + f"\nevals.adk_eval loaded from: {list(getattr(pkg, '__path__', []))}"
+            + "\nCopy metrics.py into the folder shown above (next to run.py) and run again.")
 
 
 def build_eval_set(mode: str):
