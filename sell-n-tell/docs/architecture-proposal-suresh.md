@@ -1,6 +1,6 @@
 # SellNTell: architecture proposal
 
-**For:** Suresh (architect) · **Status:** draft for review · Includes review comments from Dharun
+**For:** Suresh (architect) · **Status:** draft for review
 
 ## 1. Why change
 
@@ -141,7 +141,7 @@ contract document has to state each one:
 | 11 | Which Gemini model for `extract()`? The golden set was labelled with gemini-3.8-flash and gemini-3.1-pro-preview (global only) | A different model or version, or the scores flatter us |
 | 12 | Which region, given that the 3.x text models are global only, and what margin counts as "better than today" for `extract()`? | Live in `us-central1`; `extract()` on global if a 3.x model wins, else a regional model. Agree the margin before building it |
 | 13 | Which ADK version do we standardise on? | 2.10, pinned in `uv.lock`. A trial on 2.10 ran ADK's live evaluation on our agent with no app changes; 2.1.0 has none |
-| 14 | When do we get our own Agent Engine, and can it act as a lock across instances or host the WebSocket instead of Cloud Run? | Own engine before records are published (with Dharun). Stay on Cloud Run, one instance |
+| 14 | When do we get our own Agent Engine, and can it act as a lock across instances or host the WebSocket instead of Cloud Run? | Own engine before records are published. Stay on Cloud Run, one instance |
 | 15 | Can Model Armor screen Gemini Live audio directly? | Not sure. We assume no and screen the transcript. Needs confirming |
 | 16 | Should our code, not Live, decide when dictation has ended? | Try it once extraction works. It removes the silence watchdog if it works |
 | 17 | Do the managed log sinks fully replace the BigQuery analytics plugin once deployed? | Expected yes; confirm on Cloud Run before removing the plugin's code |
