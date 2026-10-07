@@ -97,18 +97,28 @@ def build_eval_set(mode: str):
     return EvalSet.model_validate(data)
 
 
-def summarise(case_scores: dict[str, dict[str, float | None]], failed: list[str]) -> dict:
-    """Mean per metric over the cases it applied to (None = not evaluated)."""
+def summarise(case_scores: dict[str, dict[str, float | None]], failed: list[str],
+              rates: set[str] | None = None) -> dict:
+    """Mean per metric over the cases it applied to (None = not evaluated).
+
+    ``rates`` are the metrics scored 0..1 (our criteria); they are shown as
+    percentages. Anything else -- ADK adds efficiency metrics such as
+    inference_call_count_v1 on its own -- is a count, shown as a plain average."""
     by_metric: dict[str, list[float]] = defaultdict(list)
     for scores in case_scores.values():
         for metric, value in scores.items():
             if value is not None:
                 by_metric[metric].append(value)
+    metrics = {}
+    for m, v in sorted(by_metric.items()):
+        if rates is None or m in rates:
+            metrics[m] = {"mean": round(statistics.fmean(v) * 100, 1), "unit": "%", "cases": len(v)}
+        else:
+            metrics[m] = {"mean": round(statistics.fmean(v), 2), "unit": "per case", "cases": len(v)}
     return {
         "cases_scored": len(case_scores),
         "connection_failures": failed,
-        "metrics": {m: {"mean": round(statistics.fmean(v) * 100, 1), "cases": len(v)}
-                    for m, v in sorted(by_metric.items())},
+        "metrics": metrics,
         "per_case": case_scores,
     }
 
@@ -193,12 +203,13 @@ def main() -> None:
           f"agent model {os.getenv('VOICE_NOTES_AGENT_MODEL', 'default')}")
 
     case_scores, failed = asyncio.run(_run(eval_set, config))
-    summary = summarise(case_scores, failed)
+    summary = summarise(case_scores, failed, rates=set(config.criteria))
     summary.update(mode=args.mode, framework="adk eval (LocalEvalService)", run=out.name)
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
-    print(f"\n{'metric':<36} {'mean':>7}  cases")
+    print(f"\n{'metric':<36} {'mean':>10}  cases")
     for m, v in summary["metrics"].items():
-        print(f"{m:<36} {v['mean']:>6.1f}%  {v['cases']}")
+        shown = f"{v['mean']:.1f}%" if v["unit"] == "%" else f"{v['mean']:.2f}/case"
+        print(f"{m:<36} {shown:>10}  {v['cases']}")
     if failed:
         print(f"\nnot scored (live session failed twice): {', '.join(failed)}")
     print(f"\nwritten: {out / 'summary.json'}")
