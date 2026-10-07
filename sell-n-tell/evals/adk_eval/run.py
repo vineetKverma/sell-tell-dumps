@@ -46,6 +46,15 @@ LIVE_PARALLELISM = 1     # live sessions at once
 JUDGE_PARALLELISM = 4    # metric evaluations at once (judge calls)
 
 
+def _quiet_library_warnings() -> None:
+    """ADK labels its eval classes [EXPERIMENTAL] and imports a deprecated
+    vertexai module internally; both print on every run and say nothing about
+    the eval. Hide just those, so the per-case progress is readable."""
+    import warnings
+    warnings.filterwarnings("ignore", message=r"\[EXPERIMENTAL\]", category=UserWarning)
+    warnings.filterwarnings("ignore", message=r".*vertexai\.preview\.rag.*", category=UserWarning)
+
+
 def _prepare_app_env() -> None:
     """Same settings the app uses, and the app folder on the import path so
     the agent module imports the way main.py imports it."""
@@ -169,6 +178,7 @@ def main() -> None:
     ap.add_argument("mode", choices=("quick", "full"))
     args = ap.parse_args()
 
+    _quiet_library_warnings()
     _prepare_app_env()
     from google.adk.evaluation.eval_config import EvalConfig
 
