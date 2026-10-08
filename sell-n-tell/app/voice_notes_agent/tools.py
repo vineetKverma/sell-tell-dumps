@@ -124,9 +124,11 @@ def _normalize_topics(
             }
         )
 
-    if not normalized:
-        problems.append("no discussion topics were provided")
-
+    # An empty list is valid: the rep may have discussed none of the planned
+    # campaigns, and the prompt tells the agent to leave those out. The
+    # coverage reminder then asks about each one, and commit still requires
+    # every planned topic to be addressed. Rejecting it pushed the agent to
+    # invent a discussed topic just to get the record accepted.
     return normalized, problems
 
 
@@ -159,13 +161,14 @@ async def stage_visit_notes(
             ENTIRE call across all topics.
         raw_transcript_backup: The full verbatim transcript of the dictation,
             preserved for auditing.
-        topics: One or more discussion topics, anchored to the rep's planned
-            topics. Each topic has:
+        topics: The planned topics the rep actually discussed (empty if they
+            discussed none; the tool then reminds you to ask about each).
+            Each topic has:
             - topic: the planned-topic label, copied exactly (or a new label
               only if the rep discussed something off-plan).
-            - disposition_code: outcome code 1-10 mapped from the disposition
-              registry for THAT topic (e.g. 8 = Pricing concerns). Required
-              when the topic was discussed.
+            - disposition_code: one of the codes in the disposition registry,
+              including 99, for THAT topic (e.g. 8 = Pricing concerns).
+              Required when the topic was discussed.
             - executive_summary: a condensed 1-2 sentence summary of THAT topic
               (or the rep's reason if it was planned but not discussed).
               If no business-outcome code describes what actually happened,

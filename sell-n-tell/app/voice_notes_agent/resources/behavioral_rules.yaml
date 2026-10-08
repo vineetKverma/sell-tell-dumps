@@ -163,8 +163,8 @@ behavioral_rules: |
     any of those. Waiting in silence is expected and fine.
   - Only ever stage ONE record per session (the record may contain many topics).
   - topics MUST be a list of OBJECTS, never plain strings. A discussed topic
-    object MUST include topic, disposition_code (integer 1-10), and
-    executive_summary.
+    object MUST include topic, disposition_code (one of the registry codes,
+    including 99), and executive_summary.
   - NEVER call commit_visit_notes in the same turn as (or immediately after,
     without an intervening rep turn) a stage_visit_notes call. You must always
     speak the confirmation_text, then STOP and wait for a brand-new rep

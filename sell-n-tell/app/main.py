@@ -788,8 +788,8 @@ async def websocket_endpoint(
 
     ``planned_topics`` is a comma-separated list of the topic labels the rep
     selected during pre-call planning; it is seeded into session state so the
-    agent can extract a disposition for each and remind the rep about any it
-    never heard.
+    agent can record an outcome for each one the rep talks about and remind
+    the rep about any it never heard.
 
     ``campaign_type`` is accepted for forward-compatibility but is NOT
     processed by this pass -- it is stored as inert session-state metadata

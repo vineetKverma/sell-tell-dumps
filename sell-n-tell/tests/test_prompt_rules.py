@@ -54,6 +54,32 @@ def test_event_type_rule_is_stated():
     assert "On-site visit: everything else" in _RULES
 
 
+def test_prompt_does_not_limit_codes_to_1_to_10():
+    # Code 99 is the answer when nothing fits; "1-10" told the agent otherwise.
+    tools_src = (_PKG / "tools.py").read_text(encoding="utf-8")
+    for text in (_RULES, tools_src):
+        assert "1-10" not in text
+    assert "including 99" in _RULES
+    assert "including 99" in tools_src
+
+
+def test_no_topics_is_a_valid_first_stage():
+    # When the rep discussed none of the planned campaigns, the agent sends no
+    # topics; that must be accepted so the coverage reminder can ask the rep,
+    # instead of pushing the agent to invent a discussed topic.
+    import importlib
+    import sys
+    import types
+
+    if "_vna" not in sys.modules:
+        pkg = types.ModuleType("_vna")
+        pkg.__path__ = [str(_PKG)]
+        sys.modules["_vna"] = pkg
+    tools = importlib.import_module("_vna.tools")
+    normalized, problems = tools._normalize_topics([], tools._VALID_DISPOSITION_CODES)
+    assert normalized == [] and problems == []
+
+
 def test_code_1_cues_do_not_contradict_99_guidance():
     code_1 = next(r for r in _DISPOSITIONS["dispositions"] if r["code"] == 1)
     cues = {k.lower() for k in code_1["mapping_keywords"]}
