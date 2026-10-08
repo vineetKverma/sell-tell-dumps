@@ -7,7 +7,10 @@ requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 
 dependencies = [
-    "google-adk>=1.32.0",
+    # Pinned exactly: uv.lock, the Docker image and every branch run this one
+    # version. [gcp] brings google-cloud-aiplatform, which the Agent Engine
+    # session service needs at startup.
+    "google-adk[gcp]==2.10.0",
     "fastapi>=0.115.0",
     "python-dotenv>=1.0.0",
     "uvicorn[standard]>=0.32.0",
@@ -26,6 +29,8 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    # ADK's evaluation service (evals/adk_eval), same version as the app.
+    "google-adk[eval]==2.10.0",
 ]
 # Golden dataset curation (AIML-2898) only -- reading the .xlsb source export.
 # Opt-in: `uv run --group dataset ...`. Kept out of `dev` so the unit tests

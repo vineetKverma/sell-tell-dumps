@@ -80,11 +80,11 @@ agreement with a human reviewer has not been measured yet.
 `evals/adk_eval/` runs the golden set through ADK's own evaluation service
 instead of the app's WebSocket. Our scores are registered as ADK custom
 metrics, and ADK's built-in judge (`rubric_based_tool_use_quality_v1`) checks
-the summaries against rubrics. It needs an ADK version with live evaluation,
-newer than the one the project pins, so for now:
+the summaries against rubrics. It needs ADK's live evaluation, which the
+pinned version (2.10.0, with `[eval]` in the dev group) has:
 
 ```powershell
-uv run --with "google-adk[eval]==2.10.0" --with google-cloud-aiplatform python -m evals.adk_eval.run quick
+uv run python -m evals.adk_eval.run quick
 ```
 
 It loads the agent in-process (no app needed) and writes

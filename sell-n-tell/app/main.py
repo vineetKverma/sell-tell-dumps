@@ -59,6 +59,21 @@ _COMPACTION_CUSTOM_METADATA_KEY = "adk_compaction"
 _USAGE_METADATA_CUSTOM_METADATA_KEY = "adk_usage_metadata"
 
 
+def _drop_unsupported_part_fields(content_dict: dict[str, Any]) -> None:
+    """Remove Part fields the Agent Engine Sessions API rejects.
+
+    ADK 2.10's own VertexAiSessionService.append_event strips `part_metadata`
+    (a Gemini Developer API-only field) before appending, because the API
+    fails the whole append with 400 "Unknown name part_metadata". Our
+    non-blocking copy of that write path has to do the same, or those events
+    are silently missing from the stored session.
+    """
+    for part in content_dict.get("parts") or []:
+        if isinstance(part, dict):
+            part.pop("part_metadata", None)
+            part.pop("partMetadata", None)
+
+
 def _set_internal_custom_metadata(
     metadata_dict: dict[str, Any], key: str, value: Any
 ) -> None:
@@ -297,6 +312,7 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
                 config["content"] = event.content.model_dump(
                     exclude_none=True, mode="json"
                 )
+                _drop_unsupported_part_fields(config["content"])
             if event.actions:
                 config["actions"] = {
                     "skip_summarization": event.actions.skip_summarization,
@@ -356,6 +372,8 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
                 mode="json",
                 by_alias=True,
             )
+            if isinstance(config["raw_event"].get("content"), dict):
+                _drop_unsupported_part_fields(config["raw_event"]["content"])
 
             inv_id = event.invocation_id if event.invocation_id else f"inv-{getattr(event, 'id', 'default')}"
             async def _do_append(cfg: dict[str, Any]):
