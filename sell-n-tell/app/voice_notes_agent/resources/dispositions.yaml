@@ -12,14 +12,17 @@
 # references DispositionCode.SOME_NAME continues to work unchanged.
 
 dispositions:
+  # Code 1 used to list "interested" and "send a quote". Interest alone, or a
+  # request for a quote, has no code of its own and belongs under 99; those
+  # cues pulled the agent to 1 instead (17 of the 47 disposition misses in
+  # the AIML-2702 baseline). Code 1 is now cued only by a clear buying intent
+  # or an explicit opportunity.
   - name: CREATE_OPPORTUNITY
     code: 1
     label: "Create Opportunity"
     mapping_keywords:
-      - "interested"
       - "wants to buy"
       - "ready to purchase"
-      - "send a quote"
       - "create an opportunity"
       - "new opportunity"
 

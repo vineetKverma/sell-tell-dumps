@@ -96,10 +96,12 @@ def _format_planned_topics_block(planned_topics: list[str]) -> str:
     lines = "\n".join(f"  - {t}" for t in planned_topics)
     return (
         "# Planned topics\n"
-        "The rep planned to discuss the following topics on this call. Extract "
-        "a disposition for EACH one, use these EXACT labels for the topic "
-        "field, and pass this full list as planned_topics on every "
-        f"stage_visit_notes call:\n{lines}\n"
+        "The rep planned to discuss the following campaigns on this call. Add "
+        "a topics entry ONLY for a campaign whose offer or products the rep "
+        "actually talked about, using its EXACT label below as the topic "
+        "field; leave the others out so the tool can remind the rep. Pass "
+        "this full list as planned_topics on every stage_visit_notes call:"
+        f"\n{lines}\n"
     )
 
 
