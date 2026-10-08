@@ -11,11 +11,11 @@ WORKDIR /app
 
 # Install dependencies from the lockfile, so the image runs exactly the
 # versions that were tested (uv.lock), not whatever pyproject's ranges resolve
-# to on the day of the build. --frozen fails the build if uv.lock is out of
-# date with pyproject.toml instead of silently re-resolving.
+# to on the day of the build. --locked fails the build if uv.lock is out of
+# date with pyproject.toml (--frozen would install the stale lock silently).
 RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy the app directory contents into the container

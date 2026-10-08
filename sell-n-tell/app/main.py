@@ -54,9 +54,14 @@ import datetime
 import pydantic
 from google.genai import types
 
-# Fallback metadata keys and helper for custom metadata (avoiding private ADK imports)
-_COMPACTION_CUSTOM_METADATA_KEY = "adk_compaction"
-_USAGE_METADATA_CUSTOM_METADATA_KEY = "adk_usage_metadata"
+# Custom-metadata keys for compaction and usage data. They must be the exact
+# names ADK's VertexAiSessionService reads back in get_session ("_compaction",
+# "_usage_metadata" in both 2.1.0 and 2.10.0); copied rather than imported
+# because ADK keeps them private. With different names ("adk_compaction" here
+# before), the data was stored but never restored when a session was reloaded.
+# tests/test_session_metadata_keys.py checks they still match ADK.
+_COMPACTION_CUSTOM_METADATA_KEY = "_compaction"
+_USAGE_METADATA_CUSTOM_METADATA_KEY = "_usage_metadata"
 
 
 def _drop_unsupported_part_fields(content_dict: dict[str, Any]) -> None:
