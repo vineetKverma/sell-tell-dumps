@@ -147,6 +147,33 @@ async def _create_session(base_url: str, case: Case) -> str:
     raise RuntimeError(f"session not created after {SESSION_ATTEMPTS} tries: {last}")
 
 
+async def probe_sessions(base_url: str) -> None:
+    """One session request before the run. If the endpoint is missing or its
+    reply has changed shape, every case would fail its 3 tries; stop instead,
+    with a message that says why. A transient "error" status is retried as in
+    a normal case."""
+    try:
+        async with httpx.AsyncClient(base_url=base_url, timeout=150) as http:
+            r = await http.post("/api/sessions", json={"user_id": USER_ID, "planned_topics": []})
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"POST /api/sessions failed: {type(exc).__name__}: {exc}") from exc
+    if r.status_code in (404, 405, 422):
+        raise RuntimeError(f"POST /api/sessions returned {r.status_code}; the app does not "
+                           "offer the session endpoint this eval needs")
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or "status" not in body:
+        raise RuntimeError(f"POST /api/sessions replied in an unexpected shape: {r.text[:200]}")
+    if body["status"] == "ok" and body.get("session_id"):
+        return
+    if body["status"] == "ok":
+        raise RuntimeError("POST /api/sessions replied ok without a session_id")
+    await _create_session(base_url, Case(id="probe", vertical="", note="", planned_topics=[],
+                                         event_type=None, topics=[], fields={}))
+
+
 async def run_case(case: Case, base_url: str) -> dict:
     """One case end to end. Never raises: a failure is recorded on the result
     so one bad case cannot stop a 90-case run."""
@@ -156,8 +183,10 @@ async def run_case(case: Case, base_url: str) -> dict:
         session_id = await _create_session(base_url, case)
 
         ws_base = base_url.replace("http", "ws", 1).rstrip("/")
-        query = urllib.parse.urlencode({"planned_topics": ",".join(case.planned_topics),
-                                        "campaign_type": CAMPAIGN_TYPE})
+        # planned_topics are not repeated here: the POST above seeded them into
+        # session state, which is what the agent reads (the app only logs the
+        # query-string copy).
+        query = urllib.parse.urlencode({"campaign_type": CAMPAIGN_TYPE})
         url = f"{ws_base}/ws/{USER_ID}/{session_id}?{query}"
         # No client keepalive: while the app waits on a slow Google token
         # refresh it cannot answer pings, and the default 20 s ping timeout

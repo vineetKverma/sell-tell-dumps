@@ -13,7 +13,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from evals.agent_eval import baseline as bl  # noqa: E402
-from evals.agent_eval.cases import EVALSET, Case, quick_subset  # noqa: E402
+from evals.agent_eval.cases import EVALSET, Case, dataset_sha256, quick_subset  # noqa: E402
 
 needs_data = pytest.mark.skipif(not EVALSET.exists(), reason="golden eval data not present")
 
@@ -95,9 +95,8 @@ def _final(raw, ref, n=10):
 
 @needs_data
 def test_verdicts_pass_regression_and_invalid():
-    import hashlib
     ok = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(10)]
-    ref = dict(BASE, dataset_sha256=hashlib.sha256(EVALSET.read_bytes()).hexdigest())
+    ref = dict(BASE, dataset_sha256=dataset_sha256(EVALSET))
     assert _final(ok, ref)["verdict"] == "PASS"
 
     worse = dict(ref, full=bl.summarise([_rollup(0.90, 0.49, 0.22, 0.0, 0.0)]))
@@ -112,6 +111,49 @@ def test_verdicts_pass_regression_and_invalid():
     f = _final(ok, ref)
     assert {"app_commit", "agent_model", "judge_model", "dataset_sha256"} <= set(f)
     assert "MH-0" not in json.dumps({k: v for k, v in f.items() if k != "connection_errors"})
+
+    partial = _final(ok[:7], ref)                               # stopped part-way
+    assert partial["verdict"] == "INVALID" and partial["scored"] == 7
+
+
+def test_dataset_hash_ignores_line_endings(tmp_path):
+    lf, crlf = tmp_path / "lf.json", tmp_path / "crlf.json"
+    lf.write_bytes(b'{\n "a": 1\n}\n')
+    crlf.write_bytes(b'{\r\n "a": 1\r\n}\r\n')
+    assert dataset_sha256(lf) == dataset_sha256(crlf)
+    crlf.write_bytes(b'{\r\n "a": 2\r\n}\r\n')
+    assert dataset_sha256(lf) != dataset_sha256(crlf)           # content still counts
+
+
+def test_a_metric_too_noisy_for_its_mode_is_shown_but_never_fails():
+    noisy = {"source_run": "b", "quick": bl.summarise(
+        [_rollup(e, 0.49, 0.22, 0.0, 0.0) for e in (0.40, 0.60, 0.80)])}   # stdev 20 -> limit 60
+    lines, regressed = bl.compare([_rollup(0.10, 0.49, 0.22, 0.0, 0.0)], noisy, "quick")
+    assert regressed == [] and any("event_type" in l and "too noisy" in l for l in lines)
+    _, regressed = bl.compare([_rollup(0.60, 0.20, 0.22, 0.0, 0.0)], noisy, "quick")
+    assert regressed == ["topic_status"]                        # a steady metric still fails
+
+
+def test_each_case_is_written_as_it_finishes(tmp_path, monkeypatch):
+    import asyncio
+
+    pytest.importorskip("websockets")
+    from evals.agent_eval import drive, run
+
+    sink, seen = tmp_path / "run1.jsonl", []
+
+    async def fake_run_case(case, base_url):
+        seen.append(len(sink.read_text(encoding="utf-8").splitlines()) if sink.exists() else 0)
+        if case.id == "MH-002":
+            raise KeyboardInterrupt  # Ctrl-C on the third case
+        return {"id": case.id, "final": {"x": 1}, "committed": True}
+
+    monkeypatch.setattr(drive, "run_case", fake_run_case)
+    cases = [_case(f"MH-{i:03d}", "MH") for i in range(3)]
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(run._drive(cases, "http://x", lambda _m: None, sink=sink))
+    assert seen == [0, 1, 2]                                    # on disk before the next case
+    assert [json.loads(l)["id"] for l in sink.read_text(encoding="utf-8").splitlines()] == ["MH-000", "MH-001"]
 
 
 def test_compare_skips_a_mode_the_baseline_does_not_have():

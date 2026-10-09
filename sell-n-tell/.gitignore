@@ -179,3 +179,7 @@ evals/data/
 # Eval runs (AIML-2702): transcripts and scorecards quote customer notes.
 evals/runs/
 
+# The golden set (AIML-2898): real customer notes and contact names. Kept in
+# the access-controlled eval bucket, never in the repo -- see evals/README.md.
+evals/v1/
+

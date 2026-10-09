@@ -1,7 +1,8 @@
 """Summary faithfulness: is everything in the agent's summaries said in the note?
 
-The one metric that makes extra model calls, so it only runs with ``--judge``.
-A summary is faithful when every claim in it -- the call summary and each
+The one metric that makes extra model calls. It runs in both modes (quick and
+full), so every run needs Vertex credentials (``app/.env`` and
+``gcloud auth application-default login``). A summary is faithful when every claim in it -- the call summary and each
 topic summary -- is supported by the note. Leaving something out is not
 unfaithful; adding something the rep never said is (the "due to time
 constraints" failure seen live).

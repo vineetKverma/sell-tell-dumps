@@ -3,25 +3,25 @@
     uv run python -m evals.agent_eval.baseline export evals/runs/baseline
     uv run python -m evals.agent_eval.baseline show
 
-``export`` reads a scored run's scores.json and writes
-evals/baselines/golden_v1.json with, for the full set and for the --quick
+``export`` reads the scored full runs' scores.json and writes
+evals/baselines/golden_v1.json with, for the full set and for the quick
 subset, each headline score's mean / min / max / stdev across repeats. No case
 ids, notes, names or values -- just numbers -- so it can be committed and
 every developer compares against the same reference.
 
-``run.py --compare`` reads it and reports each score against it.
+Every ``run.py`` run compares against it automatically; the verdict is in the
+run's final_scores.json.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals.agent_eval.cases import EVALSET, load_cases, load_priorities, quick_subset
+from evals.agent_eval.cases import dataset_sha256, load_cases, load_priorities, quick_subset
 from evals.agent_eval.score import aggregate
 
 BASELINE = Path(__file__).resolve().parents[1] / "baselines" / "golden_v1.json"
@@ -31,6 +31,10 @@ BASELINE = Path(__file__).resolve().parents[1] / "baselines" / "golden_v1.json"
 # less than DEFAULT_THRESHOLD points (AIML-2702 measured a 1 to 5 point spread).
 DEFAULT_THRESHOLD = 5.0
 NOISE_MULTIPLIER = 3.0
+# A metric whose limit would exceed this is too noisy in that mode to catch
+# anything (quick-mode disposition: ~9 topics, limit ~55 points). It is shown
+# but left out of the verdict rather than given a limit it can never cross.
+MAX_THRESHOLD = 20.0
 
 # (name, how to read it from a rollup, higher_is_better)
 METRICS = [
@@ -78,7 +82,7 @@ def export(run_dirs: list[Path] | Path, out: Path = BASELINE) -> dict:
         "repeats": len(repeats),
         "judge": metas[0].get("judge"),
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "dataset_sha256": hashlib.sha256(EVALSET.read_bytes()).hexdigest(),
+        "dataset_sha256": dataset_sha256(),
         "min_threshold_points": DEFAULT_THRESHOLD,
         "noise_multiplier": NOISE_MULTIPLIER,
         "full": summarise(full),
@@ -111,6 +115,8 @@ def compare(rollups: list[dict], baseline: dict, mode: str,
         worse = -delta if higher else delta
         if name in skip:
             verdict = "not judged (too many judge failures)"
+        elif limit > MAX_THRESHOLD:
+            verdict = f"not judged (too noisy in {mode} mode)"
         elif worse > limit:
             verdict = "REGRESSION"
             regressed.append(name)

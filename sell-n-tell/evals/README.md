@@ -13,7 +13,9 @@ uv run python -m evals.agent_eval.run full     # all 90 cases, about 1.5 hours
 
 The app starts automatically if nothing is running on port 8000, and stops
 afterwards. It needs the app's normal setup (`app/.env`,
-`gcloud auth application-default login`).
+`gcloud auth application-default login`) in both modes: the summary judge
+calls Vertex. And it needs the golden data, which is not in the repo (see
+[The golden data](#the-golden-data)).
 
 Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 
@@ -53,10 +55,16 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
   agent and judge models and the dataset checksum. The comparison is refused
   if the golden set differs from the baseline's.
 - **Broken runs are not scored.** Cases that hit connection errors are
-  retried once and then left out; if more than 10% fail, the run is INVALID.
+  retried once and then left out; if more than 10% fail, or the run stopped
+  before every case ran, the run is INVALID.
+- **Too-noisy scores are not judged.** A score whose noise limit is above 20
+  points is shown but left out of the verdict. Today that is disposition in
+  quick mode: about 9 topics across 18 cases, so one topic moves it 11 points.
+  Full mode judges disposition (limit ±15).
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
-not speech; quick mode (18 cases) only catches large drops; per-vertical
+not speech; quick mode (18 cases) only catches large drops and does not judge
+disposition; per-vertical
 numbers rest on 15 cases each; faithfulness is judged by a model whose
 agreement with a human reviewer has not been measured yet.
 
@@ -87,8 +95,18 @@ uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/f
 
 ## The golden data
 
-`evals/v1/` holds the golden set. It contains customer notes and contact
-names: internal only, and not to be copied outside the team.
+The golden set contains customer notes and contact names, so it is not in the
+repo. It lives in the access-controlled eval bucket (versioned; access limited
+to the eval team and CI). Fetch the folder, then either place it at
+`evals/v1/` (git-ignored) or point `SELLNTELL_EVAL_DATA` at it:
+
+```powershell
+gcloud storage cp --recursive gs://<eval-bucket>/golden_v1/* evals/v1/
+```
+
+The folder holds `golden_v1.evalset.json`, `universal_fields.csv` and
+`vertical_fields.csv`. Do not copy it anywhere else. Without it, `run` stops
+with a message saying where it looked, and the data-dependent unit tests skip.
 
 ## Unit tests
 

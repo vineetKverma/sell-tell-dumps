@@ -11,7 +11,8 @@ writes evals/runs/<mode>-<time>/ (git-ignored -- it quotes customer notes):
                      the comparison with the committed baseline. Numbers only.
   scorecard.md       the same, plus every miss as expected vs actual
   scores.json        every per-item outcome
-  run1.jsonl         per case: the saved record and the full transcript
+  run1.jsonl         per case: the saved record and the full transcript,
+                     appended as each case finishes
 
 Exit code: 0 PASS, 1 REGRESSION, 2 INVALID (the run can't be trusted).
 """
@@ -34,6 +35,7 @@ from evals.agent_eval.baseline import load as load_baseline
 from evals.agent_eval.baseline import summarise
 from evals.agent_eval.cases import (
     EVALSET,
+    dataset_sha256,
     load_cases,
     load_priorities,
     quick_subset,
@@ -182,7 +184,9 @@ def _score_run(cases, results: list[dict], judge) -> list[dict]:
     return scores
 
 
-async def _drive(cases, base_url: str, log) -> list[dict]:
+async def _drive(cases, base_url: str, log, sink: Path | None = None) -> list[dict]:
+    """Run each case in turn. With ``sink``, each result is appended to that
+    file as soon as it finishes, so a crash or Ctrl-C keeps what was done."""
     from evals.agent_eval.drive import run_case  # needs websockets; not for --rescore
 
     results = []
@@ -190,6 +194,9 @@ async def _drive(cases, base_url: str, log) -> list[dict]:
         t0 = time.monotonic()
         res = await run_case(case, base_url)
         results.append(res)
+        if sink is not None:
+            with sink.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(res, ensure_ascii=False) + "\n")
         state = res.get("error") or ("committed" if res["committed"] else
                                      "staged" if res["final"] else "NOT STAGED")
         log(f"  [{i}/{len(cases)}] {case.id}  {state}  ({time.monotonic() - t0:.0f}s)")
@@ -203,11 +210,6 @@ MAX_INFRA_ERROR_RATE = 0.10
 # The same for the judge: above this share of unjudged summaries, faithfulness
 # is reported but left out of the verdict.
 MAX_UNJUDGED_RATE = 0.10
-
-
-def _sha256(path: Path) -> str:
-    import hashlib
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _git_commit() -> str:
@@ -238,8 +240,11 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
     infra = [r["id"] for r in raw if infra_error(r)]
     judged = [r for r in raw if r.get("final") and not infra_error(r)]
     unjudged = sum(1 for r in judged if (r.get("judge") or {}).get("faithful") is None)
-    data_hash = _sha256(EVALSET)
+    data_hash = dataset_sha256(EVALSET)
     problems = []
+    missing = {c.id for c in cases} - {r["id"] for r in raw}
+    if missing:  # e.g. --rescore of a run that was stopped part-way
+        problems.append(f"{len(missing)} of {n} cases never ran; the run is incomplete")
     if len(infra) > MAX_INFRA_ERROR_RATE * n:
         problems.append(f"{len(infra)} of {n} cases hit connection/setup errors (limit "
                         f"{MAX_INFRA_ERROR_RATE:.0%}); fix the environment and run again")
@@ -264,7 +269,7 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
         "agent_model": _agent_model(),
         "judge_model": JUDGE_MODEL,
         "dataset": EVALSET.name, "dataset_sha256": data_hash,
-        "cases": n, "scored": n - len(infra), "connection_errors": infra,
+        "cases": n, "scored": n - len(infra) - len(missing), "connection_errors": infra,
         "unjudged_summaries": unjudged,
         "excluded_from_verdict": skip,
         "scores": summarise([rollup]),
@@ -296,8 +301,14 @@ def main() -> None:
         out = RUNS / name
         out.mkdir(parents=True)
         with app_running(args.base_url, start=not _healthy(args.base_url)):
+            from evals.agent_eval.drive import probe_sessions
+            try:
+                asyncio.run(probe_sessions(args.base_url))
+            except RuntimeError as exc:  # exit 2: nothing was measured
+                print(f"VERDICT: INVALID -- not run: {exc}", file=sys.stderr)
+                raise SystemExit(2) from None
             print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
-            raw = asyncio.run(_drive(cases, args.base_url, print))
+            raw = asyncio.run(_drive(cases, args.base_url, print, sink=out / "run1.jsonl"))
             redo = [i for i, r in enumerate(raw) if infra_error(r)]
             if redo:  # one automatic retry for connection/setup errors
                 print(f"retrying {len(redo)} case(s) that hit connection errors")

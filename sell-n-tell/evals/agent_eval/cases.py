@@ -14,6 +14,7 @@ on any ADK version and the same file still loads into ``adk eval`` later.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -44,6 +45,13 @@ class Case:
     topics: list[dict]                     # [{topic, discussed, disposition_code}]
     fields: dict[str, str | None]          # field id -> value, None = not stated
     contested: frozenset[str] = field(default_factory=frozenset)
+
+
+def dataset_sha256(path: Path = EVALSET) -> str:
+    """Checksum of the eval set, the same on every OS: line endings are
+    normalised first, so a CRLF checkout (Windows autocrlf) and an LF one
+    (Linux, CI) agree with the baseline."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def load_priorities(golden_dir: Path = GOLDEN_DIR) -> dict[str, int]:
