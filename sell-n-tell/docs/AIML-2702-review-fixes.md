@@ -16,7 +16,7 @@ the reply to post on its thread before resolving it.
 ## Replies
 
 **1. Golden data in the repo**
-> Agreed. `evals/v1/` is now git-ignored and removed from the PR, and the branch is squashed to one commit so no commit in it holds the data. The README says to fetch the folder from the eval bucket and point `SELLNTELL_EVAL_DATA` at it (or place it at `evals/v1/`). Which bucket/project should hold it? I'll upload once the bucket exists, with IAM limited to the eval group and CI.
+> Agreed. `evals/v1/` is now git-ignored and removed from the PR, and the branch is squashed to one commit so no commit in it holds the data. The data is in `gs://sellntell-eval-np/golden_v1/` (`prj-hds-np-data`, versioned, uniform access, public access prevented); the README says to fetch it from there and place it at `evals/v1/` or point `SELLNTELL_EVAL_DATA` at it. Bucket access is limited to the eval team; note that project-level Storage roles still apply, so if it needs to be tighter than that it's a platform-team change.
 
 **2. Dataset hash and line endings**
 > Good catch, thanks. The hash now normalises `\r\n` to `\n` in one helper (`cases.dataset_sha256`) used by `run.py`, `baseline.py` and the test, and the baseline's `dataset_sha256` is refreshed. Added a test that the CRLF and LF copies hash the same. No `.gitattributes` line, since the data no longer lives in the repo.

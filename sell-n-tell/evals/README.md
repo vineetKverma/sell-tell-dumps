@@ -96,12 +96,14 @@ uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/f
 ## The golden data
 
 The golden set contains customer notes and contact names, so it is not in the
-repo. It lives in the access-controlled eval bucket (versioned; access limited
-to the eval team and CI). Fetch the folder, then either place it at
-`evals/v1/` (git-ignored) or point `SELLNTELL_EVAL_DATA` at it:
+repo. It lives in the access-controlled bucket `gs://sellntell-eval-np`
+(project `prj-hds-np-data`; versioned; access limited to the eval team and
+CI). Fetch the folder, then either place it at `evals/v1/` (git-ignored) or
+point `SELLNTELL_EVAL_DATA` at it:
 
 ```powershell
-gcloud storage cp --recursive gs://<eval-bucket>/golden_v1/* evals/v1/
+New-Item -ItemType Directory -Force evals/v1 | Out-Null   # gcloud needs the folder to exist
+gcloud storage cp "gs://sellntell-eval-np/golden_v1/*" evals/v1/
 ```
 
 The folder holds `golden_v1.evalset.json`, `universal_fields.csv` and
