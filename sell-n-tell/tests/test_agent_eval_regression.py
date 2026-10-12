@@ -87,16 +87,26 @@ def test_skipped_metrics_are_shown_but_never_fail():
     assert regressed == [] and any("not judged" in l for l in lines)
 
 
+FAKE_HASH = "golden-set-checksum"
+
+
+@pytest.fixture(autouse=True)
+def _no_golden_file_needed(monkeypatch):
+    # final_scores checksums the golden set; these tests are about verdicts, so
+    # they use a fixed checksum and run with or without the data (e.g. in CI).
+    from evals.agent_eval import run
+    monkeypatch.setattr(run, "dataset_sha256", lambda _path=None: FAKE_HASH)
+
+
 def _final(raw, ref, n=10):
     from evals.agent_eval.run import final_scores
     cases = [_case(f"MH-{i:03d}", "MH") for i in range(n)]
     return final_scores("full", "t", cases, raw, _rollup(0.60, 0.49, 0.22, 0.0, 0.0), ref)
 
 
-@needs_data
 def test_verdicts_pass_regression_and_invalid():
     ok = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(10)]
-    ref = dict(BASE, dataset_sha256=dataset_sha256(EVALSET))
+    ref = dict(BASE, dataset_sha256=FAKE_HASH)
     assert _final(ok, ref)["verdict"] == "PASS"
 
     worse = dict(ref, full=bl.summarise([_rollup(0.90, 0.49, 0.22, 0.0, 0.0)]))
@@ -150,8 +160,9 @@ def test_export_refuses_a_too_noisy_metric_unless_allowed():
 
 def test_runs_list_what_is_not_in_the_verdict():
     ok = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(10)]
-    ref = dict(BASE, not_gated={"full": ["disposition"]})
+    ref = dict(BASE, dataset_sha256=FAKE_HASH, not_gated={"full": ["disposition"]})
     f = _final(ok, ref)
+    assert f["verdict"] == "PASS"
     assert "disposition" in f["excluded_from_verdict"]
     assert "too noisy" in f["excluded_from_verdict"]["disposition"]
 
@@ -161,8 +172,9 @@ def test_rescore_skips_a_line_cut_off_mid_write(tmp_path):
     p = tmp_path / "run1.jsonl"
     p.write_text('{"id": "MH-000"}\n{"id": "MH-001"}\n{"id": "MH-0', encoding="utf-8")
     assert [r["id"] for r in read_run(p)] == ["MH-000", "MH-001"]
-    partial = _final([dict(r, final={"x": 1}) for r in read_run(p)], dict(BASE, dataset_sha256="x"))
+    partial = _final([dict(r, final={"x": 1}) for r in read_run(p)], dict(BASE, dataset_sha256=FAKE_HASH))
     assert partial["verdict"] == "INVALID"                      # the cut-off case never ran
+    assert any("never ran" in p for p in partial["problems"])
 
 
 def test_a_missing_session_endpoint_stops_the_run_but_a_flaky_one_retries():
