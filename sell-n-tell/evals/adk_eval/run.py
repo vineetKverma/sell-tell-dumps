@@ -1,7 +1,7 @@
 """Run the golden set through ADK's evaluation framework (adk eval, live mode).
 
-    uv run --with "google-adk[eval]==2.10.0" --with google-cloud-aiplatform python -m evals.adk_eval.run quick
-    uv run --with "google-adk[eval]==2.10.0" --with google-cloud-aiplatform python -m evals.adk_eval.run full
+    uv run python -m evals.adk_eval.run quick
+    uv run python -m evals.adk_eval.run full
 
 Unlike ``evals.agent_eval`` (which drives the running app over its WebSocket),
 this loads the agent in-process and lets ADK's LocalEvalService drive it in
@@ -18,8 +18,8 @@ One live session at a time (AgentEvaluator always opens 4 in parallel, which
 timed out on the opening handshake). A case whose live session fails is
 retried once, then reported and left out of the scores.
 
-Needs ADK with live evaluation (2.10 here; the project pins an older version
--- hence ``--with`` until it upgrades).
+Needs ADK with live evaluation: the project pins 2.10 with the ``eval`` extra
+in its dev dependencies.
 
 Writes evals/runs/adk-<mode>-<time>/summary.json: per-metric means and the
 per-case scores (case ids and numbers only).
