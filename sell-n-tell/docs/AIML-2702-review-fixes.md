@@ -36,6 +36,28 @@ the reply to post on its thread before resolving it.
 **7. Judge docstring**
 > Fixed: the docstring now says the judge runs in both modes and needs Vertex credentials.
 
+## Round 2
+
+| # | File | Comment (short) | Fix |
+|---|---|---|---|
+| 8 | `drive.py` | The probe leaves an orphan session per run | Probe removed; the first case's own session request stops the run if the endpoint is missing or changed |
+| 9 | `run.py` | `--rescore` crashes on a cut-off last line | Unreadable lines are skipped with a warning; that case counts as never ran, so the run is INVALID |
+| 10 | `test_agent_eval_regression.py` | Data tests skip in CI (follow-up) | README notes they run only where the data is fetched; follow-up story for a CI fetch |
+| 11 | `baseline.py` | The noisy rule can silently drop any metric | `export` refuses a too-noisy metric unless `--allow-noisy`; the baseline records it; every run lists it under "not in the verdict" |
+
+Replies:
+
+- **8:** Fixed — removed the probe; the first case's session request now stops the run if the endpoint is missing or changed, so no extra session.
+- **9:** Fixed — an unreadable line is skipped and that case counts as never ran, so the run is INVALID instead of crashing.
+- **10:** Agreed — README now says these tests run only where the data is fetched; raised a follow-up for a CI fetch with a read-only service account.
+- **11:** Fixed — `baseline export` refuses a too-noisy metric unless it's named with `--allow-noisy`, the baseline records it, and every run lists it under "not in the verdict" in `final_scores.json` and the scorecard header.
+
+Follow-up story (for 10):
+
+> **Eval: run the golden-data tests in CI**
+> The scorer's main checks need the golden set, which is no longer in the repo, so they skip in CI. Add a CI step that fetches `gs://sellntell-eval-np/golden_v1/` with a read-only service account (workload identity if available) before the tests.
+> AC: (1) CI fetches the data with a read-only identity; (2) the data-dependent tests run and pass in CI; (3) the fetched data is not kept as a build artifact.
+
 ## Applying it
 
 1. Run the tests: `uv run pytest tests/ -q`.

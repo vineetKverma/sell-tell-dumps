@@ -125,13 +125,60 @@ def test_dataset_hash_ignores_line_endings(tmp_path):
     assert dataset_sha256(lf) != dataset_sha256(crlf)           # content still counts
 
 
-def test_a_metric_too_noisy_for_its_mode_is_shown_but_never_fails():
-    noisy = {"source_run": "b", "quick": bl.summarise(
-        [_rollup(e, 0.49, 0.22, 0.0, 0.0) for e in (0.40, 0.60, 0.80)])}   # stdev 20 -> limit 60
-    lines, regressed = bl.compare([_rollup(0.10, 0.49, 0.22, 0.0, 0.0)], noisy, "quick")
-    assert regressed == [] and any("event_type" in l and "too noisy" in l for l in lines)
-    _, regressed = bl.compare([_rollup(0.60, 0.20, 0.22, 0.0, 0.0)], noisy, "quick")
-    assert regressed == ["topic_status"]                        # a steady metric still fails
+NOISY = {"source_run": "b", "quick": bl.summarise(
+    [_rollup(e, 0.49, 0.22, 0.0, 0.0) for e in (0.40, 0.60, 0.80)])}       # event_type stdev 20 -> limit 60
+
+
+def test_a_too_noisy_metric_leaves_the_gate_only_when_recorded():
+    # Not recorded: still judged (with its wide limit), never silently dropped.
+    lines, _ = bl.compare([_rollup(0.10, 0.49, 0.22, 0.0, 0.0)], NOISY, "quick")
+    assert not any("too noisy" in l for l in lines)
+    # Recorded in the baseline: shown, not judged; a steady metric still fails.
+    recorded = dict(NOISY, not_gated={"quick": ["event_type"]})
+    lines, regressed = bl.compare([_rollup(0.10, 0.20, 0.22, 0.0, 0.0)], recorded, "quick")
+    assert regressed == ["topic_status"]
+    assert any("event_type" in l and "too noisy" in l for l in lines)
+
+
+def test_export_refuses_a_too_noisy_metric_unless_allowed():
+    assert bl.too_noisy(NOISY) == ["quick:event_type"]
+    with pytest.raises(SystemExit, match="--allow-noisy quick:event_type"):
+        bl.not_gated(NOISY)
+    assert bl.not_gated(NOISY, ["quick:event_type"]) == {"quick": ["event_type"]}
+    assert bl.not_gated(BASE) == {}                             # nothing noisy, nothing dropped
+
+
+def test_runs_list_what_is_not_in_the_verdict():
+    ok = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(10)]
+    ref = dict(BASE, not_gated={"full": ["disposition"]})
+    f = _final(ok, ref)
+    assert "disposition" in f["excluded_from_verdict"]
+    assert "too noisy" in f["excluded_from_verdict"]["disposition"]
+
+
+def test_rescore_skips_a_line_cut_off_mid_write(tmp_path):
+    from evals.agent_eval.run import read_run
+    p = tmp_path / "run1.jsonl"
+    p.write_text('{"id": "MH-000"}\n{"id": "MH-001"}\n{"id": "MH-0', encoding="utf-8")
+    assert [r["id"] for r in read_run(p)] == ["MH-000", "MH-001"]
+    partial = _final([dict(r, final={"x": 1}) for r in read_run(p)], dict(BASE, dataset_sha256="x"))
+    assert partial["verdict"] == "INVALID"                      # the cut-off case never ran
+
+
+def test_a_missing_session_endpoint_stops_the_run_but_a_flaky_one_retries():
+    httpx = pytest.importorskip("httpx")
+    pytest.importorskip("websockets")
+    from evals.agent_eval.drive import SessionEndpointError, _session_id
+
+    def resp(status, body):
+        return httpx.Response(status, json=body) if isinstance(body, dict) else httpx.Response(status, text=body)
+
+    assert _session_id(resp(200, {"status": "ok", "session_id": "123"})) == "123"
+    assert _session_id(resp(200, {"status": "error", "error": "token timeout"})) is None   # retried
+    assert _session_id(resp(503, "busy")) is None                                         # retried
+    for bad in (resp(404, "Not Found"), resp(200, {"session": "1"}), resp(200, {"status": "ok"})):
+        with pytest.raises(SessionEndpointError):
+            _session_id(bad)
 
 
 def test_each_case_is_written_as_it_finishes(tmp_path, monkeypatch):

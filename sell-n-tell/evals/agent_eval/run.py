@@ -251,6 +251,9 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
     skip = []
     if judged and unjudged > MAX_UNJUDGED_RATE * len(judged):
         skip.append("faithfulness")
+    excluded = {m: "too many judge failures" for m in skip}
+    for m in ((ref or {}).get("not_gated") or {}).get(mode, []):
+        excluded[m] = f"too noisy in {mode} mode (recorded in the baseline)"
     comparison, regressed = [], []
     if ref is None:
         problems.append("no committed baseline")
@@ -271,7 +274,7 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
         "dataset": EVALSET.name, "dataset_sha256": data_hash,
         "cases": n, "scored": n - len(infra) - len(missing), "connection_errors": infra,
         "unjudged_summaries": unjudged,
-        "excluded_from_verdict": skip,
+        "excluded_from_verdict": excluded,
         "scores": summarise([rollup]),
         "baseline_run": ref and ref.get("source_run"),
         "comparison": comparison,
@@ -294,21 +297,20 @@ def main() -> None:
 
     if args.rescore:
         out = args.rescore
-        raw = [json.loads(l) for l in (out / "run1.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        raw = read_run(out / "run1.jsonl")
         name = out.name
     else:
         name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         out = RUNS / name
         out.mkdir(parents=True)
         with app_running(args.base_url, start=not _healthy(args.base_url)):
-            from evals.agent_eval.drive import probe_sessions
+            from evals.agent_eval.drive import SessionEndpointError
+            print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
             try:
-                asyncio.run(probe_sessions(args.base_url))
-            except RuntimeError as exc:  # exit 2: nothing was measured
+                raw = asyncio.run(_drive(cases, args.base_url, print, sink=out / "run1.jsonl"))
+            except SessionEndpointError as exc:  # exit 2: nothing was measured
                 print(f"VERDICT: INVALID -- not run: {exc}", file=sys.stderr)
                 raise SystemExit(2) from None
-            print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
-            raw = asyncio.run(_drive(cases, args.base_url, print, sink=out / "run1.jsonl"))
             redo = [i for i, r in enumerate(raw) if infra_error(r)]
             if redo:  # one automatic retry for connection/setup errors
                 print(f"retrying {len(redo)} case(s) that hit connection errors")
@@ -334,7 +336,9 @@ def main() -> None:
     card = scorecard(name, [rollup], [per_case], meta)
     if final["comparison"]:
         card = card.replace("## Must-capture fields", "\n".join(final["comparison"]) + "\n\n## Must-capture fields", 1)
-    card = card.replace("# Eval scorecard", f"# Verdict: {final['verdict']}\n\n# Eval scorecard", 1)
+    left_out = "; ".join(f"{m} ({why})" for m, why in final["excluded_from_verdict"].items())
+    header = f"# Verdict: {final['verdict']}\n\n" + (f"**Not in the verdict:** {left_out}\n\n" if left_out else "")
+    card = card.replace("# Eval scorecard", header + "# Eval scorecard", 1)
     if final["problems"]:
         card = card.replace("# Eval scorecard", "Not judged: " + "; ".join(final["problems"]) + "\n\n# Eval scorecard", 1)
     (out / "scorecard.md").write_text(card, encoding="utf-8")
@@ -342,6 +346,8 @@ def main() -> None:
     print(card.split("## Failures")[0])
     print(f"VERDICT: {final['verdict']}" + (f" ({', '.join(final['regressed'])})" if final["regressed"] else "")
           + (f" -- {'; '.join(final['problems'])}" if final["problems"] else ""))
+    if left_out:
+        print(f"not in the verdict: {left_out}")
     print(f"written: {out / 'final_scores.json'}")
     raise SystemExit({"PASS": 0, "REGRESSION": 1, "INVALID": 2}[final["verdict"]])
 
@@ -386,6 +392,23 @@ def app_running(base_url: str, start: bool):
                 proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+
+def read_run(path: Path) -> list[dict]:
+    """The cases in a run1.jsonl. A line that can't be read -- the last one,
+    cut off by a Ctrl-C mid-write -- is skipped with a warning; that case then
+    counts as never ran, so the run is reported INVALID instead of crashing."""
+    rows, bad = [], 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            bad += 1
+    if bad:
+        print(f"warning: skipped {bad} unreadable line(s) in {path.name} (run stopped mid-write?)")
+    return rows
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

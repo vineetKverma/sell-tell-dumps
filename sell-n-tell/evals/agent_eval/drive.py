@@ -123,9 +123,38 @@ SESSION_ATTEMPTS = 3
 SESSION_RETRY_WAIT_S = 10
 
 
+class SessionEndpointError(RuntimeError):
+    """The app has no usable POST /api/sessions -- missing, or its reply has
+    changed shape. Every case would fail the same way, so the run stops at the
+    first one instead of retrying all 90."""
+
+
+def _session_id(r: httpx.Response) -> str | None:
+    """The session id, None for a transient failure worth retrying (a 5xx, or
+    the app's status "error" for a failed Vertex call), or SessionEndpointError
+    when the endpoint itself is wrong."""
+    if r.status_code in (404, 405, 422):
+        raise SessionEndpointError(f"POST /api/sessions returned {r.status_code}; the app does not "
+                                   "offer the session endpoint this eval needs")
+    if r.status_code >= 500:
+        return None
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or "status" not in body:
+        raise SessionEndpointError(f"POST /api/sessions replied in an unexpected shape: {r.text[:200]}")
+    if body["status"] != "ok":
+        return None
+    if not body.get("session_id"):
+        raise SessionEndpointError("POST /api/sessions replied ok without a session_id")
+    return body["session_id"]
+
+
 async def _create_session(base_url: str, case: Case) -> str:
     """POST /api/sessions, retried: the app reports a failed Vertex call (e.g.
-    a token fetch timing out) as status "error", which is worth one more try."""
+    a token fetch timing out) as status "error", which is worth one more try.
+    A missing or changed endpoint raises SessionEndpointError at once."""
     last = ""
     for attempt in range(1, SESSION_ATTEMPTS + 1):
         try:
@@ -135,11 +164,10 @@ async def _create_session(base_url: str, case: Case) -> str:
                     "planned_topics": case.planned_topics,  # a list: titles may contain commas
                     "campaign_type": CAMPAIGN_TYPE,
                 })
-                r.raise_for_status()
-                body = r.json()
-            if body.get("status") == "ok":
-                return body["session_id"]
-            last = str(body.get("error"))
+            session_id = _session_id(r)
+            if session_id:
+                return session_id
+            last = f"HTTP {r.status_code}: {r.text[:200]}"
         except httpx.HTTPError as exc:
             last = f"{type(exc).__name__}: {exc}"
         if attempt < SESSION_ATTEMPTS:
@@ -147,36 +175,10 @@ async def _create_session(base_url: str, case: Case) -> str:
     raise RuntimeError(f"session not created after {SESSION_ATTEMPTS} tries: {last}")
 
 
-async def probe_sessions(base_url: str) -> None:
-    """One session request before the run. If the endpoint is missing or its
-    reply has changed shape, every case would fail its 3 tries; stop instead,
-    with a message that says why. A transient "error" status is retried as in
-    a normal case."""
-    try:
-        async with httpx.AsyncClient(base_url=base_url, timeout=150) as http:
-            r = await http.post("/api/sessions", json={"user_id": USER_ID, "planned_topics": []})
-    except httpx.HTTPError as exc:
-        raise RuntimeError(f"POST /api/sessions failed: {type(exc).__name__}: {exc}") from exc
-    if r.status_code in (404, 405, 422):
-        raise RuntimeError(f"POST /api/sessions returned {r.status_code}; the app does not "
-                           "offer the session endpoint this eval needs")
-    try:
-        body = r.json()
-    except ValueError:
-        body = None
-    if not isinstance(body, dict) or "status" not in body:
-        raise RuntimeError(f"POST /api/sessions replied in an unexpected shape: {r.text[:200]}")
-    if body["status"] == "ok" and body.get("session_id"):
-        return
-    if body["status"] == "ok":
-        raise RuntimeError("POST /api/sessions replied ok without a session_id")
-    await _create_session(base_url, Case(id="probe", vertical="", note="", planned_topics=[],
-                                         event_type=None, topics=[], fields={}))
-
-
 async def run_case(case: Case, base_url: str) -> dict:
-    """One case end to end. Never raises: a failure is recorded on the result
-    so one bad case cannot stop a 90-case run."""
+    """One case end to end. A failure is recorded on the result so one bad case
+    cannot stop a 90-case run -- except SessionEndpointError, which would fail
+    every case and so stops the run."""
     tx = Transcript()
     result = {"id": case.id, "vertical": case.vertical}
     try:
@@ -202,6 +204,8 @@ async def run_case(case: Case, base_url: str) -> dict:
             if tx.final:
                 await asyncio.sleep(0.5)
                 await _say(ws, tx, CONFIRM_REPLY, FINAL_QUIET_PERIOD_S)
+    except SessionEndpointError:
+        raise
     except Exception as exc:  # recorded, not raised
         result["error"] = f"{type(exc).__name__}: {exc}"
 

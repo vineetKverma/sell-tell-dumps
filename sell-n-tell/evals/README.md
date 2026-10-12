@@ -57,10 +57,13 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 - **Broken runs are not scored.** Cases that hit connection errors are
   retried once and then left out; if more than 10% fail, or the run stopped
   before every case ran, the run is INVALID.
-- **Too-noisy scores are not judged.** A score whose noise limit is above 20
-  points is shown but left out of the verdict. Today that is disposition in
-  quick mode: about 9 topics across 18 cases, so one topic moves it 11 points.
-  Full mode judges disposition (limit ±15).
+- **A too-noisy score leaves the verdict only on purpose.** A score whose noise
+  limit is above 20 points can't catch anything, but it is never dropped
+  silently: `baseline export` refuses it unless it is named with
+  `--allow-noisy`, the baseline records it, and every run lists it under "not
+  in the verdict" (in `final_scores.json`, the scorecard header and the
+  console). Today that is disposition in quick mode: about 9 topics across 18
+  cases, so one topic moves it 11 points. Full mode judges disposition.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
 not speech; quick mode (18 cases) only catches large drops and does not judge
@@ -90,8 +93,11 @@ Run `full` three times, then export the scores (numbers only) to
 `evals/baselines/golden_v1.json` and commit it with the change:
 
 ```powershell
-uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C
+uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:disposition
 ```
+
+If the export names another score as too noisy, add more runs first; pass
+`--allow-noisy mode:metric` for it only as a deliberate choice.
 
 ## The golden data
 
@@ -113,3 +119,8 @@ with a message saying where it looked, and the data-dependent unit tests skip.
 ## Unit tests
 
 `uv run pytest tests/` runs the scoring tests with no model or network.
+
+The tests that need the golden data -- including "a perfect record scores 100%
+on all 90 cases", the 90- and 18-case checks and the field priorities -- run
+only where the data has been fetched (above). Elsewhere, including CI today,
+they skip; fetch the data before relying on a green run.

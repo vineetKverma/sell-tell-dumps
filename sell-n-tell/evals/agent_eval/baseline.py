@@ -32,8 +32,10 @@ BASELINE = Path(__file__).resolve().parents[1] / "baselines" / "golden_v1.json"
 DEFAULT_THRESHOLD = 5.0
 NOISE_MULTIPLIER = 3.0
 # A metric whose limit would exceed this is too noisy in that mode to catch
-# anything (quick-mode disposition: ~9 topics, limit ~55 points). It is shown
-# but left out of the verdict rather than given a limit it can never cross.
+# anything (quick-mode disposition: ~9 topics, limit ~55 points). Leaving it
+# out of the verdict is never automatic: ``export`` refuses unless it is named
+# with --allow-noisy, the baseline records it under "not_gated", and every run
+# lists it as not in the verdict.
 MAX_THRESHOLD = 20.0
 
 # (name, how to read it from a rollup, higher_is_better)
@@ -62,7 +64,31 @@ def summarise(rollups: list[dict]) -> dict:
     return out
 
 
-def export(run_dirs: list[Path] | Path, out: Path = BASELINE) -> dict:
+def too_noisy(baseline: dict) -> list[str]:
+    """'mode:metric' for every metric whose limit is above MAX_THRESHOLD."""
+    return [f"{mode}:{name}" for mode in ("full", "quick")
+            for name, m in (baseline.get(mode) or {}).items() if threshold_for(m) > MAX_THRESHOLD]
+
+
+def not_gated(baseline: dict, allow_noisy: list[str] = ()) -> dict[str, list[str]]:
+    """The metrics to leave out of the verdict, per mode. Refuses any too-noisy
+    metric that was not explicitly allowed, so a noisy re-export can never
+    quietly drop a metric from the gate."""
+    noisy = too_noisy(baseline)
+    unexpected = sorted(set(noisy) - set(allow_noisy))
+    if unexpected:
+        raise SystemExit(
+            f"too noisy to gate (limit above {MAX_THRESHOLD:.0f} points): {', '.join(unexpected)}. "
+            "Add more runs, or leave it out of the verdict deliberately with "
+            + " ".join(f"--allow-noisy {m}" for m in unexpected))
+    out: dict[str, list[str]] = {}
+    for item in noisy:
+        mode, name = item.split(":", 1)
+        out.setdefault(mode, []).append(name)
+    return out
+
+
+def export(run_dirs: list[Path] | Path, out: Path = BASELINE, allow_noisy: list[str] = ()) -> dict:
     """From one or more scored full runs (each may hold several repeats)."""
     run_dirs = [run_dirs] if isinstance(run_dirs, Path) else list(run_dirs)
     repeats, metas = [], []
@@ -88,6 +114,7 @@ def export(run_dirs: list[Path] | Path, out: Path = BASELINE) -> dict:
         "full": summarise(full),
         "quick": summarise(quick),
     }
+    baseline["not_gated"] = not_gated(baseline, allow_noisy)  # refuses before anything is written
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(baseline, indent=1) + "\n", encoding="utf-8")
     return baseline
@@ -100,8 +127,10 @@ def threshold_for(ref_metric: dict) -> float:
 def compare(rollups: list[dict], baseline: dict, mode: str,
             skip: list[str] = ()) -> tuple[list[str], list[str]]:
     """(report lines, regressed metric names) for a run against the baseline.
-    ``skip`` lists metrics shown but left out of the verdict."""
+    ``skip`` lists metrics shown but left out of the verdict; so are the
+    baseline's recorded "not_gated" metrics for this mode."""
     ref = baseline.get(mode) or {}
+    noisy = set((baseline.get("not_gated") or {}).get(mode, []))
     now = summarise(rollups)
     lines = [f"## Against the baseline ({mode} set, run '{baseline.get('source_run')}')", "",
              "| metric | baseline | this run | change | counts if beyond | verdict |",
@@ -115,7 +144,7 @@ def compare(rollups: list[dict], baseline: dict, mode: str,
         worse = -delta if higher else delta
         if name in skip:
             verdict = "not judged (too many judge failures)"
-        elif limit > MAX_THRESHOLD:
+        elif name in noisy:
             verdict = f"not judged (too noisy in {mode} mode)"
         elif worse > limit:
             verdict = "REGRESSION"
@@ -137,10 +166,13 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     ex = sub.add_parser("export", help="write evals/baselines/golden_v1.json from a scored run")
     ex.add_argument("run_dirs", type=Path, nargs="+", help="one or more full runs")
+    ex.add_argument("--allow-noisy", action="append", default=[], metavar="MODE:METRIC",
+                    help=f"leave a metric whose limit is above {MAX_THRESHOLD:.0f} points out of "
+                         "the verdict, e.g. quick:disposition (repeatable)")
     sub.add_parser("show", help="print the committed baseline")
     args = ap.parse_args()
     if args.cmd == "export":
-        b = export(args.run_dirs)
+        b = export(args.run_dirs, allow_noisy=args.allow_noisy)
         print(f"written: {BASELINE}")
     else:
         b = load()
@@ -150,6 +182,8 @@ def main() -> None:
         print(f"\n{mode}:")
         for name, m in b[mode].items():
             print(f"  {name:<20} {m['mean']:6.1f}%  (range {m['min']:.1f} to {m['max']:.1f}, {m['runs']} runs)")
+    for mode, names in (b.get("not_gated") or {}).items():
+        print(f"\nnot in the {mode} verdict (too noisy): {', '.join(names)}")
 
 
 if __name__ == "__main__":
