@@ -336,6 +336,84 @@ def test_a_failed_judge_call_is_not_cached():
     assert res["judge"].get("v") != JUDGE_INPUT_VERSION  # retried next time
 
 
+# --- the judge ---------------------------------------------------------------
+
+def _judge_replying(text_or_exc):
+    """A Judge whose model call returns ``text_or_exc`` (or raises it) -- no network."""
+    from evals.agent_eval.judge import Judge
+
+    class Models:
+        def generate_content(self, **_kw):
+            if isinstance(text_or_exc, Exception):
+                raise text_or_exc
+            return type("Resp", (), {"text": text_or_exc})()
+
+    j = object.__new__(Judge)  # skip __init__: it builds a real Vertex client
+    j.model, j.client = "m", type("Client", (), {"models": Models()})()
+    return j
+
+
+def test_judge_reads_a_verdict_and_never_guesses_on_a_bad_reply():
+    staged = perfect(make_case())
+    ok = _judge_replying('{"faithful": false, "unsupported": ["due to time constraints"]}')
+    assert ok.check("note", staged) == {"faithful": False, "unsupported": ["due to time constraints"]}
+    for bad in ("not json", '{"unsupported": []}', TimeoutError("connect timeout")):
+        v = _judge_replying(bad).check("note", staged)
+        assert v["faithful"] is None and v["error"], bad   # "not judged", never a verdict
+
+
+def test_judge_sees_every_summary():
+    from evals.agent_eval.judge import summaries_of
+    staged = {"executive_summary": "Met Bill.",
+              "topics": [{"topic": "Ranges", "executive_summary": "Quoted $3000."},
+                         {"topic": "Paint", "executive_summary": ""}]}
+    text = summaries_of(staged)
+    assert "Call summary: Met Bill." in text and 'Topic "Ranges": Quoted $3000.' in text
+    assert "Paint" not in text                                          # empty summary: nothing to judge
+
+
+# --- reading the agent's record off the socket -------------------------------
+
+def test_transcript_keeps_the_last_stage_call_commit_and_tool_errors():
+    pytest.importorskip("websockets")
+    from evals.agent_eval.drive import Transcript
+
+    def call(name, args=None):
+        return {"content": {"parts": [{"functionCall": {"name": name, "args": args or {}}}]}}
+
+    tx = Transcript()
+    for evt in (
+        {"inputTranscription": {"text": "Met Bill"}},
+        call("stage_visit_notes", {"event_type": "Phone Call"}),
+        {"content": {"parts": [{"functionResponse": {"name": "stage_visit_notes",
+                                                     "response": {"status": "incomplete", "missing": ["x"]}}}]}},
+        {"outputTranscription": {"text": "Anything on paint?"}},
+        call("stage_visit_notes", {"event_type": "Meeting"}),
+        call("some_other_tool", {"event_type": "On-site visit"}),
+        call("commit_visit_notes"),
+    ):
+        tx.take(evt)
+    assert tx.final == {"event_type": "Meeting"}                        # the record the rep confirmed
+    assert len(tx.stage_calls) == 2 and tx.committed
+    assert tx.tool_errors == [{"tool": "stage_visit_notes", "status": "incomplete", "missing": ["x"]}]
+    assert tx.lines == [("rep", "Met Bill"), ("agent", "Anything on paint?")]
+    assert Transcript().final is None and not Transcript().committed     # nothing staged
+
+
+# --- the ADK eval's summary ---------------------------------------------------
+
+def test_adk_summary_shows_rates_as_percent_and_counts_as_counts():
+    from evals.adk_eval.run import summarise
+    s = summarise({"HL-001": {"event_type_accuracy": 1.0, "inference_call_count_v1": 3.0},
+                   "HL-002": {"event_type_accuracy": 0.0, "inference_call_count_v1": 5.0,
+                              "disposition_accuracy": None}},
+                  failed=["HL-003"], rates={"event_type_accuracy", "disposition_accuracy"})
+    assert s["metrics"]["event_type_accuracy"] == {"mean": 50.0, "unit": "%", "cases": 2}
+    assert s["metrics"]["inference_call_count_v1"] == {"mean": 4.0, "unit": "per case", "cases": 2}
+    assert "disposition_accuracy" not in s["metrics"]                    # not evaluated: not 0
+    assert s["connection_failures"] == ["HL-003"] and s["cases_scored"] == 2
+
+
 # --- the rep's scripted side -------------------------------------------------
 
 def test_missing_topics_drives_the_coverage_reply():

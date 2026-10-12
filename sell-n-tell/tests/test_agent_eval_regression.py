@@ -126,6 +126,58 @@ def test_verdicts_pass_regression_and_invalid():
     assert partial["verdict"] == "INVALID" and partial["scored"] == 7
 
 
+def test_too_many_judge_failures_take_faithfulness_out_of_the_verdict():
+    rows = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(10)]
+    failed = [dict(r, judge={"faithful": None, "error": "timeout"}) for r in rows[:2]] + rows[2:]
+    ref = dict(BASE, dataset_sha256=FAKE_HASH)
+    f = _final(failed, ref)                                     # 2 of 10 unjudged > 10%
+    assert f["unjudged_summaries"] == 2 and "faithfulness" in f["excluded_from_verdict"]
+    assert any("faithfulness" in l and "not judged" in l for l in f["comparison"])
+    one = [dict(rows[0], judge={"faithful": None})] + rows[1:]
+    assert "faithfulness" not in _final(one, ref)["excluded_from_verdict"]   # 1 of 10: still judged
+
+
+def _scored_run(tmp_path, name, rates, n=90):
+    """A fake scored full run: scores.json with n cases whose event type is
+    right for the first rates[i] share -- enough for export to aggregate."""
+    import json as _json
+    from evals.agent_eval.score import score_case
+    d = tmp_path / name
+    d.mkdir()
+    case = _case("MH-001", "MH")
+    repeats = []
+    for rate in rates:
+        good = round(rate * n)
+        repeats.append([dict(score_case(case, {"event_type": "Meeting" if i < good else "Phone Call"}),
+                             id=f"MH-{i:03d}") for i in range(n)])
+    (d / "scores.json").write_text(_json.dumps({"meta": {"evalset": "golden_v1.evalset.json", "judge": "j"},
+                                                "cases": repeats}), encoding="utf-8")
+    return d
+
+
+def test_export_writes_numbers_only_and_refuses_bad_input(tmp_path, monkeypatch):
+    monkeypatch.setattr(bl, "load_priorities", lambda: {})
+    monkeypatch.setattr(bl, "load_cases", lambda: [_case(f"MH-{i:03d}", "MH") for i in range(90)])
+    monkeypatch.setattr(bl, "dataset_sha256", lambda _p=None: FAKE_HASH)
+    out = tmp_path / "golden_v1.json"
+    runs = [_scored_run(tmp_path, f"full-{k}", [r]) for k, r in enumerate((0.60, 0.62, 0.61))]
+
+    b = bl.export(runs, out)
+    assert out.exists() and b["repeats"] == 3 and b["dataset_sha256"] == FAKE_HASH
+    assert b["full"]["event_type"]["mean"] == pytest.approx(61.11, abs=0.01)
+    assert b["not_gated"] == {}
+    assert "MH-0" not in out.read_text(encoding="utf-8")        # numbers only, no case ids
+
+    partial = _scored_run(tmp_path, "partial", [0.6], n=50)
+    with pytest.raises(SystemExit, match="partial"):
+        bl.export([partial], tmp_path / "x.json")
+
+    noisy = [_scored_run(tmp_path, f"noisy-{k}", [r]) for k, r in enumerate((0.20, 0.60, 0.95))]
+    with pytest.raises(SystemExit, match="--allow-noisy"):
+        bl.export(noisy, tmp_path / "noisy.json")
+    assert not (tmp_path / "noisy.json").exists()               # refused before writing
+
+
 def test_dataset_hash_ignores_line_endings(tmp_path):
     lf, crlf = tmp_path / "lf.json", tmp_path / "crlf.json"
     lf.write_bytes(b'{\n "a": 1\n}\n')
@@ -188,8 +240,9 @@ def test_a_missing_session_endpoint_stops_the_run_but_a_flaky_one_retries():
     assert _session_id(resp(200, {"status": "ok", "session_id": "123"})) == "123"
     assert _session_id(resp(200, {"status": "error", "error": "token timeout"})) is None   # retried
     assert _session_id(resp(503, "busy")) is None                                         # retried
-    for bad in (resp(404, "Not Found"), resp(200, {"session": "1"}), resp(200, {"status": "ok"})):
-        with pytest.raises(SessionEndpointError):
+    for bad, says in ((resp(404, "Not Found"), "returned 404"), (resp(200, {"session": "1"}), "unexpected shape"),
+                      (resp(200, {"status": "ok"}), "without a session_id")):
+        with pytest.raises(SessionEndpointError, match=says):     # the message says what is wrong
             _session_id(bad)
 
 
