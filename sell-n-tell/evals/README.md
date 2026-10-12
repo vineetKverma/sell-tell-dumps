@@ -66,12 +66,13 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
   silently: `baseline export` refuses it unless it is named with
   `--allow-noisy`, the baseline records it, and every run lists it under "not
   in the verdict" (in `final_scores.json`, the scorecard header and the
-  console). Today that is disposition in quick mode: about 9 topics across 18
-  cases, so one topic moves it 11 points. Full mode judges disposition.
+  console). Today that is disposition and faithfulness in quick mode: about 9
+  topics across 18 cases, so one topic moves disposition 11 points, and one
+  summary moves faithfulness 6. Full mode judges both.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
-not speech; quick mode (18 cases) only catches large drops and does not judge
-disposition; per-vertical
+not speech; quick mode (18 cases) only catches large drops and judges only
+event type and topic status; per-vertical
 numbers rest on 15 cases each; faithfulness is judged by a model whose
 agreement with a human reviewer has not been measured yet.
 
@@ -97,7 +98,7 @@ Run `full` three times, then export the scores (numbers only) to
 `evals/baselines/golden_v1.json` and commit it with the change:
 
 ```powershell
-uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:disposition
+uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:disposition --allow-noisy quick:faithfulness
 ```
 
 If the export names another score as too noisy, add more runs first; pass

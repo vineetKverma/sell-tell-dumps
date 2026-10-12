@@ -1,6 +1,6 @@
 """The committed baseline: aggregate scores only, safe to keep in the repo.
 
-    uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:disposition
+    uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:disposition --allow-noisy quick:faithfulness
     uv run python -m evals.agent_eval.baseline show
 
 ``export`` reads the scored full runs' scores.json and writes
