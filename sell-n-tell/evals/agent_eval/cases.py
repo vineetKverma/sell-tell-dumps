@@ -1,6 +1,8 @@
 """Load the golden eval set and the must-capture field priorities.
 
-Both live next to each other in ``evals/v1/``:
+All three live in one folder, kept outside the repo (customer data) and
+fetched to ``evals/v1/`` or pointed to by SELLNTELL_EVAL_DATA -- see
+evals/README.md:
 
   golden_v1.evalset.json   90 ADK EvalCases (the note, the session state, and
                            the expected stage_visit_notes arguments)
@@ -26,7 +28,7 @@ from pathlib import Path
 GOLDEN_DIR = Path(os.environ.get("SELLNTELL_EVAL_DATA") or Path(__file__).resolve().parents[1] / "v1")
 EVALSET = GOLDEN_DIR / "golden_v1.evalset.json"
 EXPECTED_CASES = 90
-QUICK_PER_VERTICAL = 3   # --quick: the first 3 cases of each vertical, 18 in all
+QUICK_PER_VERTICAL = 3   # quick mode: the first 3 cases of each vertical, 18 in all
 
 # U-03 restates the topic outcomes, which are scored as topics. Scoring it as a
 # field too would count every topic answer twice.

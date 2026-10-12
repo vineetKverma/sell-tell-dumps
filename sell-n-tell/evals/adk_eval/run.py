@@ -82,7 +82,7 @@ def _preflight(config) -> None:
             + f"\nfiles next to it:      {sorted(p.name for p in here.iterdir() if p.is_file())}"
             + f"\nmetrics.py next to it: {(here / 'metrics.py').exists()}"
             + f"\nevals.adk_eval loaded from: {list(getattr(pkg, '__path__', []))}"
-            + "\nCopy metrics.py into the folder shown above (next to run.py) and run again.")
+            + "\nmetrics.py must sit next to run.py in evals/adk_eval/.")
 
 
 def build_eval_set(mode: str):

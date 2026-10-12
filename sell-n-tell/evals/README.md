@@ -34,7 +34,7 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 
 | Score | Meaning |
 |---|---|
-| event_type | Meeting / On-site visit / Phone Call, per the approved rule: a person mentioned is a Meeting, otherwise On-site visit |
+| event_type | Meeting / On-site visit / Phone Call: a call is a Phone Call; otherwise the approved rule applies -- a person mentioned is a Meeting, else On-site visit |
 | topic_status | each planned campaign correctly marked discussed or not |
 | disposition | the right code for each discussed topic |
 | faithfulness | the summaries say only what the rep said (checked by a judge model) |

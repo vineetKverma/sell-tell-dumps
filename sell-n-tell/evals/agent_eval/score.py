@@ -9,7 +9,7 @@ expected ones in the key:
   disposition   the code chosen for each topic the rep did discuss
   fields        each must-capture field stated or "not stated", and its value
   faithfulness  the agent's summary is grounded in the note (filled in by the
-                judge, see judge.py; None when the judge was not run)
+                judge, see judge.py; None when the judge call failed)
 
 Scoring rules fixed by the answer key:
   - an item listed in the case's ``contested`` is skipped

@@ -64,7 +64,7 @@ def scorecard(name: str, runs: list[dict], per_case: list[list[dict]], meta: dic
     if any(skipped):
         lines += ["**Not scored (connection or setup errors, not agent behaviour):** "
                   + "; ".join(f"repeat {k}: {', '.join(ids)}" for k, ids in enumerate(skipped, 1) if ids)
-                  + ". Re-run them with `--retry-errors`.", ""]
+                  + ". They were already retried once; if this persists, check the app log and run again.", ""]
 
     lines += ["## Overall and per vertical" + (" (last repeat)" if len(runs) > 1 else ""), "",
               "| group | cases | not staged | event type | topic status | disposition "
@@ -151,8 +151,8 @@ def rep_said(case, res: dict) -> str:
 def infra_error(res: dict) -> bool:
     """The run broke before the agent produced anything -- a dropped socket,
     a session that could not be created. That says nothing about the agent,
-    so the case is left out of the scores (and can be re-run with
-    --retry-errors). An error AFTER the agent staged a record is still scored:
+    so the case is retried once automatically and, if it fails again, left
+    out of the scores. An error AFTER the agent staged a record is still scored:
     the record exists."""
     return bool(res.get("error")) and not res.get("final")
 
@@ -297,7 +297,8 @@ def main() -> None:
 
     if args.rescore:
         out = args.rescore
-        raw = read_run(out / "run1.jsonl")
+        wanted = {c.id for c in cases}  # e.g. `quick --rescore` of a full run scores its quick cases
+        raw = [r for r in read_run(out / "run1.jsonl") if r.get("id") in wanted]
         name = out.name
     else:
         name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -308,16 +309,16 @@ def main() -> None:
             print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
             try:
                 raw = asyncio.run(_drive(cases, args.base_url, print, sink=out / "run1.jsonl"))
-            except SessionEndpointError as exc:  # exit 2: nothing was measured
-                print(f"VERDICT: INVALID -- not run: {exc}", file=sys.stderr)
+                redo = [i for i, r in enumerate(raw) if infra_error(r)]
+                if redo:  # one automatic retry for connection/setup errors
+                    print(f"retrying {len(redo)} case(s) that hit connection errors")
+                    by_id = {c.id: c for c in cases}
+                    fresh = asyncio.run(_drive([by_id[raw[i]["id"]] for i in redo], args.base_url, print))
+                    for i, res in zip(redo, fresh, strict=True):
+                        raw[i] = res
+            except SessionEndpointError as exc:  # exit 2: the run can't measure anything
+                print(f"VERDICT: INVALID -- stopped: {exc}", file=sys.stderr)
                 raise SystemExit(2) from None
-            redo = [i for i, r in enumerate(raw) if infra_error(r)]
-            if redo:  # one automatic retry for connection/setup errors
-                print(f"retrying {len(redo)} case(s) that hit connection errors")
-                by_id = {c.id: c for c in cases}
-                fresh = asyncio.run(_drive([by_id[raw[i]["id"]] for i in redo], args.base_url, print))
-                for i, res in zip(redo, fresh, strict=True):
-                    raw[i] = res
         _write_jsonl(out / "run1.jsonl", raw)
 
     todo = sum(1 for r in raw if r.get("final") and not infra_error(r)
