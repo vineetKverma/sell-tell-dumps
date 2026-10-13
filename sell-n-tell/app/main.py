@@ -114,6 +114,7 @@ if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1"):
 from voice_notes_agent.agent import STATE_PLANNED_TOPICS, agent, live_client  # noqa: E402
 from voice_notes_agent.live_credentials import start_background_refresh  # noqa: E402
 from voice_notes_agent import notes_workflow, turn_guard  # noqa: E402
+from voice_notes_agent.rate_limit import once_more_on_429  # noqa: E402
 
 
 logging.basicConfig(
@@ -383,7 +384,9 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
             inv_id = event.invocation_id if event.invocation_id else f"inv-{getattr(event, 'id', 'default')}"
             async def _do_append(cfg: dict[str, Any]):
                 async with self._get_api_client() as api_client:
-                    await api_client.agent_engines.sessions.events.append(
+                    # A rate-limited append is tried once more, as ADK's own
+                    # writer does; without it the event is dropped.
+                    await once_more_on_429(lambda: api_client.agent_engines.sessions.events.append(
                         name=f"reasoningEngines/{reasoning_engine_id}/sessions/{session.id}",
                         author=event.author,
                         invocation_id=inv_id,
@@ -391,7 +394,7 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
                             event.timestamp, tz=datetime.timezone.utc
                         ),
                         config=cfg,
-                    )
+                    ))
 
             try:
                 await _do_append(config)
