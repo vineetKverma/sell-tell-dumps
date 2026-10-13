@@ -137,7 +137,7 @@ def test_too_many_judge_failures_take_faithfulness_out_of_the_verdict():
     assert "faithfulness" not in _final(one, ref)["excluded_from_verdict"]   # 1 of 10: still judged
 
 
-def _scored_run(tmp_path, name, rates, n=90):
+def _scored_run(tmp_path, name, rates, n=90, key=FAKE_HASH):
     """A fake scored full run: scores.json with n cases whose event type is
     right for the first rates[i] share -- enough for export to aggregate."""
     import json as _json
@@ -152,6 +152,7 @@ def _scored_run(tmp_path, name, rates, n=90):
                              id=f"MH-{i:03d}") for i in range(n)])
     (d / "scores.json").write_text(_json.dumps({"meta": {"evalset": "golden_v1.evalset.json", "judge": "j"},
                                                 "cases": repeats}), encoding="utf-8")
+    (d / "final_scores.json").write_text(_json.dumps({"dataset_sha256": key}), encoding="utf-8")
     return d
 
 
@@ -287,7 +288,8 @@ def test_a_baseline_from_rescored_runs_names_the_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(bl, "dataset_sha256", lambda _p=None: FAKE_HASH)
     src = _scored_run(tmp_path, "full-A", [0.6])
     (src / "rescore-full").mkdir()
-    (src / "rescore-full" / "scores.json").write_bytes((src / "scores.json").read_bytes())
+    for name in ("scores.json", "final_scores.json"):
+        (src / "rescore-full" / name).write_bytes((src / name).read_bytes())
     b = bl.export([src / "rescore-full", _scored_run(tmp_path, "full-B", [0.6])], tmp_path / "b.json")
     assert b["source_run"] == "full-A/rescore-full, full-B"
 
@@ -338,3 +340,37 @@ def test_each_case_is_written_as_it_finishes(tmp_path, monkeypatch):
 def test_compare_skips_a_mode_the_baseline_does_not_have():
     lines, regressed = bl.compare([_rollup(0.1, 0.1, 0.1, 0.0, 0.0)], BASE, "quick")
     assert regressed == [] and len(lines) == 4  # header only
+
+
+def test_export_refuses_a_run_scored_on_another_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(bl, "load_priorities", lambda: {})
+    monkeypatch.setattr(bl, "load_cases", lambda: [_case(f"MH-{i:03d}", "MH") for i in range(90)])
+    monkeypatch.setattr(bl, "dataset_sha256", lambda _p=None: FAKE_HASH)
+    current = _scored_run(tmp_path, "full-A", [0.6])
+    older = _scored_run(tmp_path, "full-B", [0.6], key="an-older-key")
+    unknown = _scored_run(tmp_path, "full-C", [0.6])
+    (unknown / "final_scores.json").unlink()                    # nothing says what it was scored on
+    for bad in (older, unknown):
+        with pytest.raises(SystemExit, match="re-score it first"):
+            bl.export([current, bad], tmp_path / "b.json")
+    assert not (tmp_path / "b.json").exists()
+
+
+def test_a_run_where_no_case_is_scored_ends_invalid_not_in_a_traceback(tmp_path, monkeypatch):
+    from evals.agent_eval import run
+
+    cases = [_case(f"MH-{i:03d}", "MH") for i in range(1, 4)]
+    down = tmp_path / "full-down"
+    down.mkdir()
+    run._write_jsonl(down / "run1.jsonl", [{"id": c.id, "final": None, "error": "connect: refused"} for c in cases])
+    monkeypatch.setattr(run, "load_cases", lambda _path=None: cases)
+    monkeypatch.setattr(run, "load_priorities", lambda: {})
+    monkeypatch.setattr(run, "load_baseline", lambda: dict(BASE, dataset_sha256=FAKE_HASH))
+    monkeypatch.setattr(run, "Judge", lambda model=None: None)
+    monkeypatch.setattr(run, "infra_error", lambda r: bool(r.get("error")))
+    monkeypatch.setattr(sys, "argv", ["run", "full", "--rescore", str(down)])
+    with pytest.raises(SystemExit) as stop:
+        run.main()
+    assert stop.value.code == 2                                 # INVALID, not 1 (REGRESSION)
+    final = json.loads((down / "rescore-full" / "final_scores.json").read_text(encoding="utf-8"))
+    assert final["verdict"] == "INVALID" and "no case was scored" in final["problems"] and final["scores"] == {}

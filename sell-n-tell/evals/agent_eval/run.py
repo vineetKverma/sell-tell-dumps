@@ -245,6 +245,8 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
     missing = {c.id for c in cases} - {r["id"] for r in raw}
     if missing:  # e.g. --rescore of a run that was stopped part-way
         problems.append(f"{len(missing)} of {n} cases never ran; the run is incomplete")
+    if not rollup:
+        problems.append("no case was scored")
     if len(infra) > MAX_INFRA_ERROR_RATE * n:
         problems.append(f"{len(infra)} of {n} cases hit connection/setup errors (limit "
                         f"{MAX_INFRA_ERROR_RATE:.0%}); fix the environment and run again")
@@ -275,7 +277,7 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
         "cases": n, "scored": n - len(infra) - len(missing), "connection_errors": infra,
         "unjudged_summaries": unjudged,
         "excluded_from_verdict": excluded,
-        "scores": summarise([rollup]),
+        "scores": summarise([rollup]) if rollup else {},
         "baseline_run": ref and ref.get("source_run"),
         "comparison": comparison,
     }
@@ -340,7 +342,8 @@ def main() -> None:
             "infra_errors": [final["connection_errors"]]}
     (out / "scores.json").write_text(json.dumps(
         {"meta": meta, "runs": [rollup], "cases": [per_case]}, indent=1, default=str) + "\n", encoding="utf-8")
-    card = scorecard(name, [rollup], [per_case], meta)
+    card = (scorecard(name, [rollup], [per_case], meta) if per_case else
+            f"# Eval scorecard: {name}\n\nNo case was scored.\n")
     if final["comparison"]:
         card = card.replace("## Must-capture fields", "\n".join(final["comparison"]) + "\n\n## Must-capture fields", 1)
     left_out = "; ".join(f"{m} ({why})" for m, why in final["excluded_from_verdict"].items())

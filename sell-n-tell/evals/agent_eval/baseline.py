@@ -92,7 +92,15 @@ def export(run_dirs: list[Path] | Path, out: Path = BASELINE, allow_noisy: list[
     """From one or more scored full runs (each may hold several repeats)."""
     run_dirs = [run_dirs] if isinstance(run_dirs, Path) else list(run_dirs)
     repeats, metas = [], []
+    key = dataset_sha256()
     for d in run_dirs:
+        # The baseline is stamped with the current key, so every run in it
+        # must have been scored on that key (re-score an older run first).
+        final = d / "final_scores.json"
+        scored_on = json.loads(final.read_text(encoding="utf-8")).get("dataset_sha256") if final.exists() else None
+        if scored_on != key:
+            raise SystemExit(f"{d}: scored on a different golden set than the current one "
+                             f"({str(scored_on)[:8]} vs {key[:8]}); re-score it first")
         data = json.loads((d / "scores.json").read_text(encoding="utf-8"))
         metas.append(data["meta"])
         repeats += data["cases"]
@@ -110,7 +118,7 @@ def export(run_dirs: list[Path] | Path, out: Path = BASELINE, allow_noisy: list[
         "repeats": len(repeats),
         "judge": metas[0].get("judge"),
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "dataset_sha256": dataset_sha256(),
+        "dataset_sha256": key,
         "min_threshold_points": DEFAULT_THRESHOLD,
         "noise_multiplier": NOISE_MULTIPLIER,
         "full": summarise(full),
