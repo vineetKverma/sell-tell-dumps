@@ -296,10 +296,15 @@ def main() -> None:
     judge = Judge(model=JUDGE_MODEL)
 
     if args.rescore:
-        out = args.rescore
-        wanted = {c.id for c in cases}  # e.g. `quick --rescore` of a full run scores its quick cases
-        raw = [r for r in read_run(out / "run1.jsonl") if r.get("id") in wanted]
-        name = out.name
+        # A re-score never touches the run's own files: its scores, verdict and
+        # scorecard go to <run>/rescore-<mode>/. So `quick --rescore` of a full
+        # run scores its 18 quick cases without shrinking run1.jsonl to 18 rows
+        # or replacing the full run's verdict.
+        wanted = {c.id for c in cases}
+        raw = [r for r in read_run(args.rescore / "run1.jsonl") if r.get("id") in wanted]
+        out = args.rescore / f"rescore-{args.mode}"
+        out.mkdir(exist_ok=True)
+        name = f"{args.rescore.name}/{out.name}"
     else:
         name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         out = RUNS / name
@@ -325,7 +330,8 @@ def main() -> None:
                and (r.get("judge") or {}).get("v") != JUDGE_INPUT_VERSION)
     print(f"scoring: {todo} summaries to judge", flush=True)
     per_case = _score_run(cases, raw, judge)
-    _write_jsonl(out / "run1.jsonl", raw)
+    if not args.rescore:        # the run's own log gets the judge verdicts; a re-score leaves it as it was
+        _write_jsonl(out / "run1.jsonl", raw)
     rollup = aggregate(per_case, priorities)
 
     final = final_scores(args.mode, name, cases, raw, rollup, load_baseline())

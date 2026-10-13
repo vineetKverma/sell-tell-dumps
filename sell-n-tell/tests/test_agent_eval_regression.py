@@ -251,6 +251,47 @@ def test_a_missing_session_endpoint_stops_the_run_but_a_flaky_one_retries():
             _session_id(bad)
 
 
+def test_rescoring_a_full_run_in_quick_mode_leaves_the_run_untouched(tmp_path, monkeypatch):
+    from evals.agent_eval import run
+
+    cases = [_case(f"{v}-{i:03d}", v) for v in ("MH", "HS", "HL", "IS", "TR", "IN") for i in range(1, 16)]
+    record = {"event_type": "Meeting", "executive_summary": "s", "topics": []}
+    rows = [{"id": c.id, "final": record, "committed": True, "transcript": [["rep (sent)", "n"]],
+             "judge": {"faithful": True, "unsupported": [], "v": run.JUDGE_INPUT_VERSION}} for c in cases]
+    full = tmp_path / "full-run"
+    full.mkdir()
+    run._write_jsonl(full / "run1.jsonl", rows)
+    for name in ("scores.json", "final_scores.json", "scorecard.md"):
+        (full / name).write_text(f"the full run's {name}", encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in full.iterdir()}
+
+    monkeypatch.setattr(run, "load_cases", lambda _path=None: cases)
+    monkeypatch.setattr(run, "load_priorities", lambda: {})
+    monkeypatch.setattr(run, "load_baseline", lambda: None)
+    monkeypatch.setattr(run, "Judge", lambda model=None: None)          # every verdict is cached
+    monkeypatch.setattr(sys, "argv", ["run", "quick", "--rescore", str(full)])
+    with pytest.raises(SystemExit):
+        run.main()
+
+    assert len((full / "run1.jsonl").read_text(encoding="utf-8").splitlines()) == 90      # not cut to 18
+    assert {p.name: p.read_bytes() for p in full.iterdir() if p.is_file()} == before      # nothing overwritten
+    rescored = json.loads((full / "rescore-quick" / "final_scores.json").read_text(encoding="utf-8"))
+    assert rescored["cases"] == 18 and rescored["scored"] == 18 and rescored["mode"] == "quick"
+    assert (full / "rescore-quick" / "scorecard.md").exists() and (full / "rescore-quick" / "scores.json").exists()
+    assert not (full / "rescore-quick" / "run1.jsonl").exists()
+
+
+def test_a_baseline_from_rescored_runs_names_the_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(bl, "load_priorities", lambda: {})
+    monkeypatch.setattr(bl, "load_cases", lambda: [_case(f"MH-{i:03d}", "MH") for i in range(90)])
+    monkeypatch.setattr(bl, "dataset_sha256", lambda _p=None: FAKE_HASH)
+    src = _scored_run(tmp_path, "full-A", [0.6])
+    (src / "rescore-full").mkdir()
+    (src / "rescore-full" / "scores.json").write_bytes((src / "scores.json").read_bytes())
+    b = bl.export([src / "rescore-full", _scored_run(tmp_path, "full-B", [0.6])], tmp_path / "b.json")
+    assert b["source_run"] == "full-A/rescore-full, full-B"
+
+
 def test_the_websocket_takes_only_the_ids_in_the_path(monkeypatch):
     import asyncio
 

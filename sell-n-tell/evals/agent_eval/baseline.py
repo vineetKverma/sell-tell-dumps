@@ -104,7 +104,9 @@ def export(run_dirs: list[Path] | Path, out: Path = BASELINE, allow_noisy: list[
     quick = [aggregate([s for s in scores if s["id"] in quick_ids], priorities) for scores in repeats]
     baseline = {
         "evalset": metas[0]["evalset"],
-        "source_run": ", ".join(d.name for d in run_dirs),
+        # A re-scored run lives in <run>/rescore-<mode>/: name the run, not the subfolder.
+        "source_run": ", ".join(f"{d.parent.name}/{d.name}" if d.name.startswith("rescore-") else d.name
+                                for d in run_dirs),
         "repeats": len(repeats),
         "judge": metas[0].get("judge"),
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
