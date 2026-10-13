@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import urllib.parse
 
 import httpx
 import websockets
@@ -31,7 +30,7 @@ from evals.agent_eval.cases import Case
 from evals.agent_eval.score import norm
 
 USER_ID = "golden-eval"
-CAMPAIGN_TYPE = "standard_sales"  # sent for contract fidelity; the app ignores it
+CAMPAIGN_TYPE = "standard_sales"
 
 COVERAGE_REPLY = "I didn't get to that on this visit. There is nothing else to add."
 CONFIRM_REPLY = "Yes, that's right. Save it."
@@ -130,13 +129,14 @@ class SessionEndpointError(RuntimeError):
 
 
 def _session_id(r: httpx.Response) -> str | None:
-    """The session id, None for a transient failure worth retrying (a 5xx, or
-    the app's status "error" for a failed Vertex call), or SessionEndpointError
-    when the endpoint itself is wrong."""
+    """The session id, None for a transient failure worth retrying (a 5xx, a
+    408 or 429 from a proxy or load balancer in front of a deployed app, or the
+    app's status "error" for a failed Vertex call), or SessionEndpointError
+    when the endpoint itself is wrong (including 401 / 403: not transient)."""
     if r.status_code in (404, 405, 422):
         raise SessionEndpointError(f"POST /api/sessions returned {r.status_code}; the app does not "
                                    "offer the session endpoint this eval needs")
-    if r.status_code >= 500:
+    if r.status_code >= 500 or r.status_code in (408, 429):
         return None
     try:
         body = r.json()
@@ -185,11 +185,9 @@ async def run_case(case: Case, base_url: str) -> dict:
         session_id = await _create_session(base_url, case)
 
         ws_base = base_url.replace("http", "ws", 1).rstrip("/")
-        # planned_topics are not repeated here: the POST above seeded them into
-        # session state, which is what the agent reads (the app only logs the
-        # query-string copy).
-        query = urllib.parse.urlencode({"campaign_type": CAMPAIGN_TYPE})
-        url = f"{ws_base}/ws/{USER_ID}/{session_id}?{query}"
+        # The contract: the POST above seeds planned_topics and campaign_type;
+        # the WebSocket takes only the ids in the path.
+        url = f"{ws_base}/ws/{USER_ID}/{session_id}"
         # No client keepalive: while the app waits on a slow Google token
         # refresh it cannot answer pings, and the default 20 s ping timeout
         # dropped the socket mid-case ("no close frame received or sent").

@@ -240,10 +240,36 @@ def test_a_missing_session_endpoint_stops_the_run_but_a_flaky_one_retries():
     assert _session_id(resp(200, {"status": "ok", "session_id": "123"})) == "123"
     assert _session_id(resp(200, {"status": "error", "error": "token timeout"})) is None   # retried
     assert _session_id(resp(503, "busy")) is None                                         # retried
+    assert _session_id(resp(408, "timeout")) is None                                      # proxy: retried
+    assert _session_id(resp(429, "slow down")) is None                                    # proxy: retried
+    for auth in (401, 403):                                                               # not transient
+        with pytest.raises(SessionEndpointError):
+            _session_id(resp(auth, "forbidden"))
     for bad, says in ((resp(404, "Not Found"), "returned 404"), (resp(200, {"session": "1"}), "unexpected shape"),
                       (resp(200, {"status": "ok"}), "without a session_id")):
         with pytest.raises(SessionEndpointError, match=says):     # the message says what is wrong
             _session_id(bad)
+
+
+def test_the_websocket_takes_only_the_ids_in_the_path(monkeypatch):
+    import asyncio
+
+    pytest.importorskip("websockets")
+    from evals.agent_eval import drive
+    seen = {}
+
+    async def fake_session(base_url, case):
+        return "4242"
+
+    def fake_connect(url, **kw):
+        seen["url"] = url
+        raise ConnectionRefusedError("stop here")       # recorded on the result, not raised
+
+    monkeypatch.setattr(drive, "_create_session", fake_session)
+    monkeypatch.setattr(drive.websockets, "connect", fake_connect)
+    res = asyncio.run(drive.run_case(_case("MH-001", "MH"), "http://localhost:8000"))
+    assert seen["url"] == "ws://localhost:8000/ws/golden-eval/4242"     # no query string
+    assert "ConnectionRefusedError" in res["error"]
 
 
 def test_each_case_is_written_as_it_finishes(tmp_path, monkeypatch):

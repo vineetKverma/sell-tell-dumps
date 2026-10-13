@@ -17,6 +17,10 @@ afterwards. It needs the app's normal setup (`app/.env`,
 calls Vertex. And it needs the golden data, which is not in the repo (see
 [The golden data](#the-golden-data)).
 
+The harness follows the app's contract: `POST /api/sessions` seeds
+`planned_topics` and `campaign_type`, and the WebSocket takes only the ids
+in the path (`/ws/{user_id}/{session_id}`, no query parameters).
+
 Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 
 | File | What it is |
