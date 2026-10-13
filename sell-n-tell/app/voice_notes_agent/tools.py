@@ -193,7 +193,10 @@ async def stage_visit_notes(
     # An empty list is fine when there are planned topics: the coverage check
     # asks about each and blocks the save until they are addressed. With no
     # planned topics nothing would be missing, and an empty record would save.
-    if not topic_list and not (tool_context.state.get("planned_topics") or []):
+    # A blank label is not a planned topic: the coverage check skips it, so
+    # [""] must count as nothing planned here too.
+    planned_labels = [p for p in (tool_context.state.get("planned_topics") or []) if str(p or "").strip()]
+    if not topic_list and not planned_labels:
         problems.append("no discussion topics were provided")
     if problems:
         # Don't stage an incomplete record (and don't raise -- that would kill

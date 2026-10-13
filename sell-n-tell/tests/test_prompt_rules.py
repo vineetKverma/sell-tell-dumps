@@ -105,6 +105,10 @@ def test_an_empty_record_is_refused_when_nothing_was_planned():
     nothing_planned = stage([])
     assert nothing_planned["status"] == "incomplete"
     assert "no discussion topics were provided" in nothing_planned["problems"]
+    # A blank label is not a plan: the coverage check skips it, so it must not
+    # switch the guard off either.
+    for blanks in ([""], ["  ", ""], [None]):
+        assert stage(blanks)["status"] == "incomplete", blanks
 
     with_plan = stage(["MF Pools 26"])
     assert with_plan.get("status") != "incomplete"                 # accepted ...
