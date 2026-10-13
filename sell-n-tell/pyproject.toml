@@ -7,11 +7,9 @@ requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 
 dependencies = [
-    # ADK is pinned exactly, so uv.lock and the Docker image resolve the same
-    # ADK version. (The image runs `pip install .`, not the lockfile, so its
-    # transitive dependencies are not pinned -- a known follow-up.) [gcp] brings
-    # google-cloud-aiplatform, which the Agent Engine session service needs at
-    # startup.
+    # Pinned exactly: uv.lock, the Docker image and every branch run this one
+    # version. [gcp] brings google-cloud-aiplatform, which the Agent Engine
+    # session service needs at startup.
     "google-adk[gcp]==2.10.0",
     "fastapi>=0.115.0",
     "python-dotenv>=1.0.0",
