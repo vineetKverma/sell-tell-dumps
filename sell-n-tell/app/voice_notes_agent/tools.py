@@ -190,6 +190,11 @@ async def stage_visit_notes(
         back to the user -- and ``session_id``.
     """
     topic_list, problems = _normalize_topics(topics, _VALID_DISPOSITION_CODES)
+    # An empty list is fine when there are planned topics: the coverage check
+    # asks about each and blocks the save until they are addressed. With no
+    # planned topics nothing would be missing, and an empty record would save.
+    if not topic_list and not (tool_context.state.get("planned_topics") or []):
+        problems.append("no discussion topics were provided")
     if problems:
         # Don't stage an incomplete record (and don't raise -- that would kill
         # the live stream). Ask the model to re-call with full topic objects.

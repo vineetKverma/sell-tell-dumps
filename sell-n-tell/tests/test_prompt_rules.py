@@ -80,6 +80,37 @@ def test_no_topics_is_a_valid_first_stage():
     assert normalized == [] and problems == []
 
 
+def test_an_empty_record_is_refused_when_nothing_was_planned():
+    # With planned topics an empty list is fine: the coverage check asks about
+    # each and blocks the save. With none planned, nothing would be missing and
+    # a record with no topics at all would save.
+    import asyncio
+    import importlib
+    import sys
+    import types
+
+    if "_vna" not in sys.modules:
+        pkg = types.ModuleType("_vna")
+        pkg.__path__ = [str(_PKG)]
+        sys.modules["_vna"] = pkg
+    tools = importlib.import_module("_vna.tools")
+
+    def stage(planned):
+        ctx = types.SimpleNamespace(state={"planned_topics": planned},
+                                    session=types.SimpleNamespace(id="s-" + str(len(planned))))
+        return asyncio.run(tools.stage_visit_notes(
+            event_type="Meeting", executive_summary="Met Bill.", raw_transcript_backup="Met Bill.",
+            topics=[], tool_context=ctx))
+
+    nothing_planned = stage([])
+    assert nothing_planned["status"] == "incomplete"
+    assert "no discussion topics were provided" in nothing_planned["problems"]
+
+    with_plan = stage(["MF Pools 26"])
+    assert with_plan.get("status") != "incomplete"                 # accepted ...
+    assert "MF Pools 26" in with_plan["confirmation_text"]         # ... and the reminder asks about it
+
+
 def test_code_1_cues_do_not_contradict_99_guidance():
     code_1 = next(r for r in _DISPOSITIONS["dispositions"] if r["code"] == 1)
     cues = {k.lower() for k in code_1["mapping_keywords"]}
