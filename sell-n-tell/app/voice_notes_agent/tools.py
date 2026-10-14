@@ -155,8 +155,9 @@ async def stage_visit_notes(
     Args:
         event_type: Interaction type for the whole visit. One of "Meeting",
             "On-site visit", or "Phone Call", chosen by the event-type rule
-            in your instructions (Phone Call only for a call; Meeting when a
-            person is mentioned; otherwise On-site visit).
+            in your instructions (Phone Call only for a call; Meeting when the
+            rep had a business conversation with a customer contact; otherwise
+            On-site visit, including front desk or gatekeeper only).
         executive_summary: A condensed, structured 2-sentence summary of the
             ENTIRE call across all topics.
         raw_transcript_backup: The full verbatim transcript of the dictation,

@@ -49,9 +49,24 @@ def test_discussed_only_when_offer_or_products_mentioned():
 
 
 def test_event_type_rule_is_stated():
-    assert "Phone Call: ONLY when the rep says the conversation was by phone" in _RULES
-    assert "Meeting: the rep mentions a person" in _RULES
-    assert "On-site visit: everything else" in _RULES
+    # The business's rule (Tobi, 2026-10-14): a Meeting is a selling
+    # conversation with the customer; front desk or gatekeeper only is an
+    # On-site visit, even though the rep spoke to someone.
+    rules = " ".join(_RULES.split())
+    assert "Phone Call: ONLY when the rep says the conversation was by phone" in rules
+    assert "Meeting: the rep had a conversation about the business with someone at the customer" in rules
+    assert "only spoke to the front desk, a receptionist or another gatekeeper" in rules
+    assert "Meeting: the rep mentions a person" not in rules       # the old rule: any person counted
+    tools_src = " ".join((_PKG / "tools.py").read_text(encoding="utf-8").split())
+    assert "Meeting when a person is mentioned" not in tools_src   # the tool's docstring says the same
+
+
+def test_leave_out_rule_is_only_for_the_first_record():
+    # "topics lists ONLY the planned topics the rep actually discussed" must not
+    # read against BRANCH, which adds discussed=false entries after a reminder.
+    rules = " ".join(_RULES.split())
+    assert "This is for the first record: after a reminder, also add an entry" in rules
+    assert "including discussed=false for one they skipped" in rules
 
 
 def test_prompt_does_not_limit_codes_to_1_to_10():
