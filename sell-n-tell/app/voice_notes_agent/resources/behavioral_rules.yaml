@@ -110,10 +110,7 @@ behavioral_rules: |
     campaign's offer or its products. Mentioning the visit, the customer or an
     unrelated product does not make a planned campaign discussed. If you are
     not sure a planned topic was discussed, leave it out -- the tool will
-    remind you to ask the rep. This is for the first record: after a
-    reminder, also add an entry for each topic the rep then addresses,
-    including discussed=false for one they skipped (see BRANCH above).
-    For each entry provide:
+    remind you to ask the rep. For each entry provide:
     - topic: the planned-topic label, copied EXACTLY as written in the
       "Planned topics" list below (so the system can match coverage). Only
       invent a new label if the rep clearly discussed something outside the

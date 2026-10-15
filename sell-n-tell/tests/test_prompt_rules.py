@@ -61,12 +61,16 @@ def test_event_type_rule_is_stated():
     assert "Meeting when a person is mentioned" not in tools_src   # the tool's docstring says the same
 
 
-def test_leave_out_rule_is_only_for_the_first_record():
-    # "topics lists ONLY the planned topics the rep actually discussed" must not
-    # read against BRANCH, which adds discussed=false entries after a reminder.
+def test_the_leave_out_rule_has_no_after_reminder_clause():
+    # A clause here ("after a reminder, also add an entry for each topic the
+    # rep then addresses") was measured over three full runs: the agent began
+    # filing off-plan talk under a planned campaign's label -- an over-claim
+    # with an invented outcome -- and disposition and faithfulness dropped in
+    # every run. BRANCH already covers what to do after a reminder.
     rules = " ".join(_RULES.split())
-    assert "This is for the first record: after a reminder, also add an entry" in rules
-    assert "including discussed=false for one they skipped" in rules
+    assert "leave it out -- the tool will remind you to ask the rep. For each entry provide:" in rules
+    assert "after a reminder, also add an entry" not in rules
+    assert "Only invent a new label if the rep clearly discussed something outside the planned list" in rules
 
 
 def test_prompt_does_not_limit_codes_to_1_to_10():
