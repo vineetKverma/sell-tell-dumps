@@ -38,7 +38,7 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 
 | Score | Meaning |
 |---|---|
-| event_type | Meeting / On-site visit / Phone Call: a call is a Phone Call; otherwise the approved rule applies -- a person mentioned is a Meeting, else On-site visit |
+| event_type | Meeting / On-site visit / Phone Call: a call is a Phone Call; a business conversation with a customer contact (the decision maker or another contact such as a manager) is a Meeting; otherwise On-site visit, including front desk or gatekeeper only |
 | topic_status | each planned campaign correctly marked discussed or not |
 | disposition | the right code for each discussed topic |
 | faithfulness | the summaries say only what the rep said (checked by a judge model) |
@@ -114,8 +114,12 @@ point `SELLNTELL_EVAL_DATA` at it:
 
 ```powershell
 New-Item -ItemType Directory -Force evals/v1 | Out-Null   # gcloud needs the folder to exist
-gcloud storage cp "gs://sellntell-eval-np/golden_v1/*" evals/v1/
+gcloud storage cp "gs://sellntell-eval-np/golden_v1.4/*" evals/v1/
 ```
+
+`golden_v1.4` is the answer key the committed baseline was made on; with any
+other version a run ends INVALID ("the golden set differs from the one the
+baseline was made on").
 
 The folder holds `golden_v1.evalset.json`, `universal_fields.csv` and
 `vertical_fields.csv`. Do not copy it anywhere else. Without it, `run` stops

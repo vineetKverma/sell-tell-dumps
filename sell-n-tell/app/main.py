@@ -790,9 +790,10 @@ async def websocket_endpoint(
     """Bidirectional streaming session for one dictation conversation.
 
     ``planned_topics`` is a comma-separated list of the topic labels the rep
-    selected during pre-call planning; it is seeded into session state so the
-    agent can record an outcome for each one the rep talks about and remind
-    the rep about any it never heard.
+    selected during pre-call planning. It is only logged here: the planned
+    topics the agent reads are seeded into session state by
+    ``POST /api/sessions``, which must create the session first (an unknown
+    session_id is refused). AIML-2962 tracks dropping the query copy.
 
     ``campaign_type`` is accepted for forward-compatibility but is NOT
     processed by this pass -- it is stored as inert session-state metadata
@@ -981,9 +982,9 @@ async def _run_dictation_session(
             model_name,
         )
 
-    # Create/reuse the session, seeding planned_topics so the agent's prompt
-    # assembly can render the coverage-reminder block. No campaign_type seed
-    # anymore -- there is nothing per-campaign left to fetch.
+    # Attach to the session POST /api/sessions created; its state already
+    # holds the planned topics the agent's prompt renders the coverage-reminder
+    # block from. No campaign_type seed -- nothing per-campaign is fetched.
     session = await session_service.get_session(
         app_name=APP_NAME, user_id=user_id, session_id=session_id
     )
