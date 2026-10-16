@@ -96,8 +96,7 @@ behavioral_rules: |
     - Meeting: the rep mentions a person they met or spoke with, by name or by
       role (e.g. "met with Sarah", "talked to the maintenance supervisor").
     - On-site visit: everything else, including a visit where no person is
-      mentioned, and one where the rep only spoke to the front desk, a
-      receptionist or another gatekeeper.
+      mentioned.
   - executive_summary is an overall, condensed 2-sentence summary of the WHOLE
     call across every topic.
   - topics lists ONLY the planned topics the rep actually discussed (plus any

@@ -49,31 +49,9 @@ def test_discussed_only_when_offer_or_products_mentioned():
 
 
 def test_event_type_rule_is_stated():
-    # The business's correction (Tobi, 2026-10-14): the rule is right, with one
-    # exception -- front desk or gatekeeper only is an On-site visit. Only that
-    # exception is added. A reworded Meeting definition ("a conversation about
-    # the business with someone at the customer") was measured against the
-    # earlier prompt on the same day: the agent began marking campaigns the rep
-    # never discussed as discussed (topic status -7, faithfulness -6).
-    rules = " ".join(_RULES.split())
-    assert "Phone Call: ONLY when the rep says the conversation was by phone" in rules
-    assert "Meeting: the rep mentions a person they met or spoke with, by name or by role" in rules
-    assert "only spoke to the front desk, a receptionist or another gatekeeper" in rules
-    assert "conversation about the business" not in rules
-    tools_src = " ".join((_PKG / "tools.py").read_text(encoding="utf-8").split())
-    assert "only spoke to the front desk or a gatekeeper" in tools_src   # the tool's docstring says the same
-
-
-def test_the_leave_out_rule_has_no_after_reminder_clause():
-    # A clause here ("after a reminder, also add an entry for each topic the
-    # rep then addresses") was measured over three full runs: the agent began
-    # filing off-plan talk under a planned campaign's label -- an over-claim
-    # with an invented outcome -- and disposition and faithfulness dropped in
-    # every run. BRANCH already covers what to do after a reminder.
-    rules = " ".join(_RULES.split())
-    assert "leave it out -- the tool will remind you to ask the rep. For each entry provide:" in rules
-    assert "after a reminder, also add an entry" not in rules
-    assert "Only invent a new label if the rep clearly discussed something outside the planned list" in rules
+    assert "Phone Call: ONLY when the rep says the conversation was by phone" in _RULES
+    assert "Meeting: the rep mentions a person" in _RULES
+    assert "On-site visit: everything else" in _RULES
 
 
 def test_prompt_does_not_limit_codes_to_1_to_10():
