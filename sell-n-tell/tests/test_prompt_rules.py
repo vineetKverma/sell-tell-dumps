@@ -49,16 +49,19 @@ def test_discussed_only_when_offer_or_products_mentioned():
 
 
 def test_event_type_rule_is_stated():
-    # The business's rule (Tobi, 2026-10-14): a Meeting is a selling
-    # conversation with the customer; front desk or gatekeeper only is an
-    # On-site visit, even though the rep spoke to someone.
+    # The business's correction (Tobi, 2026-10-14): the rule is right, with one
+    # exception -- front desk or gatekeeper only is an On-site visit. Only that
+    # exception is added. A reworded Meeting definition ("a conversation about
+    # the business with someone at the customer") was measured against the
+    # earlier prompt on the same day: the agent began marking campaigns the rep
+    # never discussed as discussed (topic status -7, faithfulness -6).
     rules = " ".join(_RULES.split())
     assert "Phone Call: ONLY when the rep says the conversation was by phone" in rules
-    assert "Meeting: the rep had a conversation about the business with someone at the customer" in rules
+    assert "Meeting: the rep mentions a person they met or spoke with, by name or by role" in rules
     assert "only spoke to the front desk, a receptionist or another gatekeeper" in rules
-    assert "Meeting: the rep mentions a person" not in rules       # the old rule: any person counted
+    assert "conversation about the business" not in rules
     tools_src = " ".join((_PKG / "tools.py").read_text(encoding="utf-8").split())
-    assert "Meeting when a person is mentioned" not in tools_src   # the tool's docstring says the same
+    assert "only spoke to the front desk or a gatekeeper" in tools_src   # the tool's docstring says the same
 
 
 def test_the_leave_out_rule_has_no_after_reminder_clause():

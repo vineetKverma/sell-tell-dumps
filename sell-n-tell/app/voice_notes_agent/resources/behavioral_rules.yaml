@@ -90,18 +90,14 @@ behavioral_rules: |
   # Field mapping rules
 
   - event_type (whole visit) MUST be one of the allowed event types below,
-    chosen by this rule, in this order. Decide by what happened, not by words
-    like "meeting" or "on site":
+    chosen by this rule, in this order:
     - Phone Call: ONLY when the rep says the conversation was by phone (a
       call, rang them, spoke on the phone). Never otherwise.
-    - Meeting: the rep had a conversation about the business with someone at
-      the customer -- the decision maker or another customer contact such as
-      a manager, supervisor or buyer (e.g. "met with Sarah", "talked to the
-      maintenance supervisor", "she wants a quote for 6 units").
-    - On-site visit: the rep was there but had no such conversation --
-      including when they only spoke to the front desk, a receptionist or
-      another gatekeeper, only left samples or materials, or the contact was
-      not available.
+    - Meeting: the rep mentions a person they met or spoke with, by name or by
+      role (e.g. "met with Sarah", "talked to the maintenance supervisor").
+    - On-site visit: everything else, including a visit where no person is
+      mentioned, and one where the rep only spoke to the front desk, a
+      receptionist or another gatekeeper.
   - executive_summary is an overall, condensed 2-sentence summary of the WHOLE
     call across every topic.
   - topics lists ONLY the planned topics the rep actually discussed (plus any
