@@ -66,10 +66,11 @@ def score_case(case: Case, actual: dict | None) -> dict:
                  "event_type": None, "topics": [], "off_plan": [], "fields": [],
                  "fields_captured": "must_capture" in actual, "faithful": None}
 
-    # Event type. The key leaves it null when the note mentions no person and
-    # no call; the business-approved rule (Jeremy, AIML-1537 thread) makes
-    # that On-site visit: "if the seller mentions interacting with a person,
-    # Meeting; otherwise On-Site Visit".
+    # Event type. The key leaves it null when the note shows no conversation
+    # and no call; the business's rule (Jeremy, AIML-1537 thread; confirmed
+    # by Tobi, 2026-10-14) makes that On-site visit: a Meeting is a business
+    # conversation with a customer contact, and front desk or gatekeeper only
+    # is an On-site visit.
     if "event_type" not in case.contested:
         want = case.event_type or NO_PERSON_EVENT
         got = actual.get("event_type")

@@ -44,6 +44,15 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 | faithfulness | the summaries say only what the rep said (checked by a judge model) |
 | field_recall_* / field_invented_rate | must-capture fields captured when stated, and filled in when not (0% until the agent captures fields) |
 
+Event type is scored against the business's rule (the answer key, v1.4).
+The agent's prompt keeps its earlier rule -- "a person they met or spoke
+with, by name or by role" is a Meeting -- because every wording of the
+business rule tried in the prompt cost topic status and faithfulness. So
+about 8 golden cases count against the agent by design: 7 where the rep
+interacted with someone not named (the key says Meeting), and one where the
+rep spoke only to the front desk (the key says On-site visit). `extract()`
+(AIML-2929) follows the business rule.
+
 ## Why the numbers can be trusted
 
 - **The answers are checked.** Each golden case was labelled by two models
