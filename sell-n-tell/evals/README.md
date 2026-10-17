@@ -50,8 +50,8 @@ with, by name or by role" is a Meeting -- because every wording of the
 business rule tried in the prompt cost topic status and faithfulness. So
 about 8 golden cases count against the agent by design: 7 where the rep
 interacted with someone not named (the key says Meeting), and one where the
-rep spoke only to the front desk (the key says On-site visit). `extract()`
-(AIML-2929) follows the business rule.
+rep spoke only to the front desk (the key says On-site visit). AIML-2929
+adds `extract()`, which follows the business rule.
 
 ## Why the numbers can be trusted
 
@@ -80,8 +80,10 @@ rep spoke only to the front desk (the key says On-site visit). `extract()`
   summary moves faithfulness 6. Full mode judges both.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
-not speech; quick mode (18 cases) only catches large drops and judges only
-event type and topic status; per-vertical
+not speech; quick mode (18 cases) only catches large drops, and leaves out
+of its verdict whatever the baseline records as too noisy there (today
+disposition and faithfulness; field scores are compared, at 0% until the
+agent captures fields); per-vertical
 numbers rest on 15 cases each; faithfulness is judged by a model whose
 agreement with a human reviewer has not been measured yet.
 

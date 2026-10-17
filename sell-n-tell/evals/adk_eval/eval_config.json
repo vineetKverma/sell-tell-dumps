@@ -36,7 +36,7 @@
   "custom_metrics": {
     "event_type_accuracy": {
       "code_config": {"name": "evals.adk_eval.metrics.event_type_accuracy"},
-      "description": "Event type matches the answer key (a call is a Phone Call; otherwise a person mentioned is a Meeting, else On-site visit)."
+      "description": "Event type matches the answer key (a call is a Phone Call; a business conversation with a customer contact is a Meeting; otherwise On-site visit, including front desk or gatekeeper only)."
     },
     "topic_status_accuracy": {
       "code_config": {"name": "evals.adk_eval.metrics.topic_status_accuracy"},
