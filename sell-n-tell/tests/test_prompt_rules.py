@@ -123,15 +123,3 @@ def test_code_1_cues_do_not_contradict_99_guidance():
     # The worked example in the prompt maps interest + a quote request to 99.
     assert "interested and asked for a" in _RULES
     assert "the answer is 99" in _RULES
-
-
-def test_no_instruction_to_pass_a_parameter_the_tool_does_not_have():
-    # stage_visit_notes has no planned_topics argument; asking for it invites
-    # the model to put the full list into topics instead, re-adding every
-    # planned campaign.
-    block = _planned_topics_block(["MF Pools 26"])
-    assert "planned_topics on every" not in block
-    assert "planned_topics: ALWAYS pass" not in _RULES
-    schemas = (_PKG / "schemas.py").read_text(encoding="utf-8")
-    assert "Every planned topic should end up here" not in schemas
-

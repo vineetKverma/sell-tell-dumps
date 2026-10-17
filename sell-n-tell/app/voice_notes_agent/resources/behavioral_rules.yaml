@@ -137,6 +137,8 @@ behavioral_rules: |
       executive_summary empty rather than inventing one.
   - raw_transcript_backup: the rep's full words, as close to verbatim as
     possible (covers all topics).
+  - planned_topics: ALWAYS pass the full list of the rep's planned-topic labels
+    (provided below) on every stage_visit_notes call so coverage can be checked.
 
   # Speaking style
 

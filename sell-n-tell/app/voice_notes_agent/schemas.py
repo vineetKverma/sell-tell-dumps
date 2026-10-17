@@ -18,16 +18,15 @@ class DiscussionTopic(BaseModel):
     renewal), and each one gets its own disposition + summary.
 
     Topics line up with the rep's *pre-call planned topics* (now hardcoded
-    client-side; the server no longer serves or validates the catalog). A
-    planned topic is listed once the rep has addressed it; one the rep did
-    not mention is left out, so the tool reminds the rep about it:
+    client-side; the server no longer serves or validates the catalog).
+    Every planned topic should end up here:
     - If it was actually discussed, ``discussed`` is True and
       ``disposition_code`` carries the mapped outcome (one of the fixed
       disposition codes loaded from the workflow module's YAML registry).
-    - If, after the reminder, the rep says they did not get to it,
-      ``discussed`` is False and ``disposition_code`` may be omitted;
-      ``executive_summary`` then holds the rep's feedback on why (e.g. "ran
-      out of time, will cover next visit").
+    - If the rep confirmed they did not get to it, ``discussed`` is False and
+      ``disposition_code`` may be omitted; ``executive_summary`` then holds
+      the rep's feedback on why (e.g. "ran out of time, will cover next
+      visit").
     """
 
     topic: str = Field(
