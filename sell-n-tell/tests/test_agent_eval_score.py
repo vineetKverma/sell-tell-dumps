@@ -427,7 +427,9 @@ def test_missing_topics_drives_the_coverage_reply():
     assert missing_topics(case, staged, allow_skips=False) == ["Q3 Paint, Primer"]
 
 
-def test_missing_topics_uses_the_apps_substring_rule():
+def test_missing_topics_needs_the_planned_label_itself():
     case = make_case(planned_topics=["HC Q2 Compact Appliances"])
     staged = {"topics": [{"topic": "Compact Appliances", "discussed": True}]}
-    assert missing_topics(case, staged) == []  # covered for the app, so no reminder
+    assert missing_topics(case, staged) == ["HC Q2 Compact Appliances"]   # a partial label: the rep is asked
+    staged["topics"].append({"topic": "hc q2  compact appliances", "discussed": True})
+    assert missing_topics(case, staged) == []                              # case and spacing do not matter

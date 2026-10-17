@@ -188,3 +188,17 @@ class TestSupersedeGate:
     def test_unknown_session_raises(self, workflow):
         with pytest.raises(KeyError):
             workflow.commit_notes("no-such-session", True)
+
+
+def test_an_off_plan_row_does_not_cover_a_planned_topic():
+    """The agent adds off-plan subjects as their own rows and leaves undiscussed
+    planned topics out. "Plumbing leak" containing "plumbing" must not count
+    as the planned Plumbing, or the rep is never asked and it saves with no
+    outcome."""
+    from conftest import wf
+    planned = ["Plumbing", "MF Pools 26"]
+    rows = [topic("Plumbing leak"), topic("Pools")]
+    assert wf.compute_missing_topics(planned, rows) == ["Plumbing", "MF Pools 26"]
+    rows += [topic("plumbing"), topic("MF  Pools 26")]                    # its own label, any case or spacing
+    assert wf.compute_missing_topics(planned, rows) == []
+

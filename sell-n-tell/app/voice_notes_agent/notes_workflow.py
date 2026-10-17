@@ -208,8 +208,8 @@ def validate_payload(payload: dict[str, Any]) -> tuple[list[str], dict[str, Any]
 
 
 def _topic_key(label: str) -> str:
-    """Normalize a topic label for tolerant matching."""
-    return (label or "").strip().lower()
+    """A topic label ignoring case and spacing."""
+    return " ".join((label or "").split()).casefold()
 
 
 def compute_missing_topics(
@@ -219,10 +219,12 @@ def compute_missing_topics(
 ) -> list[str]:
     """Return planned topics that have no corresponding entry in the payload.
 
-    A planned topic is considered *covered* once it appears in the staged
-    ``topics`` list. Matching is tolerant of case/whitespace and falls back
-    to substring overlap so the model doesn't have to reproduce the catalog
-    label verbatim.
+    A planned topic is considered *covered* once a staged row carries its
+    label (ignoring case and spacing). Only its own label counts: the agent
+    leaves undiscussed planned topics out and adds off-plan subjects as their
+    own rows, so an off-plan row such as "Plumbing leak" must not cover the
+    planned "Plumbing" -- the rep would never be asked about it, and it would
+    be saved with no outcome.
 
     ``allow_skips`` decides whether a ``discussed=false`` entry counts as
     coverage. It must be False on the FIRST staging call: the model can
@@ -242,10 +244,7 @@ def compute_missing_topics(
         pk = _topic_key(planned)
         if not pk:
             continue
-        hit = pk in covered_keys or any(
-            pk in ck or ck in pk for ck in covered_keys if ck
-        )
-        if not hit:
+        if pk not in covered_keys:
             missing.append(planned)
     return missing
 

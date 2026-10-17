@@ -99,8 +99,7 @@ def _format_planned_topics_block(planned_topics: list[str]) -> str:
         "The rep planned to discuss the following campaigns on this call. Add "
         "a topics entry ONLY for a campaign whose offer or products the rep "
         "actually talked about, using its EXACT label below as the topic "
-        "field; leave the others out so the tool can remind the rep. Pass "
-        "this full list as planned_topics on every stage_visit_notes call:"
+        "field; leave the others out so the tool can remind the rep:"
         f"\n{lines}\n"
     )
 

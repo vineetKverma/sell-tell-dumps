@@ -78,17 +78,16 @@ def missing_topics(case: Case, staged: dict | None, allow_skips: bool = True) ->
     """Planned topics the app's coverage check will remind the rep about.
 
     Mirrors ``notes_workflow.compute_missing_topics`` so the scripted rep
-    answers exactly when the agent asks: a planned topic is covered by a row
-    whose label equals it or contains / is contained in it (case-insensitive),
-    and a ``discussed=false`` row counts only after the first staging call
-    (``allow_skips``). Scoring is stricter -- it wants the exact label."""
+    answers exactly when the agent asks: a planned topic is covered only by a
+    row with its own label (ignoring case and spacing), and a
+    ``discussed=false`` row counts only after the first staging call
+    (``allow_skips``)."""
     if not staged:
         return []
     covered = {norm(t.get("topic")) for t in staged.get("topics") or []
                if isinstance(t, dict) and (allow_skips or t.get("discussed", True))}
     covered.discard("")
-    return [p for p in case.planned_topics if norm(p) and not (
-        norm(p) in covered or any(norm(p) in c or c in norm(p) for c in covered))]
+    return [p for p in case.planned_topics if norm(p) and norm(p) not in covered]
 
 
 async def _settle(ws, tx: Transcript, quiet: float) -> bool:
