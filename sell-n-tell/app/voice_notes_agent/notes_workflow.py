@@ -395,19 +395,26 @@ def build_change_confirmation(
     ).strip():
         changes.append("updated the call summary")
 
-    old_topics = {
-        (t.get("topic") or "").strip().lower(): t
-        for t in old.get("topics", [])
-    }
+    # Same label rule as the coverage check, so a spacing difference is not
+    # read back as one topic removed and another added.
+    old_topics = {_topic_key(t.get("topic") or ""): t for t in old.get("topics", [])}
+    planned_keys = {_topic_key(p) for p in planned_topics or []}
     new_keys = set()
     for nt in new.get("topics", []):
         name = (nt.get("topic") or "").strip()
-        key = name.lower()
+        key = _topic_key(name)
         new_keys.add(key)
         ot = old_topics.get(key)
         if ot is None:
-            label = disposition_label(nt.get("disposition_code"))
-            changes.append(f"added a new topic, {name}, as {label.lower()}")
+            if nt.get("discussed") is False:
+                # The rep's answer to a reminder: skipping it IS the outcome.
+                changes.append(f"noted that you didn't get to {name}")
+            elif key in planned_keys:
+                label = disposition_label(nt.get("disposition_code"))
+                changes.append(f"added {name} as {label.lower()}")
+            else:
+                label = disposition_label(nt.get("disposition_code"))
+                changes.append(f"added a new topic, {name}, as {label.lower()}")
             continue
         if ot.get("disposition_code") != nt.get("disposition_code"):
             label = disposition_label(nt.get("disposition_code"))

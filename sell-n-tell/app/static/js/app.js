@@ -1144,11 +1144,16 @@ function handleFunctionResponse(fr) {
   }
 }
 
+// Same rule as the server's coverage check (notes_workflow._topic_key): a
+// planned topic is covered only by a row with its own label, ignoring case
+// and spacing -- an off-plan "Plumbing leak" does not cover "Plumbing".
+function topicKey(label) {
+  return (label || "").split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+}
+
 function topicsMatch(a, b) {
-  const x = (a || "").trim().toLowerCase();
-  const y = (b || "").trim().toLowerCase();
-  if (!x || !y) return false;
-  return x === y || x.includes(y) || y.includes(x);
+  const x = topicKey(a);
+  return x !== "" && x === topicKey(b);
 }
 
 function renderCoverage(topics) {

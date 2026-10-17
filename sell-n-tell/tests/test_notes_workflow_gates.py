@@ -202,3 +202,28 @@ def test_an_off_plan_row_does_not_cover_a_planned_topic():
     rows += [topic("plumbing"), topic("MF  Pools 26")]                    # its own label, any case or spacing
     assert wf.compute_missing_topics(planned, rows) == []
 
+
+def test_the_read_back_after_a_reminder_says_what_the_rep_said():
+    """After a reminder the rep says they skipped a planned topic; the agent
+    re-stages it with discussed=false. That is the topic's outcome, and it was
+    planned -- so not "a new topic ... as no outcome yet"."""
+    from conftest import wf
+    planned = ["Plumbing", "MF Pools 26"]
+    old = payload([topic("MF Pools 26")])
+    skipped = dict(topic("Plumbing"), discussed=False, disposition_code=None)
+    text = wf.build_change_confirmation(old, payload([topic("MF Pools 26"), skipped]), planned)
+    assert "noted that you didn't get to Plumbing" in text
+    assert "no outcome yet" not in text and "a new topic" not in text
+    discussed = topic("Plumbing", code=2)
+    assert "added Plumbing as" in wf.build_change_confirmation(old, payload([topic("MF Pools 26"), discussed]), planned)
+    off_plan = topic("Water heaters", code=2)
+    assert "added a new topic, Water heaters" in wf.build_change_confirmation(
+        old, payload([topic("MF Pools 26"), off_plan]), planned)
+
+
+def test_a_spacing_difference_is_not_read_back_as_a_removed_and_added_topic():
+    from conftest import wf
+    old, new = payload([topic("MF Pools 26")]), payload([topic("mf  pools 26")])
+    text = wf.build_change_confirmation(old, new, ["MF Pools 26"])
+    assert "removed" not in text and "added" not in text
+
