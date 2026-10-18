@@ -227,3 +227,17 @@ def test_a_spacing_difference_is_not_read_back_as_a_removed_and_added_topic():
     text = wf.build_change_confirmation(old, new, ["MF Pools 26"])
     assert "removed" not in text and "added" not in text
 
+
+def test_a_correction_to_skipped_is_read_back_as_skipped():
+    """The rep gave Plumbing an outcome, then says "actually we didn't get to
+    it": the read-back says so, not "changed the outcome to no outcome yet"."""
+    from conftest import wf
+    old = payload([topic("Plumbing", code=2)])
+    new = payload([dict(topic("Plumbing"), discussed=False, disposition_code=None)])
+    text = wf.build_change_confirmation(old, new, ["Plumbing"])
+    assert "noted that you didn't get to Plumbing" in text
+    assert "no outcome yet" not in text
+    # A real outcome change still reads as one.
+    changed = wf.build_change_confirmation(old, payload([topic("Plumbing", code=8)]), ["Plumbing"])
+    assert "changed the Plumbing outcome to" in changed
+

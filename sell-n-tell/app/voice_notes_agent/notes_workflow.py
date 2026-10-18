@@ -416,7 +416,11 @@ def build_change_confirmation(
                 label = disposition_label(nt.get("disposition_code"))
                 changes.append(f"added a new topic, {name}, as {label.lower()}")
             continue
-        if ot.get("disposition_code") != nt.get("disposition_code"):
+        if nt.get("discussed") is False and ot.get("discussed", True) is not False:
+            # A correction to "we didn't get to it": that is the outcome now,
+            # not "no outcome yet".
+            changes.append(f"noted that you didn't get to {name}")
+        elif ot.get("disposition_code") != nt.get("disposition_code"):
             label = disposition_label(nt.get("disposition_code"))
             changes.append(f"changed the {name} outcome to {label.lower()}")
         if (ot.get("executive_summary") or "").strip() != (
