@@ -233,10 +233,11 @@ def test_a_correction_to_skipped_is_read_back_as_skipped():
     it": the read-back says so, not "changed the outcome to no outcome yet"."""
     from conftest import wf
     old = payload([topic("Plumbing", code=2)])
-    new = payload([dict(topic("Plumbing"), discussed=False, disposition_code=None)])
+    new = payload([dict(topic("Plumbing", summary="Ran out of time."), discussed=False, disposition_code=None)])
     text = wf.build_change_confirmation(old, new, ["Plumbing"])
     assert "noted that you didn't get to Plumbing" in text
     assert "no outcome yet" not in text
+    assert "updated the summary" not in text          # one change, read back once
     # A real outcome change still reads as one.
     changed = wf.build_change_confirmation(old, payload([topic("Plumbing", code=8)]), ["Plumbing"])
     assert "changed the Plumbing outcome to" in changed

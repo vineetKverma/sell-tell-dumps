@@ -111,7 +111,7 @@ Run `full` three times, then export the scores (numbers only) to
 `evals/baselines/golden_v1.json` and commit it with the change:
 
 ```powershell
-uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:disposition --allow-noisy quick:faithfulness
+uv run python -m evals.agent_eval.baseline export evals/runs/full-A evals/runs/full-B evals/runs/full-C --allow-noisy quick:faithfulness
 ```
 
 If the export names another score as too noisy, add more runs first; pass
