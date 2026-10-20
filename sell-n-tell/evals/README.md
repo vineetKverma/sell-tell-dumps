@@ -75,15 +75,17 @@ adds `extract()`, which follows the business rule.
   silently: `baseline export` refuses it unless it is named with
   `--allow-noisy`, the baseline records it, and every run lists it under "not
   in the verdict" (in `final_scores.json`, the scorecard header and the
-  console). Today that is disposition and faithfulness in quick mode: about 9
-  topics across 18 cases, so one topic moves disposition 11 points, and one
-  summary moves faithfulness 6. Full mode judges both.
+  console). Today that is faithfulness in quick mode (one summary moves it 6
+  points). Quick-mode disposition stays in the verdict because the baseline's
+  three runs happened to agree, but it rests on about 9 topics, so one topic
+  moves it 11 points: confirm a quick-mode disposition REGRESSION with a full
+  run. Full mode judges both.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
 not speech; quick mode (18 cases) only catches large drops, and leaves out
 of its verdict whatever the baseline records as too noisy there (today
-disposition and faithfulness; field scores are compared, at 0% until the
-agent captures fields); per-vertical
+faithfulness; field scores are compared, at 0% until the agent captures
+fields); per-vertical
 numbers rest on 15 cases each; faithfulness is judged by a model whose
 agreement with a human reviewer has not been measured yet.
 
