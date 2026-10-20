@@ -44,6 +44,10 @@ from .schemas import CommitResult, TopicOutcome
 
 logger = logging.getLogger(__name__)
 
+# Session-state key holding the rep's pre-call planned topics (seeded by
+# POST /api/sessions). Read by agent.py and tools.py.
+STATE_PLANNED_TOPICS = "planned_topics"
+
 # ---------------------------------------------------------------------------
 # Disposition registry, loaded from YAML at import time (static data, not
 # logic -- see resources/dispositions.yaml). Replaces the Python-literal
@@ -249,6 +253,41 @@ def compute_missing_topics(
     return missing
 
 
+def near_matches(
+    missing: list[str], staged_topics: list[dict[str, Any]]
+) -> list[tuple[str, str]]:
+    """(planned label, staged label) pairs where a missing planned topic and a
+    staged row nearly match -- one label contains the other ("MF Pools" for
+    "MF Pools 26"). Coverage needs the exact label, so such a row does not
+    count; these pairs show how often the model paraphrases a label."""
+    staged = [
+        (_topic_key(t.get("topic", "")), t.get("topic", ""))
+        for t in staged_topics
+    ]
+    pairs = []
+    for planned in missing:
+        pk = _topic_key(planned)
+        for sk, label in staged:
+            if pk and sk and sk != pk and (pk in sk or sk in pk):
+                pairs.append((planned, label))
+    return pairs
+
+
+def log_near_matches(
+    session_id: str, missing: list[str], staged_topics: list[dict[str, Any]]
+) -> None:
+    """Warn when a staged row nearly matches a planned topic that still counts
+    as missing, so production logs show how often labels are paraphrased."""
+    for planned, label in near_matches(missing, staged_topics):
+        logger.warning(
+            "Coverage near-match session_id=%s planned=%r staged=%r -- not "
+            "counted as covered (exact label required)",
+            session_id,
+            planned,
+            label,
+        )
+
+
 # ---------------------------------------------------------------------------
 # In-memory, ephemeral call state. NOT a database: this dict lives only for
 # the life of the process and is never read back after a restart. Bridges
@@ -422,6 +461,12 @@ def build_change_confirmation(
             # changes with it, so that is not read back separately).
             changes.append(f"noted that you didn't get to {name}")
             continue
+        if ot.get("discussed") is False and nt.get("discussed", True) is not False:
+            # The reverse correction: "actually we did talk about it". There
+            # was no outcome before, so one is added rather than changed.
+            label = disposition_label(nt.get("disposition_code"))
+            changes.append(f"added an outcome for {name}: {label.lower()}")
+            continue
         if ot.get("disposition_code") != nt.get("disposition_code"):
             label = disposition_label(nt.get("disposition_code"))
             changes.append(f"changed the {name} outcome to {label.lower()}")
@@ -525,6 +570,7 @@ def stage_notes(
     missing = compute_missing_topics(
         planned_topics, payload.get("topics", []), allow_skips=allow_skips
     )
+    log_near_matches(session_id, missing, payload.get("topics", []))
     # A correction re-stages under a brand-new session_id, so the count has
     # to be carried forward from the record it's correcting rather than
     # derived from this one alone.

@@ -195,7 +195,8 @@ async def stage_visit_notes(
     # planned topics nothing would be missing, and an empty record would save.
     # A blank label is not a planned topic: the coverage check skips it, so
     # [""] must count as nothing planned here too.
-    planned_labels = [p for p in (tool_context.state.get("planned_topics") or []) if str(p or "").strip()]
+    planned = tool_context.state.get(notes_workflow.STATE_PLANNED_TOPICS) or []
+    planned_labels = [p for p in planned if str(p or "").strip()]
     if not topic_list and not planned_labels:
         problems.append("no discussion topics were provided")
     if problems:
@@ -219,7 +220,9 @@ async def stage_visit_notes(
 
     # Planned topics were seeded into session state at connect time. They
     # drive the coverage check (which planned topics still need an outcome).
-    planned_topics = tool_context.state.get("planned_topics") or []
+    planned_topics = (
+        tool_context.state.get(notes_workflow.STATE_PLANNED_TOPICS) or []
+    )
 
     payload = {
         "event_type": event_type,

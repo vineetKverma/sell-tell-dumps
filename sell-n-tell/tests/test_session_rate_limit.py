@@ -62,5 +62,7 @@ def test_only_once_and_only_for_a_rate_limit():
 
 
 def test_the_session_writer_uses_it():
-    assert "await once_more_on_429(lambda: api_client.agent_engines.sessions.events.append(" in (
-        APP / "main.py").read_text(encoding="utf-8")
+    # Only that the writer calls it -- not one exact formatted line, which
+    # ruff format may reflow.
+    main = (APP / "main.py").read_text(encoding="utf-8")
+    assert "once_more_on_429(" in main.split("async def _do_append", 1)[1]

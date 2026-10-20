@@ -38,7 +38,7 @@ def test_quick_subset_of_the_golden_set_is_18_cases():
 
 
 def _rollup(event, topic, faith, recall, fab):
-    acc = lambda r: {"rate": r, "ok": 0, "n": 1}  # noqa: E731
+    acc = lambda r: {"rate": r, "ok": 0, "n": 1000}  # noqa: E731  (many items: no one-item floor)
     return {"all": {"event_type": acc(event), "topic_status": acc(topic), "disposition": acc(None),
                     "faithfulness": acc(faith),
                     "fields": {"all": {"recall": recall, "fabrication": fab}, "P1": {"recall": recall}}}}
@@ -50,7 +50,7 @@ BASE = {"source_run": "baseline", "full": bl.summarise([_rollup(0.60, 0.49, 0.22
 def test_baseline_summary_holds_numbers_only():
     s = BASE["full"]
     assert s["event_type"] == {"mean": 60.0, "min": 60.0, "max": 60.0, "stdev": 0.0, "runs": 3,
-                               "higher_is_better": True}
+                               "higher_is_better": True, "items": 1000}
     assert "disposition" not in s  # no rate -> not reported, never 0
     text = json.dumps(BASE)
     assert "HL-" not in text and "note" not in text
@@ -374,3 +374,13 @@ def test_a_run_where_no_case_is_scored_ends_invalid_not_in_a_traceback(tmp_path,
     assert stop.value.code == 2                                 # INVALID, not 1 (REGRESSION)
     final = json.loads((down / "rescore-full" / "final_scores.json").read_text(encoding="utf-8"))
     assert final["verdict"] == "INVALID" and "no case was scored" in final["problems"] and final["scores"] == {}
+
+
+def test_a_limit_is_never_finer_than_one_item():
+    # Quick-mode disposition: ~9 topics, so one flipped topic moves it ~11
+    # points; three identical runs (stdev 0) must not make that a REGRESSION.
+    ref = {"mean": 77.78, "stdev": 0.0, "items": 9}
+    assert bl.threshold_for(ref) > 100 / 9
+    assert bl.threshold_for({"mean": 77.78, "stdev": 0.0}) == bl.DEFAULT_THRESHOLD   # older baselines
+    assert bl.threshold_for({"mean": 75.0, "stdev": 0.5, "items": 130}) == bl.DEFAULT_THRESHOLD
+    assert bl.summarise([_rollup(0.60, 0.49, 2 / 3, 0.0, 0.0)])["faithfulness"]["items"] == 1000

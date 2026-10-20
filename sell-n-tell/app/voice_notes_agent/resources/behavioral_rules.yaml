@@ -4,7 +4,7 @@
 # is loaded once at import time instead of living inline in agent.py.
 #
 # The dynamic campaign/config block and the planned-topics block are still
-# rendered by agent.py's _format_config_block / _format_planned_topics_block
+# rendered by agent.py's _format_config_block / prompt_blocks.format_planned_topics_block
 # -- those stay Python because they interpolate per-session state, not
 # static text.
 #

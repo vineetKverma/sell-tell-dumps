@@ -29,7 +29,9 @@ def _adk_session_service_source() -> str:
         pytest.skip("google-adk not installed")
     path = Path(next(iter(spec.submodule_search_locations))) / "vertex_ai_session_service.py"
     if not path.exists():
-        pytest.skip("ADK has no vertex_ai_session_service.py")
+        # ADK is installed but the file moved: fail, so CI notices the guard
+        # can no longer check anything (a skip would hide it).
+        pytest.fail(f"ADK is installed but {path.name} is not where this guard reads it: {path}")
     return path.read_text(encoding="utf-8")
 
 

@@ -28,6 +28,7 @@ from google.genai import types
 
 from . import notes_workflow
 from .live_credentials import build_prewarmed_live_client
+from .prompt_blocks import format_planned_topics_block
 from .tools import commit_visit_notes, stage_visit_notes
 
 
@@ -45,8 +46,10 @@ live_client = build_prewarmed_live_client()
 
 # Seeded at session creation from the rep's pre-call topic selection. This is
 # the only per-session state this module still reads -- campaign_type and
-# agent_config are gone along with the campaign machinery they served.
-STATE_PLANNED_TOPICS = "planned_topics"
+# agent_config are gone along with the campaign machinery they served. Defined
+# in notes_workflow so tools.py can use it too (tools.py cannot import this
+# module, which imports tools.py).
+STATE_PLANNED_TOPICS = notes_workflow.STATE_PLANNED_TOPICS
 
 # ---------------------------------------------------------------------------
 # Behavioral instruction template (the fixed conversational flow), loaded
@@ -85,32 +88,12 @@ def _format_config_block(config: dict) -> str:
     )
 
 
-def _format_planned_topics_block(planned_topics: list[str]) -> str:
-    "Render the rep's pre-call planned topics into the system prompt."
-    if not planned_topics:
-        return (
-            "# Planned topics\n"
-            "The rep did not pre-select any planned topics. Capture whatever "
-            "they discuss as topics and skip the coverage reminder.\n"
-        )
-    lines = "\n".join(f"  - {t}" for t in planned_topics)
-    return (
-        "# Planned topics\n"
-        "The rep planned to discuss the following campaigns on this call. Add "
-        "a topics entry ONLY for a campaign whose offer or products the rep "
-        "actually talked about, using its EXACT label below as the topic "
-        "field; leave the others out so the tool can remind the rep. Pass "
-        "this full list as planned_topics on every stage_visit_notes call:"
-        f"\n{lines}\n"
-    )
-
-
 def voice_notes_instruction(ctx: ReadonlyContext) -> str:
     "Assemble the full system instruction: fixed rules + planned topics + config."
     planned_topics = ctx.state.get(STATE_PLANNED_TOPICS) or []
     return (
         f"{_BEHAVIORAL_RULES}\n\n"
-        f"{_format_planned_topics_block(planned_topics)}\n"
+        f"{format_planned_topics_block(planned_topics)}\n"
         f"{_format_config_block(_AGENT_CONFIG)}"
     )
 

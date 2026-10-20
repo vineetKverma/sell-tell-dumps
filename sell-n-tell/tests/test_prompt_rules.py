@@ -1,13 +1,13 @@
 """AIML-2928: the prompt rules behind the AIML-2702 baseline misses.
 
 Reads the prompt sources directly. ``agent.py`` builds the live client at
-import time, so its planned-topics block is loaded on its own via ``ast``
-rather than by importing the module.
+import time, so the planned-topics block lives in ``prompt_blocks.py``, which
+is loaded on its own from its file.
 """
 
 from __future__ import annotations
 
-import ast
+import importlib.util
 from pathlib import Path
 
 import yaml
@@ -21,17 +21,19 @@ _DISPOSITIONS = yaml.safe_load(
 )
 
 
+_spec = importlib.util.spec_from_file_location("_prompt_blocks", _PKG / "prompt_blocks.py")
+_prompt_blocks = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_prompt_blocks)
+
+
 def _planned_topics_block(topics: list[str]) -> str:
-    tree = ast.parse((_PKG / "agent.py").read_text(encoding="utf-8"))
-    func = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_format_planned_topics_block"
-    )
-    namespace: dict = {}
-    exec(compile(ast.Module([func], []), "agent.py", "exec"), namespace)
-    return namespace["_format_planned_topics_block"](topics)
+    return _prompt_blocks.format_planned_topics_block(topics)
+
+
+def test_agent_uses_the_tested_block():
+    agent_src = (_PKG / "agent.py").read_text(encoding="utf-8")
+    assert "from .prompt_blocks import format_planned_topics_block" in agent_src
+    assert "def _format_planned_topics_block" not in agent_src             # one copy only
 
 
 def test_prompt_no_longer_asks_for_every_planned_topic():
@@ -123,3 +125,9 @@ def test_code_1_cues_do_not_contradict_99_guidance():
     # The worked example in the prompt maps interest + a quote request to 99.
     assert "interested and asked for a" in _RULES
     assert "the answer is 99" in _RULES
+
+
+def test_the_planned_topics_key_is_named_once():
+    tools_src = (_PKG / "tools.py").read_text(encoding="utf-8")
+    assert '"planned_topics"' not in tools_src
+    assert "notes_workflow.STATE_PLANNED_TOPICS" in tools_src

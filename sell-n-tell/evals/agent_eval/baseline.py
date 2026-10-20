@@ -50,8 +50,24 @@ METRICS = [
 ]
 
 
+# How many items each rate is computed over, so a limit is never finer than
+# one item (quick mode: ~9 discussed topics, so one topic is ~11 points).
+ITEMS = {
+    "event_type": lambda r: (r.get("event_type") or {}).get("n"),
+    "topic_status": lambda r: (r.get("topic_status") or {}).get("n"),
+    "over_claimed": lambda r: (r.get("over_claimed") or {}).get("n"),
+    "disposition": lambda r: (r.get("disposition") or {}).get("n"),
+    "faithfulness": lambda r: (r.get("faithfulness") or {}).get("n"),
+    "field_recall_P1": lambda r: ((r.get("fields") or {}).get("P1") or {}).get("stated"),
+    "field_recall_all": lambda r: ((r.get("fields") or {}).get("all") or {}).get("stated"),
+    "field_invented_rate": lambda r: (((r.get("fields") or {}).get("all") or {}).get("fp") or 0)
+    + (((r.get("fields") or {}).get("all") or {}).get("tn") or 0),
+}
+
+
 def summarise(rollups: list[dict]) -> dict:
-    """Per metric across repeats (group 'all'): mean/min/max/stdev in percent."""
+    """Per metric across repeats (group 'all'): mean/min/max/stdev in percent,
+    and the smallest number of items the rate was computed over."""
     out = {}
     for name, read, higher in METRICS:
         vals = [read(r["all"]) for r in rollups]
@@ -61,13 +77,17 @@ def summarise(rollups: list[dict]) -> dict:
                          "max": round(max(vals), 2),
                          "stdev": round(statistics.stdev(vals), 2) if len(vals) > 1 else 0.0,
                          "runs": len(vals), "higher_is_better": higher}
+            counts = [c for c in (ITEMS[name](r["all"]) for r in rollups if name in ITEMS) if c]
+            if counts:
+                out[name]["items"] = min(counts)
     return out
 
 
 def too_noisy(baseline: dict) -> list[str]:
     """'mode:metric' for every metric whose limit is above MAX_THRESHOLD."""
     return [f"{mode}:{name}" for mode in ("full", "quick")
-            for name, m in (baseline.get(mode) or {}).items() if threshold_for(m) > MAX_THRESHOLD]
+            for name, m in (baseline.get(mode) or {}).items()
+            if threshold_for(m, one_item_floor=False) > MAX_THRESHOLD]
 
 
 def not_gated(baseline: dict, allow_noisy: list[str] = ()) -> dict[str, list[str]]:
@@ -130,8 +150,15 @@ def export(run_dirs: list[Path] | Path, out: Path = BASELINE, allow_noisy: list[
     return baseline
 
 
-def threshold_for(ref_metric: dict) -> float:
-    return max(DEFAULT_THRESHOLD, NOISE_MULTIPLIER * ref_metric.get("stdev", 0.0))
+def threshold_for(ref_metric: dict, one_item_floor: bool = True) -> float:
+    """The larger of the floor, 3 x the baseline's run-to-run stdev, and (when
+    comparing a run) one item's worth of the rate plus a hair, so a single
+    flipped item is never a regression on its own. "Too noisy to gate" is
+    judged from the run-to-run spread alone (``one_item_floor=False``).
+    Baselines exported before "items" fall back to the first two."""
+    items = ref_metric.get("items") or 0
+    one_item = 100.0 / items + 0.01 if items and one_item_floor else 0.0
+    return max(DEFAULT_THRESHOLD, NOISE_MULTIPLIER * ref_metric.get("stdev", 0.0), one_item)
 
 
 def compare(rollups: list[dict], baseline: dict, mode: str,

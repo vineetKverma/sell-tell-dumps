@@ -242,3 +242,26 @@ def test_a_correction_to_skipped_is_read_back_as_skipped():
     changed = wf.build_change_confirmation(old, payload([topic("Plumbing", code=8)]), ["Plumbing"])
     assert "changed the Plumbing outcome to" in changed
 
+
+def test_a_correction_to_discussed_adds_an_outcome():
+    """The rep first said they didn't get to Plumbing, then that they did:
+    there was no outcome to change, so one is added."""
+    from conftest import wf
+    old = payload([dict(topic("Plumbing"), discussed=False, disposition_code=None)])
+    text = wf.build_change_confirmation(old, payload([topic("Plumbing", code=2)]), ["Plumbing"])
+    assert "added an outcome for Plumbing:" in text
+    assert "changed the Plumbing outcome" not in text
+
+
+def test_a_near_match_is_reported_but_not_counted(caplog):
+    """A paraphrased label ("MF Pools" for "MF Pools 26") still counts as
+    missing, but is logged so production shows how often it happens."""
+    import logging
+    from conftest import wf
+    rows = [topic("MF Pools"), topic("Water heaters")]
+    assert wf.compute_missing_topics(["MF Pools 26"], rows) == ["MF Pools 26"]
+    assert wf.near_matches(["MF Pools 26"], rows) == [("MF Pools 26", "MF Pools")]
+    with caplog.at_level(logging.WARNING):
+        wf.log_near_matches("s-1", ["MF Pools 26"], rows)
+    assert "near-match" in caplog.text and "'MF Pools 26'" in caplog.text
+    assert wf.near_matches(["Plumbing"], [topic("Water heaters")]) == []
