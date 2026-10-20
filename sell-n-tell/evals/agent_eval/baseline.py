@@ -178,7 +178,7 @@ def main() -> None:
     ex.add_argument("run_dirs", type=Path, nargs="+", help="one or more full runs")
     ex.add_argument("--allow-noisy", action="append", default=[], metavar="MODE:METRIC",
                     help=f"leave a metric whose limit is above {MAX_THRESHOLD:.0f} points out of "
-                         "the verdict, e.g. quick:disposition (repeatable)")
+                         "the verdict, e.g. quick:faithfulness (repeatable)")
     sub.add_parser("show", help="print the committed baseline")
     args = ap.parse_args()
     if args.cmd == "export":
