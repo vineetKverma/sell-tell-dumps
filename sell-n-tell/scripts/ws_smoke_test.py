@@ -27,10 +27,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import struct
 import sys
 import urllib.parse
 import urllib.request
-import uuid
 
 import websockets
 
@@ -101,10 +101,20 @@ SCENARIOS: dict[str, list[str]] = {
         "order for it.",
         "Save.",
     ],
+    "silence_nudge": [
+        "__SILENCE__",
+        (
+            "I met with the customer on site today. We discussed pricing and "
+            "they said it was too expensive for their budget right now. End of "
+            "notes."
+        ),
+        "Save it.",
+    ],
 }
 
 PLANNED_TOPICS: dict[str, str] = {
     "clean_save": "Pricing discussion",
+    "silence_nudge": "Pricing discussion",
     "correction": "Pricing discussion",
     "correction_summary": "Pricing discussion",
     "correction_disposition": "Pricing discussion",
@@ -186,7 +196,9 @@ async def _drain_until_agent_settles(
             return
         # Before the first turn_complete, wait as long as the overall cap
         # allows. After it, a short silence means the agent is done.
-        wait_for = min(quiet_period, remaining) if saw_turn_complete else remaining
+        wait_for = (
+            min(quiet_period, remaining) if saw_turn_complete else remaining
+        )
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=wait_for)
         except asyncio.TimeoutError:
@@ -205,16 +217,27 @@ async def _drain_until_agent_settles(
             saw_turn_complete = True
 
 
-async def run_scenario(scenario: str, turns: list[str], planned_topics: str) -> None:
+async def run_scenario(
+    scenario: str,
+    turns: list[str],
+    planned_topics: str,
+    audio_streaming: bool = False,
+) -> None:
     user_id = "smoke_tester"
-    topics_list = [t.strip() for t in planned_topics.split(",") if t.strip()] if planned_topics else []
-    
+    topics_list = (
+        [t.strip() for t in planned_topics.split(",") if t.strip()]
+        if planned_topics
+        else []
+    )
+
     # Mint session on server via POST /api/sessions (AIML-2743 / VertexAiSessionService)
-    post_data = json.dumps({
-        "user_id": user_id,
-        "planned_topics": topics_list,
-        "campaign_type": DEFAULT_CAMPAIGN_TYPE,
-    }).encode("utf-8")
+    post_data = json.dumps(
+        {
+            "user_id": user_id,
+            "planned_topics": topics_list,
+            "campaign_type": DEFAULT_CAMPAIGN_TYPE,
+        }
+    ).encode("utf-8")
     req = urllib.request.Request(
         "http://localhost:8000/api/sessions",
         data=post_data,
@@ -236,25 +259,75 @@ async def run_scenario(scenario: str, turns: list[str], planned_topics: str) -> 
     print(f"connecting: {url}")
 
     async with websockets.connect(url, max_size=None) as ws:
-        for i, turn in enumerate(turns, start=1):
-            if i > 1:
-                # Small courtesy pause only; the real synchronisation is the
-                # quiet-period wait below.
-                await asyncio.sleep(0.5)
-            print(f"\n--- turn {i}: REP SAYS: {turn!r} ---")
-            await ws.send(json.dumps({"type": "text", "text": turn}))
-            is_last = i == len(turns)
-            await _drain_until_agent_settles(
-                ws, FINAL_QUIET_PERIOD_S if is_last else QUIET_PERIOD_S
-            )
-        print("\n--- scenario complete ---")
+        audio_task: asyncio.Task | None = None
+        amplitude = 30
+        if audio_streaming:
+
+            async def _stream_ambient() -> None:
+                nonlocal amplitude
+                try:
+                    while True:
+                        chunk = struct.pack("<320h", *([amplitude] * 320))
+                        await ws.send(chunk)
+                        await asyncio.sleep(0.02)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    print(
+                        f"[_stream_ambient] audio stream stopped: {exc}",
+                        file=sys.stderr,
+                    )
+
+            audio_task = asyncio.create_task(_stream_ambient())
+
+        try:
+            for i, turn in enumerate(turns, start=1):
+                if i > 1:
+                    # Small courtesy pause only; the real synchronisation is the
+                    # quiet-period wait below.
+                    await asyncio.sleep(0.5)
+
+                if turn == "__SILENCE__":
+                    print(
+                        f"\n--- turn {i}: REP STAYS SILENT (16s silence for watchdog) ---"
+                    )
+                    old_amp = amplitude
+                    amplitude = 0
+                    if not audio_streaming:
+                        silence_chunk = struct.pack("<320h", *([0] * 320))
+                        for _ in range(16 * 50):
+                            await ws.send(silence_chunk)
+                            await asyncio.sleep(0.02)
+                    else:
+                        await asyncio.sleep(16.0)
+                    amplitude = old_amp
+                    await _drain_until_agent_settles(ws, QUIET_PERIOD_S)
+                    continue
+
+                print(f"\n--- turn {i}: REP SAYS: {turn!r} ---")
+                await ws.send(json.dumps({"type": "text", "text": turn}))
+                is_last = i == len(turns)
+                await _drain_until_agent_settles(
+                    ws, FINAL_QUIET_PERIOD_S if is_last else QUIET_PERIOD_S
+                )
+            print("\n--- scenario complete ---")
+        finally:
+            if audio_task is not None:
+                audio_task.cancel()
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--scenario", default=None, help="run just one scenario")
+    parser.add_argument(
+        "--scenario", default=None, help="run just one scenario"
+    )
     parser.add_argument(
         "--raw", action="store_true", help="print full raw event JSON"
+    )
+    parser.add_argument(
+        "--audio",
+        action="store_true",
+        help="stream continuous background 16kHz PCM audio",
     )
     args = parser.parse_args()
     global RAW_MODE
@@ -265,7 +338,7 @@ async def main() -> None:
     for name in names:
         turns = SCENARIOS[name]
         planned = PLANNED_TOPICS.get(name, "")
-        await run_scenario(name, turns, planned)
+        await run_scenario(name, turns, planned, audio_streaming=args.audio)
 
 
 if __name__ == "__main__":
