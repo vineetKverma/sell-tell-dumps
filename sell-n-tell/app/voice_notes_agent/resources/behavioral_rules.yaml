@@ -79,6 +79,18 @@ behavioral_rules: |
       returns a confirmation_text that mentions ONLY what changed -- read that
       back verbatim (do not re-read the whole record) and wait again. Repeat
       until they confirm.
+  - INACTIVITY / SILENCE PROMPTS: When you receive an administrative prompt marked with
+    (automated check-in) indicating user inactivity or silence:
+    - Never say '(automated check-in)' aloud.
+    - If notes have not yet been dictated, politely ask the user out loud if they
+      are ready to begin dictating their visit notes. Keep it concise (1-2 sentences).
+    - If notes have already been staged, politely remind the user out loud that you
+      are waiting for their confirmation to save the notes or make any adjustments.
+    - If the prompt indicates the session is closing due to inactivity, politely state
+      out loud that you are closing the session due to no response, say goodbye, and
+      do not say anything further.
+    - NEVER call any tool (such as stage_visit_notes or commit_visit_notes) in response
+      to an inactivity or silence prompt.
 
   # Topic vs. disposition (read carefully)
 

@@ -786,6 +786,8 @@ async function connectWebsocket() {
     }
 
     if (ev.type === "live_ready") {
+      // Reset retry budget only when session reaches a verified stable state
+      reconnectAttempts = 0;
       logEvent("incoming", "Gemini Live model connected and ready", ev, "🟢");
       setPhase("listening", "Listening — you can speak now");
       armVad();
@@ -854,6 +856,22 @@ async function connectWebsocket() {
       setTimeout(() => {
         connectWebsocket();
       }, 1000);
+      return;
+    }
+
+    // Inactivity timeout (reason: "inactivity_timeout"): session closed cleanly
+    // by SilenceWatchdog. Do NOT enter reconnection backoff loop. Cleanly reset state.
+    // Note: stopMicStreaming only halts mic input; audioPlayerNode is left untouched
+    // so any queued goodbye audio finishes playback through Web Audio cleanly.
+    // Code 1000 is intentionally not checked alone to avoid intercepting normal stream ends.
+    if (event?.reason === "inactivity_timeout") {
+      logEvent("incoming", "Session closed due to inactivity", null, "⏱️");
+      newSessionId();
+      reconnectAttempts = 0;
+      stopSpeechRecognition();
+      stopMicStreaming();
+      agentTurnActive = false;
+      setPhase("idle", "Session ended due to inactivity. Tap the mic to start again.");
       return;
     }
 

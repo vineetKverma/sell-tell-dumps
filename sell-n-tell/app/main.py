@@ -21,6 +21,7 @@ this codebase anymore.
 import asyncio
 import contextlib
 import contextvars
+import datetime
 import json
 import logging
 import os
@@ -28,30 +29,27 @@ import re
 import sys
 import warnings
 from pathlib import Path
-import time
+from typing import Any
 
+import pydantic
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
+from google.adk.events import Event
 from google.adk.models.google_llm import Gemini
 from google.adk.plugins.bigquery_agent_analytics_plugin import (
     BigQueryAgentAnalyticsPlugin,
     BigQueryLoggerConfig,
 )
-from google.adk.events import Event
 from google.adk.runners import Runner
-from google.adk.errors.already_exists_error import AlreadyExistsError
 from google.adk.sessions import (
     BaseSessionService,
     Session,
     VertexAiSessionService,
 )
-from typing import Any
-import datetime
-import pydantic
 from google.genai import types
 
 # Custom-metadata keys for compaction and usage data. They must be the exact
@@ -103,7 +101,9 @@ load_dotenv(Path(__file__).parent / ".env")
 # using standard Google Application Default Credentials (ADC) OAuth2 tokens!
 if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1"):
     _api_key = os.getenv("GOOGLE_API_KEY")
-    if _api_key and ("your_api_key" in _api_key.lower() or not _api_key.strip()):
+    if _api_key and (
+        "your_api_key" in _api_key.lower() or not _api_key.strip()
+    ):
         del os.environ["GOOGLE_API_KEY"]
 
 # pylint: disable=wrong-import-position
@@ -111,11 +111,12 @@ if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("true", "1"):
 # are gone. main.py no longer needs a CRM/workflow import at all -- every
 # REST route that used to call into it (config, stage, commit, debug list)
 # is deleted; the workflow is called directly and only from tools.py now.
-from voice_notes_agent.agent import STATE_PLANNED_TOPICS, agent, live_client  # noqa: E402
-from voice_notes_agent.live_credentials import start_background_refresh  # noqa: E402
 from voice_notes_agent import notes_workflow, turn_guard  # noqa: E402
+from voice_notes_agent.agent import STATE_PLANNED_TOPICS, agent, live_client  # noqa: E402
+from voice_notes_agent.audio_detector import AudioEnergyDetector  # noqa: E402
+from voice_notes_agent.live_credentials import start_background_refresh  # noqa: E402
 from voice_notes_agent.rate_limit import once_more_on_429  # noqa: E402
-
+from voice_notes_agent.silence_watchdog import SilenceWatchdog  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -163,7 +164,9 @@ async def lifespan(app: FastAPI):
     yield
     prune_task.cancel()
     if "session_service" in globals() and hasattr(session_service, "flush"):
-        logger.info("Flushing pending cloud session persistence tasks on shutdown...")
+        logger.info(
+            "Flushing pending cloud session persistence tasks on shutdown..."
+        )
         await session_service.flush()
 
 
@@ -204,13 +207,13 @@ async def _no_store_static(request, call_next):
 # ---------------------------------------------------------------------------
 # VertexAiSessionService persists session state and turns across process restarts,
 # redeployments, and network disconnects.
-_SESSION_PROJECT = os.getenv("VERTEX_AI_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+_SESSION_PROJECT = os.getenv("VERTEX_AI_PROJECT") or os.getenv(
+    "GOOGLE_CLOUD_PROJECT"
+)
 
 # Parse raw engine ID or URN (e.g., "urn:agent:...:reasoningEngines:2221633612665585664")
 _raw_agent_engine = (
-    os.getenv("VERTEX_AI_AGENT_ENGINE_ID")
-    or os.getenv("AGENT_ENGINE_ID")
-    or ""
+    os.getenv("VERTEX_AI_AGENT_ENGINE_ID") or os.getenv("AGENT_ENGINE_ID") or ""
 ).strip()
 
 _extracted_location = None
@@ -266,7 +269,8 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
             pending = list(self._pending_tasks)
             try:
                 await asyncio.wait_for(
-                    asyncio.gather(*pending, return_exceptions=True), timeout=timeout
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=timeout,
                 )
             except asyncio.TimeoutError:
                 if self._pending_tasks:
@@ -278,7 +282,9 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
     async def append_event(self, session: Session, event: Event) -> Event:
         # 1. Update in-memory session state (temp state, state deltas, events list) immediately
         # via BaseSessionService.append_event (<0.01ms):
-        event = await BaseSessionService.append_event(self, session=session, event=event)
+        event = await BaseSessionService.append_event(
+            self, session=session, event=event
+        )
 
         if getattr(event, "partial", False):
             return event
@@ -287,7 +293,9 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
         # Chained sequentially per session so events arrive at Vertex AI in strict chronological order:
         prev_task = self._session_tail_tasks.get(session.id)
 
-        async def _ordered_worker(p_task: asyncio.Task | None, s: Session, e: Event) -> None:
+        async def _ordered_worker(
+            p_task: asyncio.Task | None, s: Session, e: Event
+        ) -> None:
             if p_task is not None:
                 try:
                     await p_task
@@ -310,9 +318,13 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
         task.add_done_callback(_cleanup)
         return event
 
-    async def _persist_cloud_event(self, session: Session, event: Event) -> None:
+    async def _persist_cloud_event(
+        self, session: Session, event: Event
+    ) -> None:
         try:
-            reasoning_engine_id = self._get_reasoning_engine_id(session.app_name)
+            reasoning_engine_id = self._get_reasoning_engine_id(
+                session.app_name
+            )
             config: dict[str, Any] = {}
             if event.content:
                 config["content"] = event.content.model_dump(
@@ -327,7 +339,9 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
                     "transfer_agent": event.actions.transfer_to_agent,
                     "escalate": event.actions.escalate,
                     "requested_auth_configs": {
-                        k: json.loads(v.model_dump_json(exclude_none=True, by_alias=True))
+                        k: json.loads(
+                            v.model_dump_json(exclude_none=True, by_alias=True)
+                        )
                         for k, v in event.actions.requested_auth_configs.items()
                     },
                 }
@@ -349,8 +363,10 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
                 ),
             }
             if event.grounding_metadata:
-                metadata_dict["grounding_metadata"] = event.grounding_metadata.model_dump(
-                    exclude_none=True, mode="json"
+                metadata_dict["grounding_metadata"] = (
+                    event.grounding_metadata.model_dump(
+                        exclude_none=True, mode="json"
+                    )
                 )
 
             if event.actions and event.actions.compaction:
@@ -381,7 +397,12 @@ class NonBlockingVertexAiSessionService(VertexAiSessionService):
             if isinstance(config["raw_event"].get("content"), dict):
                 _drop_unsupported_part_fields(config["raw_event"]["content"])
 
-            inv_id = event.invocation_id if event.invocation_id else f"inv-{getattr(event, 'id', 'default')}"
+            inv_id = (
+                event.invocation_id
+                if event.invocation_id
+                else f"inv-{getattr(event, 'id', 'default')}"
+            )
+
             async def _do_append(cfg: dict[str, Any]):
                 async with self._get_api_client() as api_client:
                     # A rate-limited append is tried once more, as ADK's own
@@ -427,7 +448,9 @@ if not _AGENT_ENGINE_ID:
     )
 
 _api_key = os.getenv("GOOGLE_API_KEY", "")
-_express_key = None if (_api_key and "your_api_key" not in _api_key.lower()) else ""
+_express_key = (
+    None if (_api_key and "your_api_key" not in _api_key.lower()) else ""
+)
 
 logger.info(
     "Initializing NonBlockingVertexAiSessionService (project=%s, location=%s, agent_engine_id=%s)",
@@ -448,16 +471,21 @@ session_service: BaseSessionService = NonBlockingVertexAiSessionService(
 # or mint a brand new session_id (false). Defaults to false so consecutive visits rotate cleanly.
 _RECONNECT_SAME_SESSION_ENV = os.getenv("VOICE_NOTES_RECONNECT_SAME_SESSION")
 if _RECONNECT_SAME_SESSION_ENV is not None:
-    VOICE_NOTES_RECONNECT_SAME_SESSION = _RECONNECT_SAME_SESSION_ENV.lower() in (
-        "true",
-        "1",
-        "yes",
+    VOICE_NOTES_RECONNECT_SAME_SESSION = (
+        _RECONNECT_SAME_SESSION_ENV.lower()
+        in (
+            "true",
+            "1",
+            "yes",
+        )
     )
 else:
     VOICE_NOTES_RECONNECT_SAME_SESSION = False
 
 # Graceful auto-close delay in seconds after a visit is committed to CRM
-VOICE_NOTES_AUTO_CLOSE_DELAY_S = int(os.getenv("VOICE_NOTES_AUTO_CLOSE_DELAY_S", "10"))
+VOICE_NOTES_AUTO_CLOSE_DELAY_S = int(
+    os.getenv("VOICE_NOTES_AUTO_CLOSE_DELAY_S", "10")
+)
 
 # BigQuery audit logging via ADK's built-in plugin. Replaces the hand-rolled
 # bigquery_sink.py writer entirely -- no custom write code, no call site to
@@ -482,10 +510,9 @@ _BQ_LOCATION = os.getenv("BQ_ANALYTICS_LOCATION", "US")
 # off-request-path traceability mechanism is planned. Default is FALSE
 # until that lands -- do not flip this on without re-verifying startup
 # latency first.
-_BQ_ANALYTICS_ENABLED = (
-    os.getenv("BQ_ANALYTICS_ENABLED", "false").strip().lower()
-    in {"1", "true", "yes", "on"}
-)
+_BQ_ANALYTICS_ENABLED = os.getenv(
+    "BQ_ANALYTICS_ENABLED", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 _analytics_plugins: list = []
 if _BQ_ANALYTICS_ENABLED and _BQ_PROJECT:
@@ -501,7 +528,7 @@ if _BQ_ANALYTICS_ENABLED and _BQ_PROJECT:
                 ),
             )
         )
-    except Exception:  # noqa: BLE001 - audit logging must never block startup
+    except Exception:
         logger.exception(
             "Failed to initialize BigQueryAgentAnalyticsPlugin (dataset=%s); "
             "continuing without audit logging.",
@@ -551,7 +578,6 @@ async def _instrumented_gemini_connect(self, llm_request):
 Gemini.connect = _instrumented_gemini_connect
 
 
-
 # ============================================================================
 # Health check
 # ============================================================================
@@ -572,7 +598,6 @@ async def get_config() -> dict:
         "auto_close_delay_s": VOICE_NOTES_AUTO_CLOSE_DELAY_S,
         "reconnect_same_session": VOICE_NOTES_RECONNECT_SAME_SESSION,
     }
-
 
 
 class CreateSessionRequest(pydantic.BaseModel):
@@ -667,7 +692,7 @@ def _log_event(event) -> None:
         if getattr(event, "turn_complete", None):
             bits.append("TURN_COMPLETE")
         logger.info("DOWNSTREAM EVENT | %s", " | ".join(bits))
-    except Exception as exc:  # noqa: BLE001 - logging must never break streaming
+    except Exception as exc:
         logger.warning("Failed to log event: %s", exc)
 
 
@@ -777,16 +802,14 @@ def _release_session_slot(
             del _SESSION_SLOTS[session_id]
 
 
-
 @app.websocket("/ws/{user_id}/{session_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     user_id: str,
     session_id: str,
     planned_topics: str = "",
-    campaign_type: str = "standard_sales"
+    campaign_type: str = "standard_sales",
 ) -> None:
-    
     """Bidirectional streaming session for one dictation conversation.
 
     ``planned_topics`` is a comma-separated list of the topic labels the rep
@@ -874,7 +897,9 @@ async def websocket_endpoint(
             await websocket.close(code=4409, reason="session_busy")
             return
 
-        await slot.lock.acquire()  # free (checked above, no await between) -> instant
+        await (
+            slot.lock.acquire()
+        )  # free (checked above, no await between) -> instant
         acquired = True
         await _run_dictation_session(
             websocket, user_id, session_id, planned_topics, campaign_type
@@ -895,7 +920,6 @@ async def websocket_endpoint(
 
 
 async def _run_dictation_session(
-
     websocket: WebSocket,
     user_id: str,
     session_id: str,
@@ -931,7 +955,6 @@ async def _run_dictation_session(
                 }
             )
         )
-
 
     # runner.agent.model is now a Gemini(...) object (since it wraps a
     # pre-warmed client -- see live_credentials.py / BLOCKING_AUTH_FINDING.md),
@@ -1001,6 +1024,8 @@ async def _run_dictation_session(
     sid_token = _CURRENT_SESSION_ID.set(session_id)
 
     live_request_queue = LiveRequestQueue()
+    silence_watchdog = SilenceWatchdog(session_id=session_id)
+    audio_detector = AudioEnergyDetector()
 
     async def upstream_task() -> None:
         """Browser -> LiveRequestQueue (audio chunks + control messages)."""
@@ -1029,6 +1054,12 @@ async def _run_dictation_session(
                 audio_data = message["bytes"]
                 audio_chunks += 1
                 audio_bytes += len(audio_data)
+
+                # Real-time VAD voice energy check: extend silence grace window
+                # so the user is never provoked in the middle of speaking.
+                if audio_detector.update(audio_data):
+                    silence_watchdog.on_voice_detected()
+
                 # Log periodically so we can confirm mic audio is actually
                 # reaching the server (without spamming every chunk).
                 if audio_chunks % 50 == 0:
@@ -1041,7 +1072,6 @@ async def _run_dictation_session(
                     mime_type="audio/pcm;rate=16000", data=audio_data
                 )
                 live_request_queue.send_realtime(audio_blob)
-
 
             elif "text" in message:
                 json_message = json.loads(message["text"])
@@ -1067,6 +1097,7 @@ async def _run_dictation_session(
                     # genuinely happened, and the agent re-asked a question the
                     # rep had already been asked.
                     if text.strip():
+                        silence_watchdog.on_user_speech()
                         turn_guard.record_user_turn(session_id)
                         content = types.Content(parts=[types.Part(text=text)])
                         live_request_queue.send_content(content)
@@ -1111,7 +1142,10 @@ async def _run_dictation_session(
 
         def _cancel_nudges() -> None:
             nonlocal readback_nudge_task, commit_nudge_task, commit_nudge_owed
-            if readback_nudge_task is not None and not readback_nudge_task.done():
+            if (
+                readback_nudge_task is not None
+                and not readback_nudge_task.done()
+            ):
                 readback_nudge_task.cancel()
             readback_nudge_task = None
             if commit_nudge_task is not None and not commit_nudge_task.done():
@@ -1203,14 +1237,17 @@ async def _run_dictation_session(
                 # a genuine, non-empty, FINISHED transcription of the rep's own
                 # speech counts -- not the model's output, not partial chunks.
                 it = getattr(event, "input_transcription", None)
-                if it is not None and it.finished and (it.text or "").strip():
-                    _cancel_nudges()
-                    turn_guard.record_user_turn(session_id)
-                    responded_since_user_turn = False
-                    tool_called_since_user_turn = False
-                    nudge_sent_this_cycle = False
+                if it is not None and (it.text or "").strip():
+                    silence_watchdog.on_user_speech()
+                    if it.finished:
+                        _cancel_nudges()
+                        turn_guard.record_user_turn(session_id)
+                        responded_since_user_turn = False
+                        tool_called_since_user_turn = False
+                        nudge_sent_this_cycle = False
                 if getattr(event, "interrupted", None):
                     _cancel_nudges()
+                    silence_watchdog.on_user_speech()
                 # Track whether a tool's spoken summary/question actually got
                 # read aloud (see turn_guard.confirmation_was_read docstring) --
                 # a pre-tool-call guess must never count as having delivered it.
@@ -1219,27 +1256,44 @@ async def _run_dictation_session(
                     for part in content.parts:
                         if getattr(part, "inline_data", None) is not None:
                             _cancel_nudges()
+                            silence_watchdog.on_agent_turn_start()
                         if getattr(part, "function_call", None) is not None:
                             _cancel_nudges()
+                            silence_watchdog.on_agent_turn_start()
+                            silence_watchdog.on_tool_execution_start()
                             tool_called_since_user_turn = True
                         fr = getattr(part, "function_response", None)
                         if fr is not None:
+                            silence_watchdog.on_tool_execution_complete()
                             if fr.name in _READBACK_OWED_TOOLS:
-                                turn_guard.mark_awaiting_readback(session_id, fr.name)
+                                turn_guard.mark_awaiting_readback(
+                                    session_id, fr.name
+                                )
                             elif fr.name == "commit_visit_notes":
                                 resp_dict = getattr(fr, "response", {})
-                                if isinstance(resp_dict, dict) and resp_dict.get("status") in ("success", "committed"):
+                                if isinstance(
+                                    resp_dict, dict
+                                ) and resp_dict.get("status") in (
+                                    "success",
+                                    "committed",
+                                ):
                                     commit_nudge_owed = True
+                                    silence_watchdog.on_notes_committed()
                 ot = getattr(event, "output_transcription", None)
                 if ot is not None:
                     if (ot.text or "").strip():
                         _cancel_nudges()
+                        silence_watchdog.on_agent_turn_start()
                     if ot.finished:
                         turn_guard.record_agent_speech(session_id, ot.text)
                         if (ot.text or "").strip():
                             responded_since_user_turn = True
-                event_json = event.model_dump_json(exclude_none=True, by_alias=True)
+                event_json = event.model_dump_json(
+                    exclude_none=True, by_alias=True
+                )
                 await websocket.send_text(event_json)
+                if getattr(event, "turn_complete", None):
+                    silence_watchdog.on_agent_turn_complete()
                 if (
                     getattr(event, "turn_complete", None)
                     and not responded_since_user_turn
@@ -1281,7 +1335,10 @@ async def _run_dictation_session(
                     and total_nudges_sent < _MAX_NUDGES_PER_SESSION
                 ):
                     commit_nudge_owed = False
-                    if commit_nudge_task is not None and not commit_nudge_task.done():
+                    if (
+                        commit_nudge_task is not None
+                        and not commit_nudge_task.done()
+                    ):
                         commit_nudge_task.cancel()
                     commit_nudge_task = asyncio.create_task(
                         _watchdog_commit_nudge(2.0)
@@ -1291,7 +1348,10 @@ async def _run_dictation_session(
                     and turn_guard.needs_readback_nudge(session_id)
                     and total_nudges_sent < _MAX_NUDGES_PER_SESSION
                 ):
-                    if readback_nudge_task is not None and not readback_nudge_task.done():
+                    if (
+                        readback_nudge_task is not None
+                        and not readback_nudge_task.done()
+                    ):
                         readback_nudge_task.cancel()
                     readback_nudge_task = asyncio.create_task(
                         _watchdog_readback_nudge(2.5)
@@ -1315,6 +1375,15 @@ async def _run_dictation_session(
         name=f"browser-upstream-{session_id}",
     )
 
+    watchdog_task = asyncio.create_task(
+        silence_watchdog.run(
+            live_request_queue=live_request_queue,
+            websocket=websocket,
+            ready_event=live_ready_event,
+        ),
+        name=f"silence-watchdog-{session_id}",
+    )
+
     async def _notify_live_ready() -> None:
         try:
             await asyncio.wait_for(live_ready_event.wait(), timeout=60.0)
@@ -1330,9 +1399,12 @@ async def _run_dictation_session(
                 session_id,
             )
             with contextlib.suppress(Exception):
-                await websocket.close(code=4430, reason="gemini_connect_timeout")
+                await websocket.close(
+                    code=4430, reason="gemini_connect_timeout"
+                )
             down_task.cancel()
             up_task.cancel()
+            watchdog_task.cancel()
         except asyncio.CancelledError:
             pass
 
@@ -1347,13 +1419,17 @@ async def _run_dictation_session(
         # session) running orphaned forever, silently reconnecting to Vertex
         # AI on every "go away" refresh signal with no consumer. `wait` +
         # explicit cancellation of whatever's still pending avoids that leak.
+        #
+        # Note: watchdog_task is a background monitor task and must NOT be in
+        # FIRST_COMPLETED; when notes are committed or watchdog completes, the
+        # session should continue naturally.
         done, pending = await asyncio.wait(
             {up_task, down_task}, return_when=asyncio.FIRST_COMPLETED
         )
-        for task in pending | {notify_task}:
+        for task in pending | {notify_task, watchdog_task}:
             task.cancel()
-        for task in pending | {notify_task}:
-            with contextlib.suppress(asyncio.CancelledError):
+        for task in pending | {notify_task, watchdog_task}:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         for task in done:
             if task.cancelled():
@@ -1372,9 +1448,10 @@ async def _run_dictation_session(
             logger.info("Client disconnected (upstream_task): %s", exc)
         else:
             logger.error("Streaming error: %s", exc, exc_info=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("Streaming error: %s", exc, exc_info=True)
     finally:
+        silence_watchdog.is_closed = True
         live_request_queue.close()
         _LIVE_READY_EVENTS.pop(session_id, None)
         _CURRENT_SESSION_ID.reset(sid_token)
