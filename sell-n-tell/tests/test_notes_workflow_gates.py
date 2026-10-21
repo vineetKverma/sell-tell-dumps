@@ -255,13 +255,34 @@ def test_a_correction_to_discussed_adds_an_outcome():
 
 def test_a_near_match_is_reported_but_not_counted(caplog):
     """A paraphrased label ("MF Pools" for "MF Pools 26") still counts as
-    missing, but is logged so production shows how often it happens."""
+    missing; it is logged at INFO, once per pair per visit, not on every save."""
     import logging
     from conftest import wf
     rows = [topic("MF Pools"), topic("Water heaters")]
     assert wf.compute_missing_topics(["MF Pools 26"], rows) == ["MF Pools 26"]
     assert wf.near_matches(["MF Pools 26"], rows) == [("MF Pools 26", "MF Pools")]
-    with caplog.at_level(logging.WARNING):
-        wf.log_near_matches("s-1", ["MF Pools 26"], rows)
+    with caplog.at_level(logging.INFO):
+        logged = wf.log_near_matches("s-1", ["MF Pools 26"], rows)
     assert "near-match" in caplog.text and "'MF Pools 26'" in caplog.text
+    assert all(r.levelno == logging.INFO for r in caplog.records)          # not WARNING
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        wf.log_near_matches("s-1", ["MF Pools 26"], rows, logged)          # the same visit saves again
+    assert "near-match" not in caplog.text                                  # logged once
     assert wf.near_matches(["Plumbing"], [topic("Water heaters")]) == []
+
+
+def test_a_near_match_is_logged_once_across_a_visits_saves(caplog, workflow):
+    """Through stage_notes: the first save logs the pair, a correction to the
+    same visit does not log it again."""
+    import logging
+    from conftest import wf
+    planned = ["MF Pools 26"]
+    with caplog.at_level(logging.INFO):
+        wf.stage_notes(payload([topic("MF Pools")]), session_id="v-1", planned_topics=planned)
+    assert caplog.text.count("near-match") == 1
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        wf.stage_notes(payload([topic("MF Pools", code=2)]), session_id="v-1",
+                       previous_session_id="v-1", planned_topics=planned)
+    assert "near-match" not in caplog.text

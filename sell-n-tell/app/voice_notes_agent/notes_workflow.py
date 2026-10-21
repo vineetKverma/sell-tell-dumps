@@ -274,18 +274,29 @@ def near_matches(
 
 
 def log_near_matches(
-    session_id: str, missing: list[str], staged_topics: list[dict[str, Any]]
-) -> None:
-    """Warn when a staged row nearly matches a planned topic that still counts
-    as missing, so production logs show how often labels are paraphrased."""
-    for planned, label in near_matches(missing, staged_topics):
-        logger.warning(
+    session_id: str,
+    missing: list[str],
+    staged_topics: list[dict[str, Any]],
+    already_logged: set[tuple[str, str]] = frozenset(),
+) -> set[tuple[str, str]]:
+    """Log, at INFO, a staged row that nearly matches a planned topic still
+    counted as missing -- once per (planned, staged) pair per visit, not on
+    every save. A near-match is a candidate, not proof of a paraphrase: a
+    real off-plan subject ("Plumbing leak" beside a planned "Plumbing") looks
+    the same, so the count is an upper bound on paraphrased labels and each
+    hit is also a reminder the rep may not have needed. Returns every pair
+    logged so far, for the next save of the same visit."""
+    pairs = set(near_matches(missing, staged_topics))
+    for planned, label in sorted(pairs - set(already_logged)):
+        logger.info(
             "Coverage near-match session_id=%s planned=%r staged=%r -- not "
-            "counted as covered (exact label required)",
+            "counted as covered (exact label required); the rep will be "
+            "reminded about it",
             session_id,
             planned,
             label,
         )
+    return pairs | set(already_logged)
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +581,12 @@ def stage_notes(
     missing = compute_missing_topics(
         planned_topics, payload.get("topics", []), allow_skips=allow_skips
     )
-    log_near_matches(session_id, missing, payload.get("topics", []))
+    near_match_pairs = log_near_matches(
+        session_id,
+        missing,
+        payload.get("topics", []),
+        (previous or {}).get("near_matches_logged", set()),
+    )
     # A correction re-stages under a brand-new session_id, so the count has
     # to be carried forward from the record it's correcting rather than
     # derived from this one alone.
@@ -594,6 +610,8 @@ def stage_notes(
         # Whether skips were trustworthy for THIS staging, so the commit
         # gate applies the same rule the confirmation text was built from.
         "allow_skips": allow_skips,
+        # Near-match pairs already logged for this visit (logged once each).
+        "near_matches_logged": near_match_pairs,
     }
     logger.info(
         "Staged notes session_id=%s event_type=%s topics=%d missing=%d "
