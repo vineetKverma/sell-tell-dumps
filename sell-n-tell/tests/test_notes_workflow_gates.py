@@ -286,3 +286,24 @@ def test_a_near_match_is_logged_once_across_a_visits_saves(caplog, workflow):
         wf.stage_notes(payload([topic("MF Pools", code=2)]), session_id="v-1",
                        previous_session_id="v-1", planned_topics=planned)
     assert "near-match" not in caplog.text
+
+
+def test_the_staged_record_survives_a_json_round_trip(caplog):
+    """The staged record is copied into ADK session state and persisted as
+    JSON; after a restart it is rehydrated from that copy. It must serialise,
+    and a re-stage after rehydrating must work and not log the pair again."""
+    import json
+    import logging
+    from conftest import wf
+    planned = ["MF Pools 26"]
+    wf.stage_notes(payload([topic("MF Pools")]), session_id="v-2", planned_topics=planned)
+    stored = json.loads(json.dumps(wf.get_staged("v-2")))          # raises on a set
+    assert stored["near_matches_logged"] == [["MF Pools 26", "MF Pools"]]
+    wf._STAGED_NOTES.clear()                                        # the restart
+    wf.rehydrate_staged("v-2", stored)
+    with caplog.at_level(logging.INFO):
+        wf.stage_notes(payload([topic("MF Pools", code=2)]), session_id="v-2",
+                       previous_session_id="v-2", planned_topics=planned)
+    assert "near-match" not in caplog.text                          # remembered across the restart
+    json.dumps(wf.get_staged("v-2"))
+

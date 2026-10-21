@@ -581,11 +581,14 @@ def stage_notes(
     missing = compute_missing_topics(
         planned_topics, payload.get("topics", []), allow_skips=allow_skips
     )
+    # Stored as a sorted list of [planned, staged] lists: the record is
+    # copied into ADK session state and persisted as JSON, which has no sets
+    # or tuples, and comes back that way after a restart (rehydrate_staged).
+    already_logged = {
+        tuple(pair) for pair in (previous or {}).get("near_matches_logged") or []
+    }
     near_match_pairs = log_near_matches(
-        session_id,
-        missing,
-        payload.get("topics", []),
-        (previous or {}).get("near_matches_logged", set()),
+        session_id, missing, payload.get("topics", []), already_logged
     )
     # A correction re-stages under a brand-new session_id, so the count has
     # to be carried forward from the record it's correcting rather than
@@ -611,7 +614,7 @@ def stage_notes(
         # gate applies the same rule the confirmation text was built from.
         "allow_skips": allow_skips,
         # Near-match pairs already logged for this visit (logged once each).
-        "near_matches_logged": near_match_pairs,
+        "near_matches_logged": sorted(list(pair) for pair in near_match_pairs),
     }
     logger.info(
         "Staged notes session_id=%s event_type=%s topics=%d missing=%d "
