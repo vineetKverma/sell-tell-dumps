@@ -66,3 +66,15 @@ def test_the_session_writer_uses_it():
     # ruff format may reflow.
     main = (APP / "main.py").read_text(encoding="utf-8")
     assert "once_more_on_429(" in main.split("async def _do_append", 1)[1]
+
+
+def test_a_retry_is_logged(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(rate_limit.once_more_on_429(_call(ApiError(429), "stored")))
+    assert "Rate-limited (HTTP 429); retrying once" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(rate_limit.once_more_on_429(_call("stored")))           # no 429, no log
+    assert caplog.text == ""
+
