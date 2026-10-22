@@ -76,10 +76,11 @@ adds `extract()`, which follows the business rule.
   `--allow-noisy`, the baseline records it, and every run lists it under "not
   in the verdict" (in `final_scores.json`, the scorecard header and the
   console). Today that is faithfulness in quick mode (one summary moves it 6
-  points). Quick-mode disposition stays in the verdict because the baseline's
-  three runs happened to agree, but it rests on about 9 topics, so one topic
-  moves it 11 points: confirm a quick-mode disposition REGRESSION with a full
-  run. Full mode judges both.
+  points). Every limit is also at least one item's worth, so a single flipped
+  topic in quick mode (about 9 topics, ~11 points each) is never a
+  regression on its own; still confirm a quick-mode REGRESSION with a full
+  run. Full mode judges both. The committed baseline is three full runs of
+  the code as merged with AIML-2910.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
 not speech; quick mode (18 cases) only catches large drops, and leaves out
