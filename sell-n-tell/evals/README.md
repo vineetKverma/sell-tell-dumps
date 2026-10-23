@@ -83,7 +83,7 @@ adds `extract()`, which follows the business rule.
   the code as merged with AIML-2910. Its disposition varies a lot from run
   to run (63.3-73.3), so the full-mode disposition limit is about +-15
   points: a drop smaller than about 5 of 30 topics passes unnoticed. Treat
-  a disposition fall short of that as something to look at, not a pass.
+  a smaller disposition drop as something to look at, not as a pass.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
 not speech; quick mode (18 cases) only catches large drops, and leaves out
