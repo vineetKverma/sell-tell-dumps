@@ -137,6 +137,9 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   reports how many such questions a run would add.
 - `over_claimed` is the share of not-discussed campaigns marked discussed.
   Disposition is n/a: the record carries the facts behind it, not a code.
+  With `--dispositions` (AIML-3004) each discussed topic also gets a code from
+  the agent's registry, with the rep's words for it; a code other than 99
+  without those words becomes 99. Disposition is then scored and compared.
 - A run saves each settled record, not the model's raw reply. `--rescore`
   re-scores those records against a changed answer key; a change to how a
   record is settled (the evidence check, the U-10 number rule) needs a fresh

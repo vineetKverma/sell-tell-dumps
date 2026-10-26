@@ -389,3 +389,88 @@ def test_a_count_in_plural_words_or_zero_is_kept(count):
 def test_a_count_with_no_number_in_it_is_dropped_even_one_off(vague):
     assert postprocess(raw(must_capture={"U_10": vague}), NOTE, PLANNED).record["must_capture"]["U-10"] is None
 
+
+# --- disposition codes per discussed topic (AIML-3004) ---------------------------
+
+CODES = {1: "Create Opportunity", 2: "Order Placed", 8: "Pricing concerns", 99: "Outcome not covered"}
+
+
+def coded(*topics):
+    return raw(topics=[dict({"summary": "s"}, **t) for t in topics])
+
+
+def test_a_code_stays_only_with_the_reps_words_for_it():
+    said = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+            "disposition_code": "1", "outcome_evidence": "He wants a quote for 6 units"}
+    r = postprocess(coded(said), NOTE, PLANNED, sorted(CODES))
+    assert r.record["topics"][0]["disposition_code"] == 1 and r.codes_downgraded == []
+    invented = dict(said, disposition_code="2", outcome_evidence="he placed an order")
+    r = postprocess(coded(invented), NOTE, PLANNED, sorted(CODES))
+    t = r.record["topics"][0]
+    assert t["disposition_code"] == 99 and t["outcome_evidence"] == "" and r.codes_downgraded == [PLANNED[0]]
+
+
+def test_a_discussed_topic_always_has_a_code_and_others_have_none():
+    no_code = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing"}
+    unconfirmed = {"topic": PLANNED[1], "status": "discussed", "evidence": "pool heaters",
+                   "disposition_code": "8", "outcome_evidence": "pricing"}
+    r = postprocess(coded(no_code, unconfirmed), NOTE, PLANNED, sorted(CODES))
+    assert [(t["status"], t["disposition_code"]) for t in r.record["topics"]] == [
+        (DISCUSSED, 99), (UNCONFIRMED, None)]          # 99 needs no quote; not discussed has no code
+    r = postprocess(coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+                           "disposition_code": "99", "outcome_evidence": "anything"}), NOTE, PLANNED, sorted(CODES))
+    assert r.record["topics"][0]["outcome_evidence"] == "" and r.codes_downgraded == []
+
+
+def test_without_codes_the_record_has_no_code_keys():
+    r = postprocess(raw(), NOTE, PLANNED)
+    assert all("disposition_code" not in t for t in r.record["topics"])
+
+
+def test_the_schema_allows_only_the_registry_codes_as_text():
+    model = record_model(fields_for(CATALOG, "HS"), PLANNED, sorted(CODES))
+    ok = {"event_type": "Meeting", "executive_summary": "s", "must_capture": {},
+          "topics": [{"topic": PLANNED[0], "status": "discussed", "disposition_code": "99"}]}
+    model.model_validate(ok)
+    for bad in ("5", 1, "Order Placed"):
+        with pytest.raises(Exception):
+            model.model_validate(dict(ok, topics=[dict(ok["topics"][0], disposition_code=bad)]))
+
+
+def test_the_prompt_lists_the_codes_only_when_asked():
+    assert "Outcome codes" not in build_prompt(NOTE, PLANNED, "HS")
+    p = build_prompt(NOTE, PLANNED, "HS", dispositions=CODES)
+    assert "  2: Order Placed" in p and "  99: Outcome not covered" in p and "the code is 99" in p
+    assert p.index("Outcome codes") < p.index("Dictation")
+
+
+def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
+    from app.extraction import load_dispositions
+    codes = load_dispositions()
+    assert list(codes) == [*range(1, 11), 99]
+    assert codes[2].startswith("Order Placed (e.g. ") and codes[99].startswith("Outcome not covered")
+
+
+def test_codes_reach_the_call_and_the_record():
+    pytest.importorskip("google.genai")
+    reply = coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+                   "disposition_code": "8", "outcome_evidence": "mini fridge pricing"})
+    client = FakeClient(json.dumps(reply))
+    r = extract(NOTE, PLANNED, "HS", fields_for(CATALOG, "HS"), client=client, model="m", dispositions=CODES)
+    assert r.error is None and r.record["topics"][0]["disposition_code"] == 8
+    assert "8: Pricing concerns" in client.prompts[0]
+
+
+def test_codes_are_scored_only_when_the_run_asked_for_them():
+    from evals.agent_eval.cases import Case
+    from evals.extract_eval.run import score_row, to_scorer_args
+    case = Case("X-1", "HS", NOTE, PLANNED, "Meeting",
+                [{"topic": PLANNED[0], "discussed": True, "disposition_code": 8},
+                 {"topic": PLANNED[1], "discussed": False, "disposition_code": None}], {})
+    rec = postprocess(coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+                             "disposition_code": "8", "outcome_evidence": "mini fridge pricing"}),
+                      NOTE, PLANNED, sorted(CODES)).record
+    assert to_scorer_args(rec)["topics"][0]["disposition_code"] == 8
+    assert score_row(case, rec, codes=True)["topics"][0]["code_ok"] is True
+    assert "code_ok" not in score_row(case, rec)["topics"][0]                 # off: n/a, as before
+    assert score_row(case, None, codes=True)["topics"][0]["code_ok"] is False  # a reply that was no record

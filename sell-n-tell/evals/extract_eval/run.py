@@ -10,9 +10,10 @@ evals/README.md), looked up by the account's vertical.
 
 Each note goes straight to extract(); the record is scored with the harness's
 own scorer (evals/agent_eval/score.py) and the summaries with the same judge,
-so the numbers compare with the agent's baseline. Disposition codes are not
-part of the record (the facts behind them are must-capture fields), so
-disposition is reported as n/a and left out of the comparison.
+so the numbers compare with the agent's baseline. By default the record has
+no disposition codes, so disposition is n/a and left out of the comparison.
+With ``--dispositions`` (AIML-3004) each discussed topic gets a code from the
+agent's registry, and disposition is scored and compared like the agent's.
 
 A topic extract() marks ``unconfirmed`` (no quote of the rep's words) counts
 as not discussed here: in the live flow the rep would be asked, so the count
@@ -37,7 +38,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.extraction import DISCUSSED, extract, fields_for, load_catalog, load_registry  # noqa: E402
+from app.extraction import (  # noqa: E402
+    DISCUSSED, extract, fields_for, load_catalog, load_dispositions, load_registry)
 from app.extraction.catalog import VERTICALS  # noqa: E402
 from evals.agent_eval.baseline import compare as compare_to_baseline  # noqa: E402
 from evals.agent_eval.baseline import load as load_baseline  # noqa: E402
@@ -99,12 +101,14 @@ def reply_error(row: dict) -> bool:
     return kind == "reply" or (kind is None and str(row.get("error") or "").startswith("reply does not fit"))
 
 
-def score_row(case, record: dict | None) -> dict:
+def score_row(case, record: dict | None, codes: bool = False) -> dict:
     """``record`` None: the model's reply was not a record -- scored like an
-    agent that never staged, every topic and stated field a miss."""
+    agent that never staged, every topic and stated field a miss. ``codes``:
+    the run asked for disposition codes, so they are scored."""
     s = score_case(case, to_scorer_args(record))
-    for t in s["topics"]:          # no codes in the record: disposition is n/a, not 0
-        t.pop("code_ok", None)
+    if not codes:
+        for t in s["topics"]:      # no codes in the record: disposition is n/a, not 0
+            t.pop("code_ok", None)
     return s
 
 
@@ -115,7 +119,9 @@ def to_scorer_args(record: dict | None) -> dict | None:
         return None
     return {"event_type": record["event_type"], "executive_summary": record["executive_summary"],
             "topics": [{"topic": t["topic"], "discussed": t["status"] == DISCUSSED,
-                        "executive_summary": t["summary"]} for t in record["topics"]],
+                        "executive_summary": t["summary"],
+                        **({"disposition_code": t["disposition_code"]} if "disposition_code" in t else {})}
+                       for t in record["topics"]],
             "must_capture": dict(record["must_capture"])}
 
 
@@ -128,22 +134,26 @@ def _client(location: str):
                         http_options=types.HttpOptions(timeout=120_000))
 
 
-def run_once(cases, catalog, client, model: str, registry, judge, thinking=None) -> list[dict]:
+def run_once(cases, catalog, client, model: str, registry, judge, thinking=None,
+             dispositions: dict[int, str] | None = None) -> list[dict]:
     """One pass over the cases: extract, score, judge. Returns per-case rows."""
+    codes = bool(dispositions)
+
     def one(case):
         descriptions = registry.descriptions(case.planned_topics, case.vertical) if registry else {}
         res = extract(case.note, case.planned_topics, case.vertical, fields_for(catalog, case.vertical),
-                      client=client, model=model, descriptions=descriptions, thinking=thinking)
+                      client=client, model=model, descriptions=descriptions, thinking=thinking,
+                      dispositions=dispositions)
         args = to_scorer_args(res.record)
         s = None       # a failed call says nothing about the model: not scored, only counted
         if args is not None:
-            s = score_row(case, res.record)
+            s = score_row(case, res.record, codes)
             verdict = judge.check(case.note, args) if judge else {}
             s["faithful"], s["unsupported"] = verdict.get("faithful"), verdict.get("unsupported")
         elif res.error_kind == "reply":    # the model's own failure: scored as a miss
-            s = score_row(case, None)
+            s = score_row(case, None, codes)
         return {"id": case.id, "score": s, "record": res.record, "error": res.error,
-                "error_kind": res.error_kind,
+                "error_kind": res.error_kind, "codes_downgraded": res.codes_downgraded,
                 "unconfirmed": res.unconfirmed, "off_plan_labels": res.off_plan,
                 "described": sorted(descriptions), "usage": res.usage}
     with ThreadPoolExecutor(WORKERS) as pool:
@@ -194,10 +204,10 @@ def usage_summary(rows: list[dict], model: str, prices: dict) -> dict:
     return out
 
 
-def rescore_rows(cases, rows: list[dict]) -> list[dict]:
+def rescore_rows(cases, rows: list[dict], codes: bool = False) -> list[dict]:
     """Score saved records again against the current answer key (e.g. after a
     key correction). The judge's verdicts are kept: the summaries did not
-    change. No model call."""
+    change. No model call. ``codes``: the run asked for disposition codes."""
     by_id = {c.id: c for c in cases}
     out = []
     for row in rows:
@@ -206,9 +216,9 @@ def rescore_rows(cases, rows: list[dict]) -> list[dict]:
             continue
         if row.get("error") or row.get("record") is None:
             # a failed call has nothing to score; a reply that was not a record is a miss
-            out.append(dict(row, score=score_row(case, None) if reply_error(row) else None))
+            out.append(dict(row, score=score_row(case, None, codes) if reply_error(row) else None))
             continue
-        s = score_row(case, row["record"])
+        s = score_row(case, row["record"], codes)
         old = row.get("score") or {}
         s["faithful"], s["unsupported"] = old.get("faithful"), old.get("unsupported")
         out.append(dict(row, score=s))
@@ -230,6 +240,9 @@ def main() -> None:
                     help="run a model that labelled the golden set; its scores are marked as possibly flattering")
     ap.add_argument("--thinking", help="minimal / low / medium / high (3.x models), or a token budget "
                                        "such as 0 for off (2.5 models); default: the model's own")
+    ap.add_argument("--dispositions", action="store_true",
+                    help="each discussed topic also gets a disposition code from the agent's registry; "
+                         "disposition is then scored and compared (AIML-3004)")
     ap.add_argument("--judge-model", default=JUDGE_MODEL,
                     help="the faithfulness judge; should differ from --model (a model judging itself flatters)")
     args = ap.parse_args()
@@ -240,6 +253,7 @@ def main() -> None:
         # header and the judge named on it stay what the run actually used.
         args.model, args.limit = prior["model"], prior.get("limit")
         args.thinking, args.location = prior.get("thinking"), prior.get("location") or args.location
+        args.dispositions = bool(prior.get("dispositions"))
         args.set = [s for s in prior["sets"] if (out / f"raw_{s}_r1.jsonl").exists()]
         # Sets that cannot be re-scored (no raw files) keep their previous entry.
         summary = dict(prior, sets=dict(prior["sets"]),
@@ -262,11 +276,12 @@ def main() -> None:
         from evals.agent_eval.judge import Judge
         catalog, priorities = load_catalog(GOLDEN_DIR), load_priorities()
         registry = None if args.no_descriptions else load_registry(args.registry)
+        dispositions = load_dispositions() if args.dispositions else None
         client, judge = _client(args.location), Judge(model=args.judge_model)
         out = RUNS / f"extract-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         out.mkdir(parents=True)
         summary = {"model": args.model, "judge_model": args.judge_model, "repeats": args.repeats,
-                   "location": args.location, "thinking": args.thinking,
+                   "location": args.location, "thinking": args.thinking, "dispositions": args.dispositions,
                    "labelled_the_golden_set": args.model in LABELLING_MODELS,
                    "registry": None if registry is None else args.registry.name,
                    "registry_sha256": None if registry is None else hashlib.sha256(args.registry.read_bytes()).hexdigest(),
@@ -280,6 +295,7 @@ def main() -> None:
             summary.setdefault("described_topic_mentions", {})[name] = (
                 f"{sum(registry.lookup(t, v) is not None for t, v in topics)}/{len(topics)}")
         runs, per_case, errors, unconfirmed, dropped, all_rows = [], [], 0, 0, 0, []
+        downgraded = 0
         reply_errors = unjudged = judgeable = 0
         repeats = len(list(out.glob(f"raw_{name}_r*.jsonl"))) if args.rescore else args.repeats
         args.repeats = repeats
@@ -288,10 +304,12 @@ def main() -> None:
             if args.rescore:
                 print(f"{name}: re-scoring run {k}/{repeats}", flush=True)
                 rows = rescore_rows(cases, [json.loads(line) for line in
-                                            raw_file.read_text(encoding="utf-8").splitlines() if line.strip()])
+                                            raw_file.read_text(encoding="utf-8").splitlines() if line.strip()],
+                                   args.dispositions)
             else:
                 print(f"{name}: run {k}/{repeats}, {len(cases)} cases", flush=True)
-                rows = run_once(cases, catalog, client, args.model, registry, judge, args.thinking)
+                rows = run_once(cases, catalog, client, args.model, registry, judge, args.thinking,
+                                dispositions)
             if not args.rescore:
                 # Only a fresh run writes the records. A re-score reads them and
                 # leaves the file as it is: the records did not change, and
@@ -308,6 +326,7 @@ def main() -> None:
                             and (r["score"] or {}).get("faithful") is None)
             unconfirmed += sum(len(r["unconfirmed"]) for r in rows)
             dropped += sum(len(r["off_plan_labels"]) for r in rows)
+            downgraded += sum(len(r.get("codes_downgraded") or []) for r in rows)
             all_rows += rows
         meta = {"evalset": ", ".join(f.name for f in set_files(name)), "cases": len(cases),
                 "judge": summary.get("judge_model", JUDGE_MODEL)}
@@ -318,7 +337,7 @@ def main() -> None:
         title = f"extract() on {name} -- {args.model}"
         card = (scorecard(title, runs, per_case, meta) if runs else
                 f"# Eval scorecard: {title}\n\n## Overall\n\nNo call succeeded.\n\n## Must-capture fields\n")
-        skip = ["disposition"]
+        skip = [] if args.dispositions else ["disposition"]
         if unjudged > MAX_UNJUDGED_RATE * judgeable:
             skip.append("faithfulness")
         entry = {"cases": len(cases), "key_sha256": key_sha256(name), "schema_or_call_errors": errors,
@@ -331,6 +350,8 @@ def main() -> None:
                  # be 0 now the schema allows only the planned labels
                  "dropped_topic_labels": dropped,
                  "unconfirmed_topics_per_run": round(unconfirmed / args.repeats, 1),
+                 # codes set to 99 because the rep's words for them were not in the note
+                 **({"codes_downgraded_per_run": round(downgraded / args.repeats, 1)} if args.dispositions else {}),
                  "usage": usage, "scores": summarise(runs) if runs else {},
                  # recall counts any filled field; this is how many of those match the key
                  "value_accuracy": {p: _mean_pct([(r["all"]["fields"].get(p) or {}).get("value_accuracy")
@@ -365,7 +386,10 @@ def main() -> None:
                             f"Dropped topic labels: {dropped}"
                             f"{' -- CHECK: these planned topics scored as not discussed' if dropped else ''}. "
                             f"Unconfirmed topics (questions the live flow "
-                            f"would ask): {entry['unconfirmed_topics_per_run']} per run.\n\n"
+                            f"would ask): {entry['unconfirmed_topics_per_run']} per run."
+                            + (f" Disposition codes set to 99 for want of the rep's words: "
+                               f"{entry['codes_downgraded_per_run']} per run." if args.dispositions else "")
+                            + "\n\n"
                             f"Cost: {usage['input_tokens_per_note']} input + {usage['output_tokens_per_note']} "
                             f"output tokens per note, {usage['seconds_p50']} s median / {usage['seconds_p95']} s p95 "
                             f"per call; " + (f"${usage['cost_usd']} for {usage['answered_calls']} answered calls, "

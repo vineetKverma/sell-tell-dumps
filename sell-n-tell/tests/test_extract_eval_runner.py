@@ -426,3 +426,26 @@ def test_an_unknown_vertical_stops_the_run_before_any_call(monkeypatch, tmp_path
         run.main()
     assert not model.prompts and not (tmp_path / "runs").exists()
 
+@needs_data
+def test_with_dispositions_the_codes_are_asked_for_scored_and_kept_on_rescore(monkeypatch, tmp_path):
+    from evals.agent_eval import judge as judge_mod
+    from evals.extract_eval import run
+    model = EchoModel()
+    monkeypatch.setattr(run, "_client", lambda location: model)
+    monkeypatch.setattr(judge_mod, "Judge", FakeJudge)
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["run", "--model", "stand-in", "--repeats", "1", "--limit", "20",
+                                      "--dispositions"])
+    run.main()
+    out = next(tmp_path.glob("extract-*"))
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    golden = summary["sets"]["golden"]
+    assert summary["dispositions"] is True and all("99: Outcome not covered" in p for p in model.prompts)
+    assert golden["scores"]["disposition"]["mean"] == 0.0              # nothing discussed: every code a miss
+    assert golden["codes_downgraded_per_run"] == 0.0
+
+    monkeypatch.setattr(run, "_client", lambda location: pytest.fail("a re-score must not call the model"))
+    monkeypatch.setattr(sys, "argv", ["run", "--rescore", str(out)])
+    run.main()
+    after = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert after["dispositions"] is True and after["sets"]["golden"]["scores"] == golden["scores"]

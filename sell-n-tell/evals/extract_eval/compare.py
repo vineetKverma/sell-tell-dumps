@@ -16,7 +16,7 @@ import argparse
 import json
 from pathlib import Path
 
-COLUMNS = ("event_type", "topic_status", "over_claimed", "faithfulness",
+COLUMNS = ("event_type", "topic_status", "over_claimed", "disposition", "faithfulness",
            "field_recall_P1", "field_recall_all", "field_invented_rate")
 
 
@@ -39,6 +39,8 @@ def row(run: Path, set_name: str) -> dict:
             "value_acc_all": (entry.get("value_accuracy") or {}).get("all"),
             "errors": entry.get("schema_or_call_errors"), "dropped": entry.get("dropped_topic_labels"),
             "unconfirmed": entry.get("unconfirmed_topics_per_run"),
+            # codes set to 99 for want of the rep's words (runs with --dispositions)
+            "codes_to_99": entry.get("codes_downgraded_per_run"),
             "usd_per_1k": use.get("cost_per_1000_notes_usd"), "usd_per_1k_2027": use.get("cost_per_1000_notes_usd_from_2027"),
             "p50_s": use.get("seconds_p50"), "p95_s": use.get("seconds_p95"),
             "in_tok": use.get("input_tokens_per_note"), "out_tok": use.get("output_tokens_per_note")}
@@ -47,7 +49,7 @@ def row(run: Path, set_name: str) -> dict:
 def table(rows: list[dict]) -> str:
     head = ["run", "model", "thinking", "location", "key", "repeats", "limit", "descriptions",
             "labelling_model", "judge", "unjudged", *COLUMNS, "value_acc_P1", "value_acc_all", "errors", "dropped",
-            "unconfirmed", "usd_per_1k", "usd_per_1k_2027", "p50_s", "p95_s", "in_tok", "out_tok", "invalid"]
+            "unconfirmed", "codes_to_99", "usd_per_1k", "usd_per_1k_2027", "p50_s", "p95_s", "in_tok", "out_tok", "invalid"]
     def fmt(h, v):
         if v is None:
             return ""

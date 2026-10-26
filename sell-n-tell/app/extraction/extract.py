@@ -21,6 +21,15 @@ After the call, code (not the model) settles each planned topic:
   - a planned topic the model left out is not discussed;
   - a topic label that is not one of the planned topics is reported as
     off-plan and dropped.
+
+With ``dispositions`` (AIML-3004), each discussed topic also gets a code from
+the registry, and code settles it too:
+
+  - a code other than 99 stays only if ``outcome_evidence`` -- the rep's own
+    words for that outcome -- appears in the dictation; otherwise it becomes
+    99 (manual review);
+  - a discussed topic with no code is 99; a topic that is not discussed (or
+    unconfirmed) has no code.
 """
 
 from __future__ import annotations
@@ -77,11 +86,14 @@ def _key(field_id: str) -> str:
     return field_id.replace("-", "_")
 
 
-def record_model(fields: list[Field], planned: list[str] | None = None) -> type[pydantic.BaseModel]:
+def record_model(fields: list[Field], planned: list[str] | None = None,
+                 codes: list[int] | None = None) -> type[pydantic.BaseModel]:
     """The record's schema for one visit: event type, summary, topics and the
     vertical's must-capture fields, each optional. With ``planned``, a topic's
     label can only be one of those exact titles (an enum in the schema), so
-    the model cannot return a label the code would fail to match."""
+    the model cannot return a label the code would fail to match. With
+    ``codes``, each topic also carries a disposition code from that list (as
+    text: the schema's enums are strings) and the rep's words for it."""
     captured = pydantic.create_model(
         "MustCapture",
         **{_key(f.id): (Optional[str], pydantic.Field(
@@ -89,10 +101,19 @@ def record_model(fields: list[Field], planned: list[str] | None = None) -> type[
            for f in fields})
     topic = TopicResult
     labels = tuple(dict.fromkeys(planned or ()))
+    extra: dict[str, Any] = {}
     if labels:
-        topic = pydantic.create_model(
-            "PlannedTopic", __base__=TopicResult,
-            topic=(Literal[labels], pydantic.Field(description="The planned topic's label.")))
+        extra["topic"] = (Literal[labels], pydantic.Field(description="The planned topic's label."))
+    if codes:
+        extra["disposition_code"] = (Optional[Literal[tuple(str(c) for c in codes)]], pydantic.Field(
+            default=None, description="For a discussed topic: the outcome code that matches what the rep "
+                                      "said about this campaign; 99 when no code fits or no outcome was "
+                                      "stated. Null when not discussed."))
+        extra["outcome_evidence"] = (str, pydantic.Field(
+            default="", description="For a code other than 99: the rep's own words about the outcome, "
+                                    "copied verbatim from the dictation. Empty otherwise."))
+    if extra:
+        topic = pydantic.create_model("PlannedTopic", __base__=TopicResult, **extra)
     return pydantic.create_model(
         "VisitRecord",
         event_type=(Literal[EVENT_TYPES], ...),
@@ -139,8 +160,15 @@ def _unmark(text: str) -> str:
     return re.sub(r"([<>])(?=\1\1)", r"\1 ", text)
 
 
+CODES_RULE = """- Outcome codes: for each discussed topic, choose the code below that matches the
+  outcome the rep stated for that campaign, and copy the rep's words about that outcome
+  into outcome_evidence. If no code fits, or the rep stated no outcome, the code is 99:
+  never pick a code because it sounds close. A topic that was not discussed has no code."""
+
+
 def build_prompt(note: str, planned: list[str], vertical: str,
-                 descriptions: dict[str, str] | None = None) -> str:
+                 descriptions: dict[str, str] | None = None,
+                 dispositions: dict[int, str] | None = None) -> str:
     descriptions = descriptions or {}
     topic_lines = "\n".join(
         f"{i}. label: {_unmark(t)}\n   about: "
@@ -148,7 +176,11 @@ def build_prompt(note: str, planned: list[str], vertical: str,
         for i, t in enumerate(planned, 1)
     ) or "(none)"
     note = _unmark(note)
-    return (f"{RULES}\nAccount vertical: {vertical}\n\nPlanned topics (the topic field is the label "
+    codes = ""
+    if dispositions:
+        code_lines = "\n".join(f"  {c}: {label}" for c, label in dispositions.items())
+        codes = f"{CODES_RULE}\n\nOutcome codes:\n{code_lines}\n"
+    return (f"{RULES}{codes}\nAccount vertical: {vertical}\n\nPlanned topics (the topic field is the label "
             f"only, never the description):\n{topic_lines}\n\nDictation:\n<<<\n{note}\n>>>")
 
 
@@ -215,10 +247,19 @@ class ExtractResult:
     # -- retrying cannot help.
     error_kind: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)   # tokens and seconds of the call
+    # topics whose code fell back to 99 because its evidence was not in the note
+    codes_downgraded: list[str] = field(default_factory=list)
 
 
-def postprocess(raw: dict[str, Any], note: str, planned: list[str]) -> ExtractResult:
-    """Settle the validated model output into the record (code, not model)."""
+NONE_FITS = 99
+
+
+def postprocess(raw: dict[str, Any], note: str, planned: list[str],
+                codes: list[int] | None = None) -> ExtractResult:
+    """Settle the validated model output into the record (code, not model).
+    With ``codes``: a discussed topic keeps a code other than 99 only if the
+    rep's words for it are in the note, otherwise 99; a missing code is 99;
+    a topic that is not discussed has none."""
     by_label = {}
     off_plan = []
     planned = list(dict.fromkeys(planned))         # a title planned twice is one topic
@@ -232,18 +273,31 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str]) -> ExtractRe
             off_plan.append(t["topic"])
         else:
             by_label.setdefault(label, t)          # first entry wins; duplicates ignored
-    topics, unconfirmed = [], []
+    topics, unconfirmed, downgraded = [], [], []
     for label in planned:
         t = by_label.get(label)
         status = t["status"] if t else NOT_DISCUSSED
         if status == DISCUSSED and not evidence_ok(t.get("evidence", ""), note):
             status = UNCONFIRMED
             unconfirmed.append(label)
-        topics.append({"topic": label, "status": status,
-                       "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
-                       # kept for an unconfirmed topic (the rep's question is built from it);
-                       # the status marks it unverified
-                       "summary": (t or {}).get("summary", "") if status != NOT_DISCUSSED else ""})
+        topic = {"topic": label, "status": status,
+                 "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
+                 # kept for an unconfirmed topic (the rep's question is built from it);
+                 # the status marks it unverified
+                 "summary": (t or {}).get("summary", "") if status != NOT_DISCUSSED else ""}
+        if codes:
+            code, outcome = None, ""
+            if status == DISCUSSED:
+                given = (t or {}).get("disposition_code")
+                code = int(given) if given not in (None, "") else NONE_FITS
+                outcome = (t or {}).get("outcome_evidence", "")
+                if code != NONE_FITS and not quote_in(outcome, note):
+                    code, outcome = NONE_FITS, ""
+                    downgraded.append(label)
+                if code == NONE_FITS:
+                    outcome = ""
+            topic.update(disposition_code=code, outcome_evidence=outcome)
+        topics.append(topic)
     fields = {k.replace("_", "-"): (None if v is None or _norm(v) in NOT_STATED else v)
               for k, v in (raw.get("must_capture") or {}).items()}
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count
@@ -251,7 +305,8 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str]) -> ExtractRe
             fields[fid] = None
     record = {"event_type": raw["event_type"], "executive_summary": raw.get("executive_summary", ""),
               "topics": topics, "must_capture": fields}
-    return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan)
+    return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan,
+                         codes_downgraded=downgraded)
 
 
 def thinking_config(thinking: str | int | None):
@@ -268,10 +323,11 @@ def thinking_config(thinking: str | int | None):
 
 def extract(note: str, planned: list[str], vertical: str, fields: list[Field], *,
             client, model: str, descriptions: dict[str, str] | None = None,
-            thinking: str | int | None = None) -> ExtractResult:
+            thinking: str | int | None = None, dispositions: dict[int, str] | None = None) -> ExtractResult:
     """One Gemini call. ``client`` is a google.genai Client (any object with
     ``models.generate_content``). Never raises: a failed call or a reply that
-    does not fit the schema is returned as ``error``."""
+    does not fit the schema is returned as ``error``. With ``dispositions``
+    ({code: label}), each discussed topic also gets a disposition code."""
     from google.genai import types
 
     planned = list(dict.fromkeys(planned or ()))   # a title planned twice is one topic
@@ -280,11 +336,13 @@ def extract(note: str, planned: list[str], vertical: str, fields: list[Field], *
                              error_kind="input", usage={"seconds": 0.0})
     started = time.monotonic()
     try:        # the setup is inside too: a bad setting is an error result, not a crash
-        schema = record_model(fields, planned)
+        codes = sorted(dispositions) if dispositions else None
+        schema = record_model(fields, planned, codes)
         config = types.GenerateContentConfig(temperature=0, response_mime_type="application/json",
                                              response_schema=schema, thinking_config=thinking_config(thinking))
         resp = client.models.generate_content(
-            model=model, contents=build_prompt(note, planned, vertical, descriptions), config=config)
+            model=model, contents=build_prompt(note, planned, vertical, descriptions, dispositions),
+            config=config)
     except Exception as exc:  # setup, network, quota, auth
         return ExtractResult(error=f"{type(exc).__name__}: {exc}"[:500], error_kind="call",
                              usage={"seconds": round(time.monotonic() - started, 2)})
@@ -300,7 +358,7 @@ def extract(note: str, planned: list[str], vertical: str, fields: list[Field], *
         return ExtractResult(error=f"reply does not fit the schema: {exc}"[:500], error_kind="reply",
                              usage=usage)
     try:
-        result = postprocess(raw, note, planned)
+        result = postprocess(raw, note, planned, codes)
     except Exception as exc:  # our code, not the model
         return ExtractResult(error=f"settling the record failed: {type(exc).__name__}: {exc}"[:500],
                              error_kind="internal", usage=usage)
