@@ -17,7 +17,9 @@ if str(_ROOT) not in sys.path:
 from evals.agent_eval.cases import EVALSET  # noqa: E402
 
 REGISTRY = _ROOT / "evals" / "reference" / "campaign_topics.csv"
-pytestmark = pytest.mark.skipif(not (EVALSET.exists() and REGISTRY.exists()),
+# Only the tests that read the golden set or the campaign registry need them;
+# the rest (cost, price table, compare table, ...) run anywhere, CI included.
+needs_data = pytest.mark.skipif(not (EVALSET.exists() and REGISTRY.exists()),
                                 reason="golden data or campaign registry not present")
 
 
@@ -48,6 +50,7 @@ class FakeJudge:
         return {"faithful": True, "unsupported": []}
 
 
+@needs_data
 def test_runner_end_to_end(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -72,6 +75,7 @@ def test_runner_end_to_end(monkeypatch, tmp_path):
     assert "not compared: --limit" in (out / "scorecard_golden.md").read_text(encoding="utf-8")
 
 
+@needs_data
 def test_rescore_uses_the_saved_records_and_makes_no_model_call(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -92,6 +96,7 @@ def test_rescore_uses_the_saved_records_and_makes_no_model_call(monkeypatch, tmp
     assert after["sets"]["golden"]["scores"] == before["sets"]["golden"]["scores"]   # same key, same scores
 
 
+@needs_data
 def test_rescore_never_rewrites_the_saved_records(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -127,6 +132,7 @@ def test_rescore_rows_follows_a_corrected_key():
     assert s["event_type"]["ok"] is True and s["faithful"] is True                    # verdict kept
 
 
+@needs_data
 def test_a_labelling_model_runs_only_on_purpose_and_is_marked(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -142,6 +148,7 @@ def test_a_labelling_model_runs_only_on_purpose_and_is_marked(monkeypatch, tmp_p
     assert summary["labelled_the_golden_set"] is True and summary["judge_model"] == "gemini-3.1-pro-preview"
 
 
+@needs_data
 def test_a_model_judging_its_own_summaries_is_noted_on_the_scorecard(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -178,6 +185,7 @@ def test_the_committed_price_table_is_complete_for_the_models_we_run():
         assert prices[m]["input_per_million"] > 0 and prices[m]["output_per_million"] > 0 and prices[m]["from"]
 
 
+@needs_data
 def test_a_run_where_calls_fail_is_invalid_not_a_regression(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -200,6 +208,7 @@ def test_a_run_where_calls_fail_is_invalid_not_a_regression(monkeypatch, tmp_pat
     assert "INVALID -- not compared" in card and "REGRESSION" not in card and "improved" not in card
 
 
+@needs_data
 def test_compare_reads_each_runs_own_numbers(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import compare, run
@@ -218,6 +227,7 @@ def test_compare_reads_each_runs_own_numbers(monkeypatch, tmp_path):
     assert "| stand-in | low |" in compare.table([r])
 
 
+@needs_data
 def test_a_failed_call_is_left_out_of_the_scores_not_scored_as_a_miss(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -247,6 +257,7 @@ def test_a_failed_call_is_left_out_of_the_scores_not_scored_as_a_miss(monkeypatc
     assert len(scored) == 11 and all(s["staged"] for s in scored)               # the failed one is not a miss
 
 
+@needs_data
 def test_rescore_keeps_the_runs_own_settings(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -315,6 +326,7 @@ def test_cost_and_latency_are_over_the_calls_the_model_answered():
     assert u["seconds_p95"] == 2.0 and u["cost_per_1000_notes_usd"] == pytest.approx(1.2)
 
 
+@needs_data
 def test_unjudged_summaries_are_counted_and_too_many_take_faithfulness_out(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -335,6 +347,7 @@ def test_unjudged_summaries_are_counted_and_too_many_take_faithfulness_out(monke
         out / "scorecard_golden.md").read_text(encoding="utf-8")
 
 
+@needs_data
 def test_a_missing_set_stops_the_run_before_any_call_and_each_set_records_its_own_key(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import compare, run
@@ -372,6 +385,7 @@ def test_an_error_message_cannot_break_the_compare_table():
     assert "first: a / b" in line and line.count("|") == compare.table([{"run": "r"}]).splitlines()[-1].count("|")
 
 
+@needs_data
 def test_an_id_in_two_top_up_rounds_stops_the_run_before_any_call(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
@@ -389,6 +403,7 @@ def test_an_id_in_two_top_up_rounds_stops_the_run_before_any_call(monkeypatch, t
     assert not model.prompts and not (tmp_path / "runs").exists()
 
 
+@needs_data
 def test_an_unknown_vertical_stops_the_run_before_any_call(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
     from evals.extract_eval import run
