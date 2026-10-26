@@ -26,7 +26,7 @@ consumer. Based on the architecture proposal (§3 changes, §4 client contract,
 |---|---|---|
 | Now | AIML-2962, S-08 | depend on nothing |
 | | AIML-3003 | needs AIML-2929 |
-| | AIML-3004 | needs AIML-2929 and the business answer on whether codes are needed |
+| | AIML-3004 | needs AIML-2929; the business answered: a code per discussed topic |
 | Next | S-01 | needs AIML-2929 and AIML-3003's decision; Phases 2–4 build on it |
 | After S-01, in parallel | S-02, S-03, S-05, S-06, S-09, S-13 | each needs only S-01 |
 | Then | S-04 | needs S-01, S-02 |
@@ -77,24 +77,29 @@ Acceptance criteria:
 
 Depends on AIML-2929. Proposal change 2, question 9.
 
-### AIML-3004 Business-rule derived dispositions (5)
+### AIML-3004 Disposition code per discussed topic, checked against the rep's words (5)
 
-Disposition codes stop being a model choice. The model captures the facts
-(U-02 contact outcome, U-04 commercial outcome, U-06 objection and
-competitor); if a per-topic code is still needed downstream, Python derives it
-with a business-owned mapping (e.g. U-04 "order placed" → 2, U-06 "pricing" →
-8, no match → 99). If no code is needed, the codes are dropped instead.
+The business needs a disposition code per discussed topic, not per
+must-capture field (Suresh, 2026-10-26). `extract()` picks each discussed
+topic's code from the fixed registry (`dispositions.yaml`, codes 1–10 and 99)
+together with the rep's words for that outcome; our code keeps the model's
+code only when those words are in the note, and otherwise sets 99 (manual
+review).
+Deriving the code from the captured fields was measured first and cannot
+reach the agent's score (63.3% at best on key v1.4).
 
 Acceptance criteria:
 - The business answer to "is a per-topic code needed?" is recorded first.
-- The mapping lives in reference data (S-08), not in code or the prompt, and
-  adds the missing outcomes (quote created, no contact).
-- No disposition instructions or cue words remain in any prompt.
-- Unit tests cover every mapping row, the 99 fallback, and contradictory facts.
-- Disposition is scored on the golden set from the derived code.
+- Each discussed topic gets one code from the registry; a topic not
+  discussed has none. The schema allows only the registry's codes.
+- A code other than 99 is kept only with the rep's words for it, checked in
+  code; otherwise it is 99. The scorecard counts these fallbacks.
+- Without the option, `extract()`'s prompt, schema and record are unchanged.
+- Unit tests cover the code check, the 99 fallback, the schema and scoring.
+- Disposition is scored on the golden set and compared with the agent's
+  baseline; the result is in the decisions log.
 
-Open question: does Salesforce or reporting need a per-topic code at all
-(proposal question 3)? Depends on AIML-2929. Proposal change 4.
+Depends on AIML-2929. Proposal change 4.
 
 ## Phase 2: our code runs the conversation (26 points)
 
