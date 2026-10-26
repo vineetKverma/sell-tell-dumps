@@ -132,6 +132,10 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   would add.
 - `over_claimed` is the share of not-discussed campaigns marked discussed.
   Disposition is n/a: the record carries the facts behind it, not a code.
+- A run saves each settled record, not the model's raw reply. `--rescore`
+  re-scores those records against a changed answer key; a change to how a
+  record is settled (the evidence check, the U-10 number rule) needs a fresh
+  run.
 - Each planned topic gets its short description (about 300 characters) from
   the campaign registry, `evals/reference/campaign_topics.csv` (the Campaign
   Topics export, repaired in code: a Replace All damaged its names), looked up

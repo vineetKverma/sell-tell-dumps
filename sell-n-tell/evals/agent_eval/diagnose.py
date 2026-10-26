@@ -1,4 +1,5 @@
-"""Where do the baseline's misses come from? Counts only -- no note text.
+"""Where do the baseline's misses come from? Counts only by default -- no
+note text (``--show-unsupported`` is the exception, below).
 
     uv run python -m evals.agent_eval.diagnose evals/runs/baseline
     uv run python -m evals.agent_eval.diagnose evals/runs/extract-<time>/scores_topup.json
@@ -29,8 +30,10 @@ def main() -> None:
         path = args.run_dir / "scores_golden.json"     # an extract_eval run (one file per set)
     data = json.loads(path.read_text(encoding="utf-8"))
     runs = data["cases"]
+    errors = data["meta"].get("infra_errors")
     print(f"repeats: {len(runs)}  scored cases per repeat: {[len(r) for r in runs]}  "
-          f"not scored (errors): {[len(x) for x in data['meta'].get('infra_errors', [])]}")
+          + (f"not scored (errors): {[len(x) for x in errors]}" if errors is not None
+             else "errors: see the run's summary.json (an extract run counts them there)"))
 
     ev, topic, code, faith = Counter(), Counter(), Counter(), Counter()
     unsupported: list[str] = []

@@ -387,3 +387,23 @@ def test_an_id_in_two_top_up_rounds_stops_the_run_before_any_call(monkeypatch, t
     with pytest.raises(SystemExit, match="ids must be unique"):
         run.main()
     assert not model.prompts and not (tmp_path / "runs").exists()
+
+
+def test_an_unknown_vertical_stops_the_run_before_any_call(monkeypatch, tmp_path):
+    from evals.agent_eval import judge as judge_mod
+    from evals.extract_eval import run
+    model = EchoModel()
+    monkeypatch.setattr(run, "_client", lambda location: model)
+    monkeypatch.setattr(judge_mod, "Judge", FakeJudge)
+    monkeypatch.setattr(run, "RUNS", tmp_path / "runs")
+    monkeypatch.setattr(run, "SETS_DIR", tmp_path / "sets")
+    (tmp_path / "sets" / "topup").mkdir(parents=True)
+    data = json.loads(EVALSET.read_text(encoding="utf-8"))
+    data["eval_cases"] = data["eval_cases"][:2]
+    data["eval_cases"][1]["session_input"]["state"]["vertical"] = "XX"   # a vertical with no field list
+    (tmp_path / "sets" / "topup" / "golden_topup_v1.evalset.json").write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["run", "--model", "stand-in", "--repeats", "1", "--set", "topup"])
+    with pytest.raises(SystemExit, match="vertical 'XX'"):
+        run.main()
+    assert not model.prompts and not (tmp_path / "runs").exists()
+

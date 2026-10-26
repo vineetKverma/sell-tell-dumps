@@ -38,6 +38,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.extraction import DISCUSSED, extract, fields_for, load_catalog, load_registry  # noqa: E402
+from app.extraction.catalog import VERTICALS  # noqa: E402
 from evals.agent_eval.baseline import compare as compare_to_baseline  # noqa: E402
 from evals.agent_eval.baseline import load as load_baseline  # noqa: E402
 from evals.agent_eval.baseline import summarise  # noqa: E402
@@ -68,14 +69,18 @@ def set_files(name: str) -> list[Path]:
 def set_cases(name: str, limit: int | None = None) -> list:
     """The set's cases from every file in its folder: the top-up comes in
     rounds of different notes (golden_topup_v1..v3), not versions of one key.
-    An id in two files is a data mistake, so the run stops rather than drop
-    or double-count a case."""
+    An id in two files, or a vertical with no field list, is a data mistake,
+    so the run stops before any call rather than drop, double-count or crash
+    on a case part-way through."""
     cases, seen = [], {}
     for f in set_files(name):
         for c in load_cases(f, strict=(name == "golden")):
             if c.id in seen:
                 raise SystemExit(f"{name}: case {c.id} is in both {seen[c.id]} and {f.name}; "
                                  "ids must be unique across the set's files")
+            if c.vertical not in VERTICALS:
+                raise SystemExit(f"{name}: case {c.id} has vertical {c.vertical!r} in {f.name}; "
+                                 f"expected one of {', '.join(VERTICALS)}")
             seen[c.id] = f.name
             cases.append(c)
     return cases[:limit]
