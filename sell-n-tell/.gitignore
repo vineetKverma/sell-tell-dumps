@@ -182,4 +182,7 @@ evals/runs/
 # The golden set (AIML-2898): real customer notes and contact names. Kept in
 # the access-controlled eval bucket, never in the repo -- see evals/README.md.
 evals/v1/
+evals/topup/
+evals/synthetic/
+evals/reference/
 

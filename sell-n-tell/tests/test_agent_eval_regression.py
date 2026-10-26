@@ -384,3 +384,40 @@ def test_a_limit_is_never_finer_than_one_item():
     assert bl.threshold_for({"mean": 77.78, "stdev": 0.0}) == bl.DEFAULT_THRESHOLD   # older baselines
     assert bl.threshold_for({"mean": 75.0, "stdev": 0.5, "items": 130}) == bl.DEFAULT_THRESHOLD
     assert bl.summarise([_rollup(0.60, 0.49, 2 / 3, 0.0, 0.0)])["faithfulness"]["items"] == 1000
+
+
+def test_an_agent_that_never_replied_is_counted_on_its_own():
+    from evals.agent_eval.run import no_reply
+    silent = {"id": "HL-006", "final": None, "transcript": [["rep (sent)", "Dan Lake"]]}
+    answered = {"id": "HL-007", "final": None, "transcript": [["rep (sent)", "n"], ["agent", "Could you repeat?"]]}
+    broken = {"id": "HL-008", "final": None, "error": "connect: refused", "transcript": [["rep (sent)", "n"]]}
+    staged = {"id": "HL-009", "final": {"x": 1}, "transcript": [["rep (sent)", "n"]]}
+    assert [no_reply(r) for r in (silent, answered, broken, staged)] == [True, False, False, False]
+    ok = [{"id": f"MH-{i:03d}", "final": {"x": 1}, "judge": {"faithful": True}} for i in range(9)]
+    final = _final(ok + [{"id": "MH-009", "final": None, "transcript": [["rep (sent)", "n"]]}],
+                   dict(BASE, dataset_sha256=FAKE_HASH))
+    assert final["no_reply"] == ["MH-009"]                        # counted ...
+    assert final["scored"] == 10                                  # ... and still scored as a miss
+
+
+def test_the_app_log_goes_to_the_runs_own_folder(tmp_path, monkeypatch):
+    import subprocess
+    from evals.agent_eval import run
+
+    class Proc:
+        pid = 1
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: Proc())
+    monkeypatch.setattr(run, "_healthy", lambda _url: True)
+    with run.app_running("http://localhost:8000", start=True, log=tmp_path / "full-x" / "app.log"):
+        pass
+    assert (tmp_path / "full-x" / "app.log").exists()

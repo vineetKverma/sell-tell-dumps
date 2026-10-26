@@ -42,6 +42,7 @@ MAX_THRESHOLD = 20.0
 METRICS = [
     ("event_type", lambda r: r["event_type"]["rate"], True),
     ("topic_status", lambda r: r["topic_status"]["rate"], True),
+    ("over_claimed", lambda r: (r.get("over_claimed") or {}).get("rate"), False),
     ("disposition", lambda r: r["disposition"]["rate"], True),
     ("faithfulness", lambda r: r["faithfulness"]["rate"], True),
     ("field_recall_P1", lambda r: r["fields"].get("P1", {}).get("recall"), True),

@@ -1,6 +1,7 @@
 """Where do the baseline's misses come from? Counts only -- no note text.
 
     uv run python -m evals.agent_eval.diagnose evals/runs/baseline
+    uv run python -m evals.agent_eval.diagnose evals/runs/extract-<time>/scores_topup.json
 
 Reads scores.json from a scored run and breaks each headline metric into
 expected -> actual pairs, so a systematic pattern (e.g. the agent marking
@@ -23,7 +24,10 @@ def main() -> None:
     ap.add_argument("run_dir", type=Path)
     ap.add_argument("--show-unsupported", type=int, default=0, metavar="N")
     args = ap.parse_args()
-    data = json.loads((args.run_dir / "scores.json").read_text(encoding="utf-8"))
+    path = args.run_dir if args.run_dir.is_file() else args.run_dir / "scores.json"
+    if not path.exists() and (args.run_dir / "scores_golden.json").exists():
+        path = args.run_dir / "scores_golden.json"     # an extract_eval run (one file per set)
+    data = json.loads(path.read_text(encoding="utf-8"))
     runs = data["cases"]
     print(f"repeats: {len(runs)}  scored cases per repeat: {[len(r) for r in runs]}  "
           f"not scored (errors): {[len(x) for x in data['meta'].get('infra_errors', [])]}")

@@ -67,12 +67,12 @@ def scorecard(name: str, runs: list[dict], per_case: list[list[dict]], meta: dic
                   + ". They were already retried once; if this persists, check the app log and run again.", ""]
 
     lines += ["## Overall and per vertical" + (" (last repeat)" if len(runs) > 1 else ""), "",
-              "| group | cases | not staged | event type | topic status | disposition "
+              "| group | cases | not staged | event type | topic status | over-claimed | disposition "
               "| duplicate rows | off-plan rows | faithfulness |",
-              "|---|---|---|---|---|---|---|---|---|"]
+              "|---|---|---|---|---|---|---|---|---|---|"]
     for g, r in last.items():
         lines.append(f"| {g} | {r['cases']} | {r['not_staged']} | {_acc(r['event_type'])} "
-                     f"| {_acc(r['topic_status'])} | {_acc(r['disposition'])} "
+                     f"| {_acc(r['topic_status'])} | {_acc(r['over_claimed'])} | {_acc(r['disposition'])} "
                      f"| {r['duplicate_rows']} | {r['off_plan_rows']} | {_acc(r['faithfulness'])} |")
 
     allr = last["all"]
@@ -157,6 +157,15 @@ def infra_error(res: dict) -> bool:
     return bool(res.get("error")) and not res.get("final")
 
 
+def no_reply(res: dict) -> bool:
+    """The agent said nothing and called no tool after the rep's note: the
+    rep was left with silence. Scored as a miss (the rep got no record), but
+    counted on its own, because a live-service hiccup looks exactly the same
+    and should not pass for a prompt failure."""
+    return (not infra_error(res) and not res.get("final")
+            and not any(who == "agent" for who, _ in res.get("transcript") or []))
+
+
 def _score_run(cases, results: list[dict], judge) -> list[dict]:
     by_id = {c.id: c for c in cases}
     scores = []
@@ -238,6 +247,7 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
     the scores, and the verdict against the baseline. Numbers only."""
     n = len(cases)
     infra = [r["id"] for r in raw if infra_error(r)]
+    silent = [r["id"] for r in raw if no_reply(r)]
     judged = [r for r in raw if r.get("final") and not infra_error(r)]
     unjudged = sum(1 for r in judged if (r.get("judge") or {}).get("faithful") is None)
     data_hash = dataset_sha256(EVALSET)
@@ -275,6 +285,7 @@ def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref
         "judge_model": JUDGE_MODEL,
         "dataset": EVALSET.name, "dataset_sha256": data_hash,
         "cases": n, "scored": n - len(infra) - len(missing), "connection_errors": infra,
+        "no_reply": silent,
         "unjudged_summaries": unjudged,
         "excluded_from_verdict": excluded,
         "scores": summarise([rollup]) if rollup else {},
@@ -311,7 +322,7 @@ def main() -> None:
         name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         out = RUNS / name
         out.mkdir(parents=True)
-        with app_running(args.base_url, start=not _healthy(args.base_url)):
+        with app_running(args.base_url, start=not _healthy(args.base_url), log=out / "app.log"):
             from evals.agent_eval.drive import SessionEndpointError
             print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
             try:
@@ -348,6 +359,10 @@ def main() -> None:
         card = card.replace("## Must-capture fields", "\n".join(final["comparison"]) + "\n\n## Must-capture fields", 1)
     left_out = "; ".join(f"{m} ({why})" for m, why in final["excluded_from_verdict"].items())
     header = f"# Verdict: {final['verdict']}\n\n" + (f"**Not in the verdict:** {left_out}\n\n" if left_out else "")
+    if final["no_reply"]:
+        header += (f"**The agent never replied:** {len(final['no_reply'])} case(s) "
+                   f"({', '.join(final['no_reply'])}), scored as misses -- a live-service hiccup looks the same; "
+                   "see app.log in this folder.\n\n")
     card = card.replace("# Eval scorecard", header + "# Eval scorecard", 1)
     if final["problems"]:
         card = card.replace("# Eval scorecard", "Not judged: " + "; ".join(final["problems"]) + "\n\n# Eval scorecard", 1)
@@ -358,6 +373,8 @@ def main() -> None:
           + (f" -- {'; '.join(final['problems'])}" if final["problems"] else ""))
     if left_out:
         print(f"not in the verdict: {left_out}")
+    if final["no_reply"]:
+        print(f"the agent never replied: {', '.join(final['no_reply'])}")
     print(f"written: {out / 'final_scores.json'}")
     raise SystemExit({"PASS": 0, "REGRESSION": 1, "INVALID": 2}[final["verdict"]])
 
@@ -374,25 +391,26 @@ def _healthy(base_url: str) -> bool:
 
 
 @contextlib.contextmanager
-def app_running(base_url: str, start: bool):
+def app_running(base_url: str, start: bool, log: Path | None = None):
     """With ``start``, run the app (uvicorn, same Python) for the duration and
     stop it afterwards, waiting until /healthz answers before driving cases.
-    Otherwise use the app that is already running."""
+    Otherwise use the app that is already running. The app's log goes to
+    ``log`` -- the run's own folder, so the next run does not overwrite it."""
     proc = None
     if start:
         port = urllib.parse.urlsplit(base_url).port or 8000
         root = Path(__file__).resolve().parents[2]
-        RUNS.mkdir(parents=True, exist_ok=True)
-        log = (RUNS / "app.log").open("w", encoding="utf-8")
+        log = log or RUNS / "app.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
         proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)],
-                                cwd=root, stdout=log, stderr=subprocess.STDOUT)
+                                cwd=root, stdout=log.open("w", encoding="utf-8"), stderr=subprocess.STDOUT)
         deadline = time.monotonic() + APP_START_TIMEOUT_S
         while not _healthy(base_url):
             if proc.poll() is not None or time.monotonic() > deadline:
                 proc.kill()
-                raise SystemExit(f"The app did not start. See {RUNS / 'app.log'}")
+                raise SystemExit(f"The app did not start. See {log}")
             time.sleep(2)
-        print(f"app started (pid {proc.pid}); log: {RUNS / 'app.log'}")
+        print(f"app started (pid {proc.pid}); log: {log}")
     try:
         yield
     finally:

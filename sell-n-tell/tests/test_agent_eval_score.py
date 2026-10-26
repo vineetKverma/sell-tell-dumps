@@ -223,6 +223,28 @@ def test_captured_but_wrong_value():
 
 
 @pytest.mark.parametrize("expected,actual,ok", [
+    ("spoke with contact", "spoke with target", True),       # a conversation, target or alternate unknown
+    ("spoke with contact", "Spoke with alternate", True),
+    ("spoke with target", "spoke with contact", False),     # the key says which: "contact" is not enough
+    ("spoke with alternate", "spoke with contact", False),
+    ("spoke with target", "spoke with alternate", False),   # ... and the other one is wrong
+    ("spoke with contact", "no contact", False),
+    ("spoke with target", "Spoke with the target", True),   # the same answer, worded with "the"
+    ("spoke with contact", "Spoke with Rachel, the property manager", True),   # a conversation, whoever with
+    ("spoke with target", "Spoke with Rachel, the property manager", False),
+    ("spoke with contact", "left a voicemail", False),
+    ("spoke with contact", "spoke with no one", False),      # not a conversation
+    ("spoke with contact", "Spoke to nobody", False),
+    ("spoke with target", "spoke with the target's assistant", False),   # someone, but not the target
+    ("spoke with contact", "spoke with the target’s assistant", True),
+])
+def test_contact_outcome_accepts_target_or_alternate_against_spoke_with_contact(expected, actual, ok):
+    from evals.agent_eval.score import field_value_agrees
+    assert field_value_agrees("U-02", expected, actual) is ok
+    assert field_value_agrees("U-04", "spoke with contact", "spoke with target") is False   # U-02 only
+
+
+@pytest.mark.parametrize("expected,actual,ok", [
     ("12 units", "12 units a month", True),
     ("Quote created: $3000", "quote created $3000", True),
     ("Bill", "Bob", False),
@@ -246,6 +268,19 @@ def test_rollup_by_vertical_and_priority():
     assert roll["HL"]["fields"]["all"]["recall"] == 0.0
     assert roll["all"]["fields"]["P1"]["stated"] == 2  # U-01 in both cases
     assert roll["all"]["fields"]["P3"]["recall"] is None  # MH-01 never stated: n/a, not 0
+
+
+def test_over_claimed_counts_not_discussed_topics_marked_discussed():
+    case = make_case()                                          # "Q3 Paint, Primer" was not discussed
+    args = perfect(case)
+    assert aggregate([score_case(case, args)], PRIO)["all"]["over_claimed"] == {"ok": 0, "n": 1, "rate": 0.0}
+    args["topics"][1]["discussed"] = True                       # claimed anyway
+    assert aggregate([score_case(case, args)], PRIO)["all"]["over_claimed"]["rate"] == 1.0
+    args["topics"][0]["discussed"] = False                      # a missed topic is not an over-claim
+    args["topics"][1]["discussed"] = False
+    assert aggregate([score_case(case, args)], PRIO)["all"]["over_claimed"]["rate"] == 0.0
+    # Never staging is a miss, but not an over-claim.
+    assert aggregate([score_case(case, None)], PRIO)["all"]["over_claimed"]["rate"] == 0.0
 
 
 def test_variance_across_repeats():

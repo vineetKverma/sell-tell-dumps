@@ -1,0 +1,13 @@
+{
+ "_how": "USD per 1 million tokens. Thinking tokens are billed as output. 'from' says where each figure came from; confirm against the Vertex AI pricing page (cloud.google.com/vertex-ai/generative-ai/pricing) before quoting a cost outside the team. 'from_2027' is the price after the introductory period.",
+ "gemini-3.8-flash": {"input_per_million": 0.75, "output_per_million": 3.75,
+                      "from_2027": {"input_per_million": 1.50, "output_per_million": 7.50},
+                      "from": "ai.google.dev/gemini-api/docs/pricing, standard paid tier (introductory until 2026-12-31); confirmed twice", "checked": "2026-10-12"},
+ "gemini-3.7-flash": {"input_per_million": 0.75, "output_per_million": 3.75,
+                      "from_2027": {"input_per_million": 1.50, "output_per_million": 7.50},
+                      "from": "UNCONFIRMED: third-party listings (requesty.ai, openrouter.ai); not on Google's Gemini API pricing page", "checked": "2026-10-12"},
+ "gemini-2.5-flash": {"input_per_million": 0.30, "output_per_million": 2.50,
+                      "from": "ai.google.dev/gemini-api/docs/pricing, standard paid tier; $0.30 is the text/image/video input rate (audio is $1.00) -- extract() sends text only; confirmed twice", "checked": "2026-10-12"},
+ "gemini-3.1-pro-preview": {"input_per_million": 2.00, "output_per_million": 12.00,
+                            "from": "ai.google.dev/gemini-api/docs/pricing, standard paid tier, prompts up to 200k tokens ($4.00 / $18.00 above; ours are ~2k); confirmed twice", "checked": "2026-10-12"}
+}

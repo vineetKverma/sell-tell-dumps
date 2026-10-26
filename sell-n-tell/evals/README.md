@@ -50,8 +50,8 @@ with, by name or by role" is a Meeting -- because every wording of the
 business rule tried in the prompt cost topic status and faithfulness. So
 about 8 golden cases count against the agent by design: 7 where the rep
 interacted with someone not named (the key says Meeting), and one where the
-rep spoke only to the front desk (the key says On-site visit). AIML-2929
-adds `extract()`, which follows the business rule.
+rep spoke only to the front desk (the key says On-site visit). `extract()`
+(`app/extraction`) follows the business rule.
 
 ## Why the numbers can be trusted
 
@@ -109,6 +109,34 @@ It loads the agent in-process (no app needed) and writes
 `evals/runs/adk-<mode>-<time>/summary.json`. This is where audio-based testing
 will go later; the WebSocket run above stays the regression gate.
 
+## Scoring `extract()` directly (AIML-2929)
+
+`evals/extract_eval/` sends each note straight to `extract()` (the text
+extraction with a fixed schema, `app/extraction/`) -- no app, no live
+conversation, so a run takes minutes. The record is scored with the same
+scorer and judge as above and compared with the committed baseline.
+
+```powershell
+uv run python -m evals.extract_eval.run --model <model>                                   # golden set, 3 runs
+uv run python -m evals.extract_eval.run --model <model> --set golden topup synthetic
+uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10       # a first look
+```
+
+- Two models labelled the golden set (gemini-3.8-flash,
+  gemini-3.1-pro-preview), so their scores may flatter them. The run refuses
+  them unless `--allow-labelling-model` is passed, and the scorecard then says
+  so.
+- A topic is `discussed` only with the rep's own words as evidence, checked in
+  code; without them it is `unconfirmed` (the live flow would ask the rep) and
+  scores as not discussed. The scorecard reports how many such questions a run
+  would add.
+- `over_claimed` is the share of not-discussed campaigns marked discussed.
+  Disposition is n/a: the record carries the facts behind it, not a code.
+- Each planned topic gets its short description (about 300 characters) from
+  the campaign registry, `evals/reference/campaign_topics.csv` (the Campaign
+  Topics export, repaired in code: a Replace All damaged its names), looked up
+  by the account's vertical. `--no-descriptions` runs on titles only.
+
 ## Updating the baseline (when a change is accepted as the new normal)
 
 Run `full` three times, then export the scores (numbers only) to
@@ -139,8 +167,19 @@ other version a run ends INVALID ("the golden set differs from the one the
 baseline was made on").
 
 The folder holds `golden_v1.evalset.json`, `universal_fields.csv` and
-`vertical_fields.csv`. Do not copy it anywhere else. Without it, `run` stops
-with a message saying where it looked, and the data-dependent unit tests skip.
+`vertical_fields.csv`. The field top-up (65 more real notes) and synthetic
+(5 written cases) sets are in the same bucket, fetched next to it for the
+`extract()` eval:
+
+```powershell
+gcloud storage cp -r gs://sellntell-eval-np/topup gs://sellntell-eval-np/synthetic gs://sellntell-eval-np/reference evals/
+```
+
+`reference/campaign_topics.csv` is the campaign registry (titles and
+descriptions) that `extract()` uses.
+
+Do not copy the golden data anywhere else. Without it, `run` stops with a
+message saying where it looked, and the data-dependent unit tests skip.
 
 ## Unit tests
 

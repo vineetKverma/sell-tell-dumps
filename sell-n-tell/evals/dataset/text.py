@@ -24,12 +24,12 @@ VERTICALS = ("MH", "HS", "HL", "IS", "TR", "IN")
 # ("Comfort" had a lowercase "mf"). The original case is lost; "gov" is
 # lowercase because its only occurrence is mid-sentence. HL - HEALTHCARE and
 # TR - TRADES never occur outside Industry__c (checked against the full sheet).
-REGISTRY_DAMAGE = {
-    "HS - HOSPITALITY": "Hosp",
-    "IN - INDUSTRIAL": "Inst",
-    "MH - MULTIFAMILY": "MF",
-    "IS - PUBLIC SECTOR": "gov",
-}
+#
+# One source: the damage map, the repair and the short description live with
+# the app's registry loader (app/extraction/campaigns.py), which the product
+# uses; the curation tools import them, so the two cannot drift apart.
+from app.extraction.campaigns import REGISTRY_DAMAGE, repair, short_description  # noqa: E402, F401
+
 VERTICAL_TOKENS = (
     "MH - MULTIFAMILY",
     "HS - HOSPITALITY",
@@ -72,18 +72,12 @@ HEALTHCARE_PERSON = r"\b(?:patient|resident|mr\.|mrs\.|ms\.)\b"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _PHONE = re.compile(r"\b\d{3}[-.\s)]\s?\d{3}[-.\s]\d{4}\b")
 _LONG_NUMBER = re.compile(r"\b\d{6,}\b")
-_URL = re.compile(r"https?://\S+")
-_GUIDE_LABEL = re.compile(r"\b(?:seller|user) guid(?:e|ance)\s*:\s*", re.IGNORECASE)
 MOJIBAKE_MARKERS = (chr(0xE2) + chr(0x20AC), chr(0xC3))  # a-hat + euro, A-tilde
 
 
 def repair_registry_text(text: object) -> str:
     """Undo the Replace All damage in a registry Name or Description."""
-    if not isinstance(text, str):
-        return ""
-    for token, original in REGISTRY_DAMAGE.items():
-        text = text.replace(token, original)
-    return text
+    return repair(text) if isinstance(text, str) else ""
 
 
 def damage_count(texts: list[object]) -> dict[str, int]:
@@ -174,18 +168,6 @@ def mask_pii(text: str) -> str:
     text = _EMAIL.sub("[EMAIL]", text)
     text = _PHONE.sub("[PHONE]", text)
     return _LONG_NUMBER.sub("[NUMBER]", text)
-
-
-def short_description(text: str, limit: int = 300) -> str:
-    """A campaign description cut down to what an agent prompt can carry:
-    links and guide labels removed, whitespace collapsed, cut at a sentence."""
-    text = _GUIDE_LABEL.sub("", _URL.sub("", text or ""))
-    text = " ".join(text.split())
-    if len(text) <= limit:
-        return text
-    cut = text[:limit]
-    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
-    return cut[: end + 1] if end > limit // 3 else cut.rstrip() + "..."
 
 
 def strata_for(note: str) -> list[str]:

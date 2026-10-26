@@ -44,6 +44,33 @@ def _stated(value) -> bool:
     return value not in (None, "") and norm(value) not in ("not stated", "null", "none", "n/a")
 
 
+_SPOKE_WITH = re.compile(r"^spoke (?:with|to) (?:the |an? )?(\w+)(['’]s\b)?")
+_NOBODY = ("no", "nobody", "noone", "none")
+
+
+def _spoke_with(value: str) -> str | None:
+    """"target", "alternate", "someone" (a conversation, with whoever: "spoke
+    with contact", "spoke with Rachel, the manager", "spoke with the target's
+    assistant"), or None (no conversation: "spoke with no one")."""
+    m = _SPOKE_WITH.match(norm(value))
+    if not m or m.group(1) in _NOBODY:
+        return None
+    return m.group(1) if m.group(1) in ("target", "alternate") and not m.group(2) else "someone"
+
+
+def field_value_agrees(field_id: str, expected: str, actual: str) -> bool:
+    """value_agrees, plus one field rule: for U-02 (contact outcome) a KEY of
+    "spoke with contact" -- a conversation is clear from the note but not
+    whether it was the target or an alternate -- accepts any answer that says
+    the rep spoke with someone. A key that names target or alternate still has
+    to be matched ("spoke with the target" is the same answer)."""
+    if field_id == "U-02":
+        e, a = _spoke_with(expected), _spoke_with(actual)
+        if e and a:
+            return e == "someone" or e == a
+    return value_agrees(expected, actual)
+
+
 def value_agrees(expected: str, actual: str) -> bool:
     """Same after normalising, or one contains the other ("12 units" and
     "12 units a month") -- the rule the two answer-key builds were compared
@@ -112,7 +139,7 @@ def score_case(case: Case, actual: dict | None) -> dict:
         outcome = ("TP" if e and a else "FN" if e else "FP" if a else "TN")
         item = {"field": fid, "expected": want, "actual": got, "outcome": outcome}
         if outcome == "TP":
-            item["value_ok"] = value_agrees(want, got)
+            item["value_ok"] = field_value_agrees(fid, want, got)
         out["fields"].append(item)
     return out
 
@@ -157,11 +184,16 @@ def _rollup(scores: list[dict], priorities: dict[str, int]) -> dict:
             by_prio[f"P{priorities.get(f['field'], '?')}"].append(f)
             by_field[f["field"]].append(f)
 
+    not_discussed = [t for t in topics if t["expected"] == NOT_DISCUSSED]
     return {
         "cases": len(scores),
         "not_staged": sum(not s["staged"] for s in scores),
         "event_type": _acc(sum(e["ok"] for e in ev), len(ev)),
         "topic_status": _acc(sum(t["status_ok"] for t in topics), len(topics)),
+        # Of the planned topics the rep did NOT discuss, the share the agent
+        # claimed as discussed -- the costly miss (an outcome is recorded for a
+        # campaign nobody talked about). Lower is better.
+        "over_claimed": _acc(sum(t["actual"] == DISCUSSED for t in not_discussed), len(not_discussed)),
         "disposition": _acc(sum(t["code_ok"] for t in codes), len(codes)),
         "duplicate_rows": sum(t["actual"] == DUPLICATE for t in topics),
         "off_plan_rows": sum(len(s["off_plan"]) for s in scores),
