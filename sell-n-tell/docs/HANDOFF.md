@@ -11,50 +11,27 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 
 | Story | State | Next |
 |---|---|---|
-| **AIML-2898** golden dataset | **Done** (merged with PR #10). Key now v1.4 | Closing comment |
-| **AIML-2702** eval harness | **Merged** (PR #10, squash, 2026-10-15; AIML-2898 and AIML-2702 moved to Done). Source branch kept until 2928 is rebased | Closing comments on AIML-2898 / AIML-2702; delete the source branch after the 2928 rebase |
-| **AIML-2928** ADK 2.10 + prompt fixes | **PR #11 open, ready for review** (dev machine `2b862b8`: merged with `development` after AIML-2910). Baseline = 3 runs of the shipping code on v1.4 (78.7 / 75.6 / 71.1 / 54.9, `not_gated` quick: faithfulness); merged code run PASS (81.4 / 76.2 / 66.7 / 56.3). Model-facing text = the measured version; fixes: exact-label coverage, read-back wording, record card | Suresh's review → squash-merge → rebase 2929 onto `development` (expect README and baseline conflicts) |
-| **AIML-2929** `extract()` go/no-go | **Ready except the rebuild.** Final run on key v1.4 with the next-step rule (`extract-20261020-174739`): topic status 95.4%, event type 93.8%, over-claim 0%, faithfulness 91.1%, P1 recall 93.0%, invented 1.8%, USD 3.03 / 1,000 notes. Export check with 2929's code passed (over-claimed gated; quick leaves out faithfulness only). Reports updated | After PR #11 merges: on the dev machine `git checkout -B feature/AIML-2929-text-extraction origin/development`, copy the 19 files (`git diff --cached --stat` = 19 files, 1860+/17-), tests, export + commit the baseline, push, raise the PR (draft in chat; add the labelling-model guard note) |
+| **AIML-2898** golden dataset | **Done** (merged with PR #10). Key now v1.4 | — |
+| **AIML-2702** eval harness | **Merged** (PR #10, squash, 2026-10-15) | — |
+| **AIML-2928** ADK 2.10 + prompt fixes | **Merged** (PR #11, squash, 2026-10-26, `a416029`), approved by Suresh. Baseline = three full runs of the merged code (81.0 / 80.0 / 67.8 / 56.3) | — |
+| **AIML-2929** `extract()` go/no-go | **Branch pushed** (`feature/AIML-2929-text-extraction`, on `development` after PR #11): 20 files, baseline re-exported with over-claimed gated. PR to raise | Raise the PR to `development`; Suresh's go/no-go answer comes on it |
+| **AIML-3037** Python 3.11+ runtime | Backlog (raised from the PR #11 review) | — |
+| **AIML-3054** scorecard counters (disposition loss, needless reminders) | Backlog (raised from the PR #11 review) | — |
 | **AIML-2957** golden-data tests in CI | Backlog | — |
-| **AIML-2962** web UI + WebSocket follow the session contract | Backlog (raised from PR #10 round 3) | UI first, then the `main.py` handler |
-| Event-type rule | **Answered** (Tobi, for Jeremy, 2026-10-14): front desk or gatekeeper only is an On-site visit. In key v1.4 and `extract()`. The agent's prompt (2928) deliberately keeps its earlier rule: every wording tried cost topic status and faithfulness (3 wordings, 6 runs, control run) | Done |
-
-**PR order:** #10 (merged) → 2928 → 2929. 2928 is rebased onto
-`development`; 2929 is rebased onto 2928 with
-`git rebase --onto feature/AIML-2928-prompt-fixes <old 2928 tip>`.
+| **AIML-2962** web UI + WebSocket follow the session contract | Backlog | UI first, then the `main.py` handler |
+| Event-type rule | **Answered** (Tobi, for Jeremy, 2026-10-14): front desk or gatekeeper only is an On-site visit. In key v1.4 and `extract()`. The agent's prompt keeps its earlier rule: every wording tried cost topic status and faithfulness (3 wordings, 6 runs, a control run) | Done |
 
 ### 1. Branches
 
-- `feature/AIML-2702-eval-harness`: merged into `development` as one squashed
-  commit (`f4f061a` on the dev machine). Delete the branch now that 2928 is
-  rebased.
-- `feature/AIML-2928-prompt-fixes`: rebased onto `development` and pushed at
-  `0a9c1d7` (93 tests). On top of the earlier work (ADK 2.10, prompt rules,
-  empty-record guard, 429 retry): the event-type rule as the business
-  confirmed it, and the after-reminder clause (finding 11) added and then
-  dropped -- three full runs with it made the agent file off-plan talk under
-  planned campaigns (disposition and faithfulness down in every run). Locally
-  also: README fetches golden v1.4, WebSocket docstring corrected.
-- `feature/AIML-2929-text-extraction`: on top of `f464522`, not pushed (so
-  it gets `987cb52`, the rate-limit retry, when it is rebased). Dev
-  machine commits `20bf861` (extract + eval), `4e86f32` (key v1.3 baseline,
-  field rule, cost/latency, thinking), `70a28aa` (`compare.py`, price
-  sources), `cac6d57` (review findings), `1f52bc8` (review round 2),
-  `8c794aa` (review round 3), `2fa549f` (README: fetch golden v1.3),
-  `14137fd` (review round 4). 160 tests pass there; the top-up loads all 65
-  cases. Nothing left to add
-  before the PR.
-- An automated review of these two branches gave 10 findings, then 7, then 15, then 3; the triage and
-  what was done about each is in `AIML-2929-review-findings.md`. Still open
-  from it: one event-type rule in the agent prompt, the key and `extract()`
-  (waits for Jeremy — today the agent prompt says "a person by name or
-  role", the key and `extract()` say "any interaction").
-- `pyproject.toml` / `uv.lock` are managed with uv on the dev machine and
-  are never hand-edited.
-- `backup/AIML-2928-before-rebase` (dev machine only) still holds the
-  pre-squash history with customer data; everything in it is in the bucket —
-  safe to delete.
-- `feature/AIML-2898-golden-dataset` was deleted (Bitbucket and local).
+- `development` holds PR #10 (eval harness) and PR #11 (AIML-2928), plus
+  AIML-2910 (silence watchdog, another team's).
+- `feature/AIML-2929-text-extraction`: rebuilt on `development` after PR #11
+  as one commit: `extract()`, its eval, the harness's per-run app log and
+  never-replied count, and the over-claimed metric gated in the baseline.
+- An automated review of these branches gave several rounds of findings; the
+  triage is in `AIML-2929-review-findings.md`.
+- `pyproject.toml` / `uv.lock` are managed with uv and never hand-edited.
+- Stage files by path; never `git add -A`.
 
 ### 2. Data — never in the repo
 
@@ -64,75 +41,62 @@ noncurrent expire after 90 days; uniform access; public access prevented):
 | Folder | Contents |
 |---|---|
 | `golden_v1/` | v1.1 as labelled: `golden_v1.evalset.json` (90), `universal_fields.csv`, `vertical_fields.csv` |
-| `golden_v1.2/` | + 17 event types → Meeting (approved rule as written); manifest lists the ids |
-| `golden_v1.3/` | **in use**: v1.2 + U-02 "spoke with contact" on 21 cases; checksum `1f0cbbc0a5d7…` |
+| `golden_v1.2/` | + 17 event types → Meeting; manifest lists the ids |
+| `golden_v1.3/` | v1.2 + U-02 "spoke with contact" on 21 cases |
+| `golden_v1.4/` | **in use**: v1.3 + the front-desk rule (HS-007 → On-site visit; HL-011 contested); checksum `32a1988b…` |
 | `topup/` | 65 real notes for field examples (`golden_topup_v1..v3`: 44 + 12 + 9) — key still v1.1 |
 | `synthetic/` | 5 written cases (HS-08 / HS-09) — key still v1.1 |
 | `reference/` | `campaign_topics.csv` — the campaign registry (titles + descriptions) |
 | `review/` | `golden_v1_review.xlsx` sent to Suresh |
 
-On the dev machine: `evals/v1/` = golden v1.3; `evals/topup/`,
-`evals/synthetic/`, `evals/reference/` fetched (git-ignored on the 2929
-branch; on the 2702 branch the last three show as untracked — never add
-them).
-
 ```powershell
 New-Item -ItemType Directory -Force evals/v1 | Out-Null
-gcloud storage cp "gs://sellntell-eval-np/golden_v1.3/*" evals/v1/
+gcloud storage cp "gs://sellntell-eval-np/golden_v1.4/*" evals/v1/
 gcloud storage cp -r gs://sellntell-eval-np/topup gs://sellntell-eval-np/synthetic gs://sellntell-eval-np/reference evals/
 ```
 
 The dataset checksum ignores line endings (`cases.dataset_sha256`).
-Switching to the 2702 branch can remove `evals/v1` on the dev machine; fetch
-it again. Stage files by path — never `git add -A`.
+`evals/topup/`, `evals/synthetic/` and `evals/reference/` are git-ignored
+from AIML-2929.
 
-### 3. AIML-2928 — done
+### 3. AIML-2928 — merged
 
-ADK 2.10.0 pinned (`[gcp]`; `[eval]` in dev), `requirements.txt` removed,
-session metadata keys `_compaction` / `_usage_metadata`, prompt rules (topic
-discussed only on its offer/products; Phone Call → Meeting → On-site visit;
-codes include 99). Dockerfile still `pip install .` (team follow-up).
+ADK 2.10.0 (`google-adk` plus `google-cloud-aiplatform[agent-engines]`, no
+`[gcp]` extra; `[eval]` in dev), `requirements.txt` removed, session metadata
+keys `_compaction` / `_usage_metadata`, one retry on HTTP 429 (logged).
+Prompt rules: a topic is discussed only on its offer or products, codes
+include 99, an empty record is refused when nothing was planned. Coverage
+needs a planned topic's own label; the read-back says what the rep said; the
+gate's limits are never finer than one item.
 
-**The committed agent baseline** (3 runs, re-scored on v1.3):
+**The committed baseline** (three full runs of the merged code, key v1.4):
 
-| Score | Baseline | Noise limit |
+| Score | Full | Quick |
 |---|---|---|
-| Event type | 80.5% | ±5.0 |
-| Topic status | 75.4% | ±10.6 |
-| Over-claimed | 27.3% | ±12.1 |
-| Disposition | 73.3% | ±10.0 |
-| Faithfulness | 52.6% | ±6.0 |
+| Event type | 81.0% | 90.2% |
+| Topic status | 80.0% | 85.2% |
+| Over-claimed | 21.3% | 18.5% |
+| Disposition | 67.8% | 81.5% |
+| Faithfulness | 56.3% | 52.1% (not gated) |
 
-Quick mode gates event type and topic status only (`not_gated`:
-disposition, faithfulness).
+Full-mode disposition varies 63.3-73.3 between runs, so its limit is about
+±15 points (stated in the README). Over-claimed was added by AIML-2929.
 
-**AIML-2928 decisions and measurements (all on key v1.4):**
+**What was tried for the event-type rule (key v1.4):**
 
 | Prompt | Runs | Event type | Topic status | Disposition | Faithfulness |
 |---|---|---|---|---|---|
 | PR #10 (before 2928) | 3 | 57.2 | 48.7 | 72.2 | 22.0 |
-| Earlier 2928 prompt (the committed baseline) | 3 | 79.1 | 75.4 | 73.3 | 52.6 |
-| Same, control run 16 Oct | 1 | 76.7 | 77.7 | 70.0 | 53.4 |
+| Earlier 2928 prompt | 3 | 79.1 | 75.4 | 73.3 | 52.6 |
 | New event-type wording + after-reminder clause | 3 | 79.8 | 73.9 | 67.8 | 48.5 |
 | New wording, no clause | 2 | 81.4 | 70.4 | 70.0 | 47.2 |
 | One-line front-desk exception | 1 | 82.6 | 72.3 | 70.0 | 43.2 |
-| **Final: earlier rule + exact-label coverage** | 1 clean | 74.4 | 75.4 | 70.0 | 59.3 (PASS) |
 
 Every version of the business rule in the agent's prompt made it mark
-undiscussed campaigns as discussed (topic status and faithfulness down), so
-the prompt keeps its earlier rule and the README says about 8 cases count
-against it by design. The final code also counts a planned topic as covered
-only by a row with its own label (an off-plan "Plumbing leak" no longer
-covers "Plumbing"); the harness mirrors it. Left: 2 more runs of the final
-code, then re-export the baseline from the 3 clean runs (`--allow-noisy
-quick:disposition --allow-noisy quick:faithfulness`) and check reminders and
-missing planned topics in them.
-
-Known prompt follow-ups, deliberately not in this PR (old text; a topic
-wording change already cost one regression): the hard rule "a not-discussed
-planned topic must be marked discussed=false" reads against "leave it out"
-on the first record; two lines ask for a `planned_topics` argument the tool
-does not have (ADK drops it, so harmless).
+undiscussed campaigns as discussed, so the prompt keeps its earlier rule.
+Editing the `planned_topics` instruction, the schema text and the
+discussed=false hard rule made the agent answer 8-10 notes per run with an
+empty turn, so those stay as measured.
 
 ### 4. The evals
 
@@ -226,10 +190,10 @@ coverage figure "26%" was counted on damaged names → 66%.
 - Jira: AIML-2928 (AC4 + results), AIML-2929 (ACs + link the report),
   AIML-2957 and AIML-2962 linked to AIML-2702.
 
-### 8. Dev-machine notes
+### 8. Environment notes
 
-- `app/.env`: `VERTEX_AI_AGENT_ENGINE_ID` (… `reasoningEngines:2221633612665585664`,
-  borrowed) and `VERTEX_AI_AGENT_ENGINE_LOCATION=us-central1`.
+- `app/.env`: `VERTEX_AI_AGENT_ENGINE_ID` (a borrowed engine; our own comes from
+  another team) and `VERTEX_AI_AGENT_ENGINE_LOCATION=us-central1`.
 - `uv run` re-syncs to the branch's lock (ADK 2.1.0 on 2702, 2.10.0 from
   2928).
 - Model access (`evals/dataset/probe_models.py`): every 3.x model is
@@ -259,10 +223,10 @@ git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
 
 | Ticket | Title | Status |
 |---|---|---|
-| **AIML-2702** | Eval harness | **PR #10 open**, review resolved; awaiting approval. Closes on merge |
-| **AIML-2898** | Curate the vertical golden dataset | **Done**; data in `gs://sellntell-eval-np`. Closes with PR #10 |
-| **AIML-2928** | ADK 2.10 + prompt fixes (5 pts) | **Done**; branch pushed, PR after #10 merges |
-| **AIML-2929** | Text extraction with a fixed schema, go/no-go (5 pts) | **Done, measured** (§6 above); PR after 2928 |
+| **AIML-2702** | Eval harness | **Merged** (PR #10) |
+| **AIML-2898** | Curate the vertical golden dataset | **Done**; data in `gs://sellntell-eval-np` |
+| **AIML-2928** | ADK 2.10 + prompt fixes (5 pts) | **Merged** (PR #11) |
+| **AIML-2929** | Text extraction with a fixed schema, go/no-go (5 pts) | **Done, measured** (§6 above); PR to raise |
 | **AIML-2957** | Run the golden-data tests in CI | Backlog |
 | **AIML-2962** | Web UI and WebSocket follow the session contract | Backlog |
 | **AIML-2751** | Remove the guided flow | **Merged** into `development` |
@@ -341,28 +305,15 @@ there, not in `main.py`.
   harness scores tool-call arguments.
 - Durable audit is ADK's BigQuery analytics plugin behind
   `BQ_ANALYTICS_ENABLED` (default `false`).
-- `config.py` — dead (`API_BASE` for a loopback that no longer exists);
-  nothing imports it.
+- `config.py` — the silence watchdog's timeout settings (AIML-2910).
+- `silence_watchdog.py`, `audio_detector.py` — AIML-2910: check-ins when the
+  rep goes quiet, closing an idle session.
 
 One agent, one Runner, one flow (implicit); guided is retired.
 
 ---
 
 ## 4. Environment
-
-Repo lives on a separate machine (`C:\Personal Storage\developer\sell-n-tell`);
-a reconstructed copy for reading/editing is at
-`c:\Personal Storage\poc\sellNtell\sell-n-tell`.
-
-**Syncing the local copy** — do this before any analysis, or you will reason
-about files that don't exist:
-
-```powershell
-# on the app machine, from the repo root (copy tools/export-repo-md.ps1 there first)
-.\export-repo-md.ps1
-# copy export\ back, then locally:
-.\tools\import-repo-md.ps1 -In .\export -Dest .\sell-n-tell
-```
 
 **Run:**
 
