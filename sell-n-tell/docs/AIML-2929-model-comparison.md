@@ -43,8 +43,8 @@ every other score within noise.
 
 - Every configuration beats the live agent on event type, topic status,
   over-claiming, faithfulness and field recall, by far more than the
-  run-to-run noise; the invented-value rate stays within noise of the
-  agent's 0% (0.4–2.8%).
+  run-to-run noise. The invented-value rate is 0.4–2.8%; the agent has no
+  figure to compare, since it captures no fields.
 - **Low thinking is the setting to use**: about 3× faster and a third to half
   the cost of the default, with every score still well above the agent.
 - **At low thinking, 3.8-flash and 3.7-flash are equivalent** — differences
@@ -114,7 +114,7 @@ the cent (3.7-flash low, from 2027: USD 5.94 recomputed vs USD 5.93 on the
 scorecard — rounding of the per-note averages; the table shows the run's own
 figure). Every figure in the quality, cost and latency tables was then
 checked against `evals.extract_eval.compare` output, read from the runs' own
-files on the test machine: all match, all five runs scored on key v1.3.
+files (`evals/runs/`): all match, all five runs scored on key v1.3.
 
 ## Latency (per extraction call)
 
@@ -137,7 +137,7 @@ the slow tail both matter.
 - **Prices are the Gemini API's published rates.** Calls go through Vertex AI,
   which normally charges the same; confirm on the Vertex AI pricing page
   before quoting costs outside the team. The 3.x price doubles on 1 Jan 2027.
-- **Latency was measured from the test machine on the global endpoint (3.x)
+- **Latency was measured from a developer workstation on the global endpoint (3.x)
   and us-east1 (2.5), 8 calls in parallel.** Production latency, from Cloud
   Run in us-central1 with one call per conversation, may differ; the relative
   order between rows is the useful part.
@@ -235,7 +235,7 @@ the rule; it would mean a re-score, not a re-run.
 
 ## Runs
 
-| Run | Folder (test machine, `evals/runs/`) |
+| Run | Folder (`evals/runs/`) |
 |---|---|
 | Agent final baseline (AIML-2928, key v1.4) | `full-20261018-025729`, `full-20261018-104955`, `full-20261018-153051` |
 | 3.8-flash, low — key v1.4, with the next-step rule (final) | `extract-20261020-174739` |

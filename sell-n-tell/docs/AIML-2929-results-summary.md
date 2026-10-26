@@ -32,7 +32,7 @@ recall ≥ 60%; invented values ≤ 5%.
 
 ## How to verify
 
-On the test machine, branch `feature/AIML-2929-text-extraction`:
+From the repo, branch `feature/AIML-2929-text-extraction`, where the eval runs are stored (`evals/runs/`):
 
 ```powershell
 # the extract() numbers above, read from the run's own files
@@ -44,7 +44,7 @@ Get-Content evals\runs\extract-20261020-174739\scorecard_golden.md -Encoding utf
 # reproduce it from scratch (about 15 minutes)
 uv run python -m evals.extract_eval.run --model gemini-3.8-flash --allow-labelling-model --thinking low
 
-# the agent baseline it is compared with (on the AIML-2928 branch)
+# the agent baseline it is compared with (committed in evals/baselines/)
 uv run python -m evals.agent_eval.baseline show
 ```
 
