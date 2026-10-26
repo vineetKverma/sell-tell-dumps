@@ -2,7 +2,7 @@
 
 **What was measured:** the text extraction (`extract()`: one Gemini call,
 fixed JSON schema) on the full golden set — 90 real FAR notes, 3 runs —
-against the live agent's final baseline (AIML-2928, PR #11). Same answer key
+against the live agent's committed baseline (three full runs after PR #11 merged). Same answer key
 (golden v1.4), same scorer and judge for both.
 
 **Configuration:** gemini-3.8-flash, thinking = low, global endpoint.
@@ -11,10 +11,10 @@ against the live agent's final baseline (AIML-2928, PR #11). Same answer key
 
 | Measure | Live agent (baseline) | `extract()` |
 |---|---|---|
-| Topic status | 75.6% | **95.4%** |
-| Campaigns wrongly marked discussed | 26.7% | **0%** |
-| Event type | 78.7% | **93.8%** |
-| Summary faithfulness | 54.9% | **91.1%** |
+| Topic status | 80.0% | **95.4%** |
+| Campaigns wrongly marked discussed | 21.3% | **0%** |
+| Event type | 81.0% | **93.8%** |
+| Summary faithfulness | 56.3% | **91.1%** |
 | Must-capture fields, P1 recall | 0% | **93.0%** |
 | Must-capture fields, all recall | 0% | **93.7%** |
 | Invented field values | — | **1.8%** |
@@ -22,7 +22,7 @@ against the live agent's final baseline (AIML-2928, PR #11). Same answer key
 | Cost per 1,000 notes | — | **USD 3.03** (USD 6.05 from 2027) |
 | Time per note, median / 95th percentile | — | **4.2 s / 11.4 s** |
 
-The agent's 26.7% is a lower bound: an over-claim under a paraphrased label
+The agent's 21.3% is a lower bound: an over-claim under a paraphrased label
 or as duplicate rows is not counted. `extract()`'s 0% is exact (labels are
 fixed to the planned titles).
 

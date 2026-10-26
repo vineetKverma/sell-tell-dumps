@@ -58,7 +58,7 @@ def test_a_second_run_is_refused_and_writes_nothing(tmp_path, monkeypatch):
     assert manifest.read_bytes() == first
 
     # Any key but golden v1.2 is refused and writes nothing, whatever the label.
-    monkeypatch.setattr(sys, "argv", ["fix", str(out / src.name), str(tmp_path / "v14"), "--version", "v1.4"])
+    monkeypatch.setattr(sys, "argv", ["fix", str(out / src.name), str(tmp_path / "v14")])
     with pytest.raises(SystemExit, match="expected sellntell_golden_v1.2"):
         fix.main()
     assert not (tmp_path / "v14").exists()

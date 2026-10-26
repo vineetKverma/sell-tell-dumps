@@ -170,9 +170,9 @@ Fixed after this triage (each with a test that fails when the fix is undone):
 | 8 | Setup is inside the error handling; a title planned twice is one topic | AIML-2929 |
 | 9 | The contact-outcome script uses the scorer's meaning of blank and tolerates missing fields; key v1.3 checksum unchanged (`1f0cbbc0…`) | AIML-2929 (dataset tooling) |
 
-Open: **2** (one event-type rule in the prompt, the key and `extract()`) —
-waits for Jeremy; the caveat is in the comparison report. **6** arrives with
-the rebase after PR #10. The evidence check (3) is stricter than the one
+Settled since: **2** — the business confirmed the rule (2026-10-14); the
+key (v1.4) and `extract()` follow it, and the agent's prompt keeps its earlier
+rule after measurement. **6** came with the rebase after PR #10. The evidence check (3) is stricter than the one
 the reported runs used; a re-run of the chosen configuration confirmed the
 numbers (`extract-20261013-200024`: topic status 95.6%, over-claimed 0%,
 unconfirmed 0.3 per run, 0 errors — within run-to-run variation).
@@ -218,7 +218,7 @@ not recorded in the saved runs; the re-score under "Checks" below prints it.
 | 8 | The evidence check rejected a verbatim quote when the rep's own note has an ellipsis | **Valid — a regression from round 1's stricter check.** A quote found whole in the note passes before any splitting | AIML-2929 | Fixed |
 | 9 | `summary.json` stored only the golden key's checksum | **Valid.** Each set records its own `key_sha256`; `compare` shows it | AIML-2929 | Fixed |
 | 10 | `baseline export` stamps the current key's checksum without checking each run's | **Valid.** Each run's `final_scores.json` has the checksum it was scored on; export refuses a run scored on another key, or one with no `final_scores.json` | AIML-2702 (PR #10, `7ec9c98`) | Fixed |
-| 11 | "topics lists ONLY the planned topics the rep actually discussed" reads against the older rule to add a `discussed=false` entry after a reminder | **Valid as wording.** The two rules apply at different steps (first record; after a reminder), and the measured runs did save, so the model reads it as intended. One clause makes it explicit. A prompt change, so it is measured before it is kept: it goes in with the event-type rule change (finding 2 of round 1), so one full run covers both | AIML-2928 | Deferred |
+| 11 | "topics lists ONLY the planned topics the rep actually discussed" reads against the older rule to add a `discussed=false` entry after a reminder | **Valid as wording.** The two rules apply at different steps (first record; after a reminder), and the measured runs did save, so the model reads it as intended. One clause makes it explicit. A prompt change, so it is measured before it is kept: it goes in with the event-type rule change (finding 2 of round 1), so one full run covers both | AIML-2928 | Resolved: measured, the clause was dropped |
 | 12 | The app's copy of the session write path has no retry on HTTP 429 | **Valid.** ADK 2.10 retries the append once after 1 s on a 429; the app's copy logged a warning and dropped the event. It now does the same one retry | AIML-2928 (`987cb52`) | Fixed |
 | 13 | `extract()` could still raise | **Valid.** `planned=None`, the usage read and settling the record are now inside the error handling | AIML-2929 | Fixed |
 | 14 | Two planned titles that differ only in case collapse to one | **Valid, not reachable today** (no two registry titles collide). The exact title is matched first | AIML-2929 | Fixed |
@@ -270,22 +270,17 @@ undone. No reported number changes (every reported run had 0 errors).
 |---|---|---|
 | R4-1 | Round 3's fix (1) put reading usage and settling the record inside the error labelled "reply", so a bug in our own code would be scored as the model's miss on every case and never make the run INVALID | **Valid — a gap in our round-3 fix.** "reply" is now only a reply that does not parse into the schema. Our own code failing after a valid reply is "internal": left out of the scores and counted towards INVALID, like a failed call |
 | R4-2 | U-02: "spoke with no one" and "spoke to nobody" counted as a conversation; "spoke with the target's assistant" read as the target | **Valid.** Read as no conversation, and as "someone" (accepted against "spoke with contact", not against "spoke with target"). Field value accuracy only |
-| R4-3 | Round 3's fix (15) kept one case per id across the top-up files, the later file winning — but `golden_topup_v1..v3` are three rounds of different notes, not versions of one key | **Valid — round-3 finding 15 misread the files, and the fix followed it.** Every file is loaded again; an id in two files stops the run before any call (a data mistake, never resolved quietly). Check on the dev machine: `uv run python -c "from evals.extract_eval.run import set_cases; print(len(set_cases('topup')))"` prints 65 |
+| R4-3 | Round 3's fix (15) kept one case per id across the top-up files, the later file winning — but `golden_topup_v1..v3` are three rounds of different notes, not versions of one key | **Valid — round-3 finding 15 misread the files, and the fix followed it.** Every file is loaded again; an id in two files stops the run before any call (a data mistake, never resolved quietly). Check: `uv run python -c "from evals.extract_eval.run import set_cases; print(len(set_cases('topup')))"` prints 65 |
 
 Carried over: finding 6 (the agent's over-claim figure is a lower bound) is
 now stated in `AIML-2929-model-comparison.md` and
 `AIML-2929-results-summary.md`. Finding 11 stays deferred to the event-type
 rule change.
 
-## Proposed order
+## Order of the fixes
 
-| When | What |
-|---|---|
-| Before the AIML-2928 PR | 1 (empty record), 10 (comment) |
-| Before the AIML-2929 PR | 3 (evidence check), 4 (failed calls), 5, 7, 8 |
-| With Jeremy's answer | 2 — one rule in the prompt, the key and `extract()`; until then, the caveat in the report |
-| On rebase after PR #10 | 6 |
-| Before the top-up / synthetic key review | 9 |
+Done: everything above is fixed or settled, except 9, which waits for a
+review of the top-up and synthetic keys.
 
 ## Checks to run (read-only, on the machine with the runs)
 

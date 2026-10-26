@@ -1,4 +1,4 @@
-﻿# SellNTell — session handoff
+# SellNTell — session handoff
 
 Resume with no prior context. Read this first — it says where things stand and
 what to do next. Then `architecture-proposal-suresh.md` for the design we are
@@ -120,8 +120,8 @@ INVALID (both harnesses); a labelling model runs only with
   written): Phone Call if a call; Meeting if any interaction, named or not;
   otherwise On-site (incl. person unavailable). 17 cases → Meeting: named —
   HL-003 HS-004 IN-013 IS-008 IS-009 IS-012 MH-002 MH-009 TR-012 TR-014;
-  unnamed — HL-010 HL-015 HS-003 IN-009 IN-015 MH-006 TR-007. If Jeremy says
-  unnamed doesn't count: `--named-only`, rebuild v1.3, re-score.
+  unnamed — HL-010 HL-015 HS-003 IN-009 IN-015 MH-006 TR-007. Confirmed by
+  the business (2026-10-14), with the front-desk exception applied in v1.4.
 - **Contact outcome U-02** (`evals/dataset/fix_contact_outcome.py`, v1.2 →
   v1.3): rule decided from the must-capture sheet (U-02 is P1, "capture on
   every call") — **a field is filled when the note clearly shows it**. Where
@@ -162,7 +162,7 @@ the cost; 3.8 default has P1 recall 57.1% (fails the proposed ≥ 60%).
    every golden, top-up and synthetic run; tests cover schema, quote check,
    mapping, label enum, usage, invalid runs.
 2. Golden event types follow the approved rule before scoring; baseline
-   re-scored — **met** (v1.2/v1.3 manifests list every id).
+   re-scored — **met** (v1.2, v1.3 and v1.4 manifests list every id).
 3. One command, scorecard in the harness format, a non-labelling model, 3
    runs — **met** (3.7-flash is the independent measurement).
 4. Go/no-go — **met on the proposed targets**; Suresh's agreement comes on
@@ -187,8 +187,8 @@ coverage figure "26%" was counted on damaged names → 66%.
   out and kills the live stream). Team: Docker image from `uv.lock`.
 - Suresh: the 26% → 66% correction to the proposal; the AIML-2929 results
   message (drafted, to go with the PR).
-- Jira: AIML-2928 (AC4 + results), AIML-2929 (ACs + link the report),
-  AIML-2957 and AIML-2962 linked to AIML-2702.
+- Jira: AIML-2929 (ACs + link the report); AIML-2957 and AIML-2962 linked to
+  AIML-2702.
 
 ### 8. Environment notes
 
@@ -254,7 +254,7 @@ outcome codes, hands-free, with no screen.
 
 **Where it is going:** the must-capture sheet asks the agent to also extract
 up to 20 fields per call (11 universal + 9 for the account's vertical), only
-when stated. The new architecture (§6 of START HERE) is how; the eval is how
+when stated. The new architecture (§9 of START HERE) is how; the eval is how
 we know it worked.
 
 ---
@@ -293,8 +293,9 @@ there, not in `main.py`.
 **The layer:**
 
 - `notes_workflow.py` — staging, corrections, the coverage gate
-  (`compute_missing_topics`), commit and its idempotent replay. In-memory
-  `_STAGED_NOTES` only; nothing survives a restart.
+  (`compute_missing_topics`), commit and its idempotent replay. The staged
+  record lives in `_STAGED_NOTES` and is also copied into ADK session state,
+  from which `commit_visit_notes` rehydrates it after a restart.
 - `schemas.py` — the Pydantic payloads (`DiscussionTopic` etc.).
 - `resources/dispositions.yaml` — one universal disposition registry (codes
   1–10, 99).
@@ -332,7 +333,7 @@ drops every live WebSocket and every staged record.
 
 ### Frontend caching — read this before editing `app.js`
 
-`index.html` loads `app.js?v=16`; `app.js` imports `audio-player.js?v=10` and
+`index.html` loads `app.js?v=17`; `app.js` imports `audio-player.js?v=10` and
 `audio-recorder.js?v=10`. The browser caches by full URL, so bump the version
 of whichever file you change. The two numbers are currently out of step,
 contrary to the comment in `app.js` that asks for them to match — harmless,
@@ -359,7 +360,7 @@ PCM noise. Watch for `commit_visit_notes BLOCKED:` (turn_guard),
 uv run pytest tests/ -q
 ```
 
-- `tests/test_notes_workflow_gates.py` (8 tests) — the staging/commit gates,
+- `tests/test_notes_workflow_gates.py` (16 tests) — the staging/commit gates and read-back,
   on `development`. `tests/conftest.py` imports `notes_workflow` under a
   private package name so the ADK agent is never built.
 - `tests/test_agent_eval_score.py` — the harness's scoring, the judge's reply
@@ -373,13 +374,14 @@ uv run pytest tests/ -q
 - `tests/test_extraction.py` — 2929: catalog, schema, evidence check,
   settling the record, scorer mapping (a stand-in client, no model).
 - Every eval test was checked by breaking the code it covers; each break fails
-  a test. Tests that read the golden set skip when it is absent.
-- Counts: 2702 branch 67 passed + 1 skipped (with data); 2928 branch 81
-  passed; 2929 branch 219 locally (includes the local-only dataset tests).
+  a test. Most tests that read the golden set skip when it is absent;
+  `test_dataset_topup.py` (local only) fails instead.
+- Counts: `development` (after PR #11) 126 passed; the AIML-2929 branch 210
+  passed; locally about 310 with the local-only dataset tests.
 - `tests/test_dataset_*.py` — the curation pipeline; local only, like the
   pipeline.
 
-**Model-level** — the eval (START HERE §2) is the scored check.
+**Model-level** — the eval (START HERE §4) is the scored check.
 `scripts/ws_smoke_test.py` still works for a quick look (7 scenarios); its only
 output is the transcript, and the proposal retires it.
 
@@ -433,7 +435,7 @@ localhost, a smoke count zeroed by a restart, pytest "working" from a stale
 All are also questions in the proposal:
 
 1. **The new architecture** — Suresh's review of `architecture-proposal-suresh.md`.
-2. **Event-type rule** — asked of Jeremy (§5 of START HERE).
+2. **Event-type rule** — settled: confirmed by the business (2026-10-14); in key v1.4 and `extract()`.
 3. **AIML-2929 go/no-go numbers** — margin and field targets, to agree with Suresh.
 4. **Disposition codes** — does anything downstream need a per-topic code? If
    not, drop them; if yes, derive them from U-02 / U-04 / U-06.
@@ -455,7 +457,9 @@ steer: reconfirm when unsure — evidence-checked topics in AIML-2929).
 | `AIML-2702-baseline.md` | the first eval baseline (before 2928): scores, patterns, causes, the disposition-code question |
 | `AIML-2702-review-fixes.md` | PR #10 review: rounds 1–2, each comment, fix and reply; the AIML-2957 story text |
 | `AIML-2929-model-comparison.md` | **AIML-2929 proof**: quality, cost, latency per model; key versions; the field rule; run folders |
-| `AIML-2929-review-findings.md` | the 10 automated review findings on the 2928/2929 branches: verdict, evidence, fix and status of each |
+| `AIML-2929-review-findings.md` | every round of automated review findings on the 2928/2929 branches: verdict, fix and status |
+| `AIML-2929-results-summary.md` | the AIML-2929 results for Suresh: the go/no-go table and how to verify it |
+| `architecture-stories.md` | the 22 stories for the new architecture, with pick order and open questions |
 | `AIML-2702-pivot.md` | the AIML-2898 and AIML-2702 story text as built |
 | `plan-after-implicit-decision.md` | the plan after choosing implicit: remove guided, then Jeremy's two requirements |
 | `stories-after-guided-removal.md` | the six follow-up stories, re-scoped |

@@ -13,14 +13,14 @@ The tables after this section chose the model and thinking level (key v1.3,
 13 October). Since then: the business confirmed the event-type rule (front
 desk or gatekeeper only is an On-site visit; key v1.4), `extract()` follows
 it, and a rule for the next step (U-09) was added. The chosen configuration,
-re-run on key v1.4, against the live agent's final baseline (AIML-2928, PR #11):
+re-run on key v1.4, against the live agent's committed baseline (three full runs after PR #11 merged):
 
 | Measure (mean of 3 runs) | Live agent | `extract()` |
 |---|---|---|
-| Event type | 78.7% | **93.8%** |
-| Topic status | 75.6% | **95.4%** |
-| Campaigns wrongly marked discussed | 26.7% | **0%** |
-| Faithfulness | 54.9% | **91.1%** |
+| Event type | 81.0% | **93.8%** |
+| Topic status | 80.0% | **95.4%** |
+| Campaigns wrongly marked discussed | 21.3% | **0%** |
+| Faithfulness | 56.3% | **91.1%** |
 | P1 field recall | 0% | **93.0%** |
 | All-field recall | 0% | **93.7%** |
 | Invented field values | — | **1.8%** |
@@ -29,8 +29,8 @@ re-run on key v1.4, against the live agent's final baseline (AIML-2928, PR #11):
 | Time per note, median / p95 | — | **4.2 s / 11.4 s** |
 
 gemini-3.8-flash, thinking low, global endpoint (`extract-20261020-174739`).
-The agent row is the three full runs behind AIML-2928's committed baseline;
-its over-claim was counted with this branch's scorer (25%, 29%, 26%).
+The agent row is the committed baseline: three full runs of the code as
+merged (disposition 67.8%; over-claim 20.0–23.0% across the runs).
 
 **The next-step rule** tells `extract()` to record the next step as
 "action | owner | date", keeping the action when no owner or date is said,
@@ -237,7 +237,7 @@ the rule; it would mean a re-score, not a re-run.
 
 | Run | Folder (`evals/runs/`) |
 |---|---|
-| Agent final baseline (AIML-2928, key v1.4) | `full-20261018-025729`, `full-20261018-104955`, `full-20261018-153051` |
+| Agent baseline after PR #11 (key v1.4) | `full-20261020-212704`, `full-20261021-004113`, `full-20261022-134511` (re-scored) |
 | 3.8-flash, low — key v1.4, with the next-step rule (final) | `extract-20261020-174739` |
 | 3.8-flash, low — key v1.4, before the next-step rule | `extract-20261014-220710` |
 | Agent baseline used in the tables below (3 runs, re-scored on v1.3) | `full-20261008-212950`, `full-20261008-232134`, `full-20261009-210636` |
