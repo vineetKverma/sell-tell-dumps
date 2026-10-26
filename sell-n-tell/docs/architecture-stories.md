@@ -114,6 +114,10 @@ Acceptance criteria:
 - An unmentioned planned topic triggers one question, driven by topic status.
 - Step and draft are in session state; a restart resumes.
 - Extraction rules are gone from the Live prompt; the Live agent has one tool.
+- The AIML-2910 silence watchdog works on the dialogue steps: its check-ins
+  read the current step instead of `turn_guard` and `notes_workflow.get_staged`,
+  and a check-in while a topic reminder is pending repeats the reminder rather
+  than asking to save.
 - Scripted conversations (happy path, skipped topic, correction, no reply)
   pass in the harness.
 
@@ -155,7 +159,8 @@ task, and the supersede gate. Keep the business rules and move
 `test_notes_workflow_gates.py` with them.
 
 Acceptance criteria:
-- Removed modules and tools are gone; nothing imports them.
+- Removed modules and tools are gone; nothing imports them, including the
+  AIML-2910 silence watchdog (moved onto the dialogue steps in S-01).
 - The moved gate tests pass against the dialogue steps.
 - A full harness run passes against the committed baseline.
 
@@ -299,7 +304,8 @@ Acceptance criteria:
 - One trace shows a whole session, including each model call and publish.
 - A BigQuery view gives tokens and cost per session and per day.
 - Added latency of the extra model calls measured against today.
-- The plugin, `scripts/bigquery_*` and `config.py` are gone.
+- The plugin and `scripts/bigquery_*` are gone. `config.py` stays: the
+  silence watchdog reads its timeout settings from it.
 
 Depends on S-01. Proposal change 10.
 
