@@ -274,13 +274,14 @@ undone. No reported number changes (every reported run had 0 errors).
 
 Carried over: finding 6 (the agent's over-claim figure is a lower bound) is
 now stated in `AIML-2929-model-comparison.md` and
-`AIML-2929-results-summary.md`. Finding 11 stays deferred to the event-type
-rule change.
+`AIML-2929-results-summary.md`. Finding 11 was resolved by measurement: the
+clause was dropped.
 
 ## Order of the fixes
 
-Done: everything above is fixed or settled, except 9, which waits for a
-review of the top-up and synthetic keys.
+Done: everything above is fixed or settled. Still to do, outside these
+findings: review the top-up and synthetic keys before running the key scripts
+on them.
 
 ## Checks to run (read-only, on the machine with the runs)
 
