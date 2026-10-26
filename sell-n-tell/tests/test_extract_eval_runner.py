@@ -426,6 +426,7 @@ def test_an_unknown_vertical_stops_the_run_before_any_call(monkeypatch, tmp_path
         run.main()
     assert not model.prompts and not (tmp_path / "runs").exists()
 
+
 @needs_data
 def test_with_dispositions_the_codes_are_asked_for_scored_and_kept_on_rescore(monkeypatch, tmp_path):
     from evals.agent_eval import judge as judge_mod
