@@ -53,13 +53,13 @@ def test_a_second_run_is_refused_and_writes_nothing(tmp_path, monkeypatch):
 
     # Run on its own output: refused, and the manifest keeps its list of cases.
     monkeypatch.setattr(sys, "argv", ["fix", str(out / src.name), str(out)])
-    with pytest.raises(SystemExit, match="already carries v1.3"):
+    with pytest.raises(SystemExit, match="expected sellntell_golden_v1.2"):
         fix.main()
     assert manifest.read_bytes() == first
 
-    # A key with nothing to change (given another version label) writes nothing.
+    # Any key but golden v1.2 is refused and writes nothing, whatever the label.
     monkeypatch.setattr(sys, "argv", ["fix", str(out / src.name), str(tmp_path / "v14"), "--version", "v1.4"])
-    with pytest.raises(SystemExit, match="nothing written"):
+    with pytest.raises(SystemExit, match="expected sellntell_golden_v1.2"):
         fix.main()
     assert not (tmp_path / "v14").exists()
 
@@ -78,3 +78,19 @@ def test_a_case_that_is_not_changed_is_left_exactly_as_it_was():
     stage_args(visit)["must_capture"] = None                                 # null in the key
     out, changed = apply({"eval_set_id": "set_v1.2", "eval_cases": [_case("M", "Meeting"), visit]})
     assert changed == ["M"] and stage_args(out["eval_cases"][1])["must_capture"] is None
+
+
+def test_a_non_golden_key_is_refused_before_anything_is_written(tmp_path, monkeypatch):
+    import json
+
+    import pytest
+
+    from evals.dataset import fix_contact_outcome as fix
+    src = tmp_path / "golden_topup_v1.evalset.json"
+    src.write_text(json.dumps({"eval_set_id": "sellntell_topup_v1", "eval_cases": [_case("T", "Meeting")]}),
+                   encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["fix", str(src), str(tmp_path / "out")])
+    with pytest.raises(SystemExit, match="golden v1.2 only"):
+        fix.main()
+    assert not (tmp_path / "out").exists()
+

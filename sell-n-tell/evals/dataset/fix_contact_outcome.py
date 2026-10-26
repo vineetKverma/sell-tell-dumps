@@ -10,8 +10,9 @@ when filling it would be a guess.
   call", with the values spoke with target / spoke with alternate / no
   contact. Reps never write "I spoke with the target"; they write "Rachel
   said...". So the field can only mean what the note shows.
-- The approved event-type rule judges by what happened, not by exact words
-  ("if the seller mentions interacting with a person -> Meeting").
+- The event-type rule judges by what happened, not by exact words: a Meeting
+  is a business conversation with a customer contact (confirmed 2026-10-14;
+  key v1.4 then moved front-desk-only visits to On-site visit).
 - The key left U-02 blank on such notes because OUR labelling instructions
   demanded a verbatim quote for every value (draft_labels.py) -- not a
   business requirement.
@@ -71,6 +72,12 @@ def main() -> None:
     args = ap.parse_args()
     raw = args.evalset.read_bytes()
     data = json.loads(raw.decode("utf-8"))
+    source_id = data.get("eval_set_id")
+    if source_id != "sellntell_golden_v1.2":
+        # Reviewed against golden v1.2 only. A top-up or synthetic key would be
+        # labelled as if the golden fixes had been applied to it.
+        raise SystemExit(f"expected sellntell_golden_v1.2, got {source_id!r}: this fix was reviewed "
+                         "against golden v1.2 only (apply fix_event_types to v1.1 first)")
     if data.get("eval_set_id") == "sellntell_golden_v1.1":
         raise SystemExit("this is golden v1.1: apply fix_event_types (v1.2) first, so Meeting means an interaction")
     if str(data.get("eval_set_id", "")).endswith(f"_{args.version}"):
@@ -87,7 +94,7 @@ def main() -> None:
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
     norm = lambda b: hashlib.sha256(b.replace(b"\r\n", b"\n")).hexdigest()  # noqa: E731
     manifest = {"version": args.version, "file": out.name, "sha256": norm(out.read_bytes()),
-                "from": {"eval_set_id": json.loads(raw)["eval_set_id"], "sha256": norm(raw)},
+                "from": {"eval_set_id": source_id, "sha256": norm(raw)},
                 "change": f"U-02 -> '{VALUE}' where event type is Meeting and U-02 was blank",
                 "rule": "a field is filled when the note clearly shows it, blank when it would be a guess",
                 "cases": changed, "made_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
