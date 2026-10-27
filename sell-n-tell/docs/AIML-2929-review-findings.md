@@ -163,7 +163,7 @@ Fixed after this triage (each with a test that fails when the fix is undone):
 |---|---|---|
 | 1 | An empty topic list is refused when nothing was planned; still accepted, with the reminder, when there are planned topics | AIML-2928 |
 | 10 | **Not applied.** `pyproject.toml` is managed with uv and is not hand-edited, even for a comment. The fact itself (the image runs `pip install .`, not the lockfile) is stated in the AIML-2928 PR text | — |
-| 3 | Evidence fragments need whole words, at least 4 letters or digits each, in note order | AIML-2929 |
+| 3 | Evidence fragments need whole words, at least 4 letters or digits each, in note order (since PR #13: also two different non-filler words) | AIML-2929 |
 | 4 | Failed calls are left out of the scores and counted | AIML-2929 |
 | 5 | A count in words ("twelve units", "a dozen") is kept | AIML-2929 |
 | 7 | A re-score keeps the run's thinking level, location and its other sets | AIML-2929 |
@@ -276,6 +276,22 @@ Carried over: finding 6 (the agent's over-claim figure is a lower bound) is
 now stated in `AIML-2929-model-comparison.md` and
 `AIML-2929-results-summary.md`. Finding 11 was resolved by measurement: the
 clause was dropped.
+
+## PR #13 review (Suresh) and two deep-review rounds
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | One word ("pools") kept a topic discussed | Evidence needs two different words that are not filler. Three words or refusing label-only quotes rejected 11 right calls (`extract-20261027-151522`), so not used. Negation ("Nothing on pools") is a pinned known limit |
+| 2 | An unconfirmed topic kept its summary | Dropped with its evidence. The call summary is a stated limit; the judge scores it |
+| 3 | ">>>" in a note closed the block | Markers spaced out; a note over 10,000 characters is refused |
+| 4 | Plural number words, zero, "a couple", "one-off" | Fixed |
+| 5 | Where the catalog and registry come from in production | S-08 |
+| 6 | "Spoke with the front desk" counted as spoke with contact | A gatekeeper anywhere in the answer is its own class; "no contact" equals "spoke with no one"; containment on word edges. v1.4 has 21 "spoke with contact" keys; re-scoring the final run changed no score |
+| 7 | Prices from 2027; P1 recall not like for like | In the reports and the PR text |
+| 8 | Cost line counted failed calls | Counts answered calls |
+
+Final run of the fixed code: `extract-20261027-161300`, within run-to-run
+variation of the run before the fixes.
 
 ## Order of the fixes
 

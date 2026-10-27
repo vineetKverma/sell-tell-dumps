@@ -17,18 +17,22 @@ re-run on key v1.4, against the live agent's committed baseline (three full runs
 
 | Measure (mean of 3 runs) | Live agent | `extract()` |
 |---|---|---|
-| Event type | 81.0% | **93.8%** |
-| Topic status | 80.0% | **95.4%** |
+| Event type | 81.0% | **92.6%** |
+| Topic status | 80.0% | **95.6%** |
 | Campaigns wrongly marked discussed | 21.3% | **0%** |
-| Faithfulness | 56.3% | **91.1%** |
-| P1 field recall | 0% | **93.0%** |
-| All-field recall | 0% | **93.7%** |
-| Invented field values | — | **1.8%** |
+| Faithfulness | 56.3% | **91.8%** |
+| P1 field recall ¹ | 0% | **92.2%** |
+| All-field recall ¹ | 0% | **93.0%** |
+| Invented field values | — | **1.6%** |
 | Schema or call errors | — | **0** of 270 |
 | Cost per 1,000 notes | — | **USD 3.03** (USD 6.05 from 2027) |
-| Time per note, median / p95 | — | **4.2 s / 11.4 s** |
+| Time per note, median / p95 | — | **4.5 s / 9.8 s** |
 
-gemini-3.8-flash, thinking low, global endpoint (`extract-20261020-174739`).
+¹ Not like for like: the live agent fills no must-capture fields.
+
+gemini-3.8-flash, thinking low, global endpoint (`extract-20261027-161300`, the
+code after the PR #13 review fixes; before them, `extract-20261020-174739`
+measured 93.8 / 95.4 / 91.1 / 93.0 on the same rows, within run-to-run variation).
 The agent row is the committed baseline: three full runs of the code as
 merged (disposition 67.8%; over-claim 20.0–23.0% across the runs).
 
@@ -157,9 +161,11 @@ the slow tail both matter.
   and one front-desk visit (HS-007). The result does not rest on event type:
   topic status, over-claiming, faithfulness and fields do not depend on it.
 - **The evidence check was tightened after these runs** (review finding:
-  loose fragments such as "a ... e ... i" passed, in any order). It now
-  needs whole words, at least 4 letters or digits per fragment, in the order
-  they appear in the note. Over-claiming was 0% in every 3.x run, so the old
+  loose fragments such as "a ... e ... i" passed, in any order). It then
+  needed whole words, at least 4 letters or digits per fragment, in the order
+  they appear in the note; since the PR #13 review it also needs at least two
+  different words that are not filler, and an unconfirmed topic keeps no
+  summary. Over-claiming was 0% in every 3.x run, so the old
   check was not what kept it there. **Confirmed by a re-run of the chosen
   configuration with the stricter check** (`extract-20261013-200024`, 3
   runs): topic status 95.6% (was 94.9%), over-claimed 0%, unconfirmed 0.3
@@ -238,7 +244,9 @@ the rule; it would mean a re-score, not a re-run.
 | Run | Folder (`evals/runs/`) |
 |---|---|
 | Agent baseline after PR #11 (key v1.4) | `full-20261020-212704`, `full-20261021-004113`, `full-20261022-134511` (re-scored) |
-| 3.8-flash, low — key v1.4, with the next-step rule (final) | `extract-20261020-174739` |
+| 3.8-flash, low — key v1.4, after the PR #13 review fixes (final) | `extract-20261027-161300` |
+| 3.8-flash, low — key v1.4, a stricter evidence rule tried and dropped (three words, no label-only quotes) | `extract-20261027-151522` |
+| 3.8-flash, low — key v1.4, with the next-step rule | `extract-20261020-174739` |
 | 3.8-flash, low — key v1.4, before the next-step rule | `extract-20261014-220710` |
 | Agent baseline used in the tables below (3 runs, re-scored on v1.3) | `full-20261008-212950`, `full-20261008-232134`, `full-20261009-210636` |
 | 3.8-flash, default | `extract-20261012-220905` |

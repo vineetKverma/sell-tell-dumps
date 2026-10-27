@@ -11,16 +11,20 @@ against the live agent's committed baseline (three full runs after PR #11 merged
 
 | Measure | Live agent (baseline) | `extract()` |
 |---|---|---|
-| Topic status | 80.0% | **95.4%** |
+| Topic status | 80.0% | **95.6%** |
 | Campaigns wrongly marked discussed | 21.3% | **0%** |
-| Event type | 81.0% | **93.8%** |
-| Summary faithfulness | 56.3% | **91.1%** |
-| Must-capture fields, P1 recall | 0% | **93.0%** |
-| Must-capture fields, all recall | 0% | **93.7%** |
-| Invented field values | — | **1.8%** |
+| Event type | 81.0% | **92.6%** |
+| Summary faithfulness | 56.3% | **91.8%** |
+| Must-capture fields, P1 recall ¹ | 0% | **92.2%** |
+| Must-capture fields, all recall ¹ | 0% | **93.0%** |
+| Invented field values | — | **1.6%** |
 | Schema or call errors (270 calls) | — | **0** |
 | Cost per 1,000 notes | — | **USD 3.03** (USD 6.05 from 2027) |
-| Time per note, median / 95th percentile | — | **4.2 s / 11.4 s** |
+| Time per note, median / 95th percentile | — | **4.5 s / 9.8 s** |
+
+¹ Not like for like: the live agent fills no must-capture fields.
+
+`extract-20261027-161300`: the code as it is after the PR #13 review fixes.
 
 The agent's 21.3% is a lower bound: an over-claim under a paraphrased label
 or as duplicate rows is not counted. `extract()`'s 0% is exact (labels are
@@ -36,10 +40,10 @@ From the repo, branch `feature/AIML-2929-text-extraction`, where the eval runs a
 
 ```powershell
 # the extract() numbers above, read from the run's own files
-uv run python -m evals.extract_eval.compare evals/runs/extract-20261020-174739
+uv run python -m evals.extract_eval.compare evals/runs/extract-20261027-161300
 
 # the full scorecard for that run (per vertical, per field, every miss)
-Get-Content evals\runs\extract-20261020-174739\scorecard_golden.md -Encoding utf8
+Get-Content evals\runs\extract-20261027-161300\scorecard_golden.md -Encoding utf8
 
 # reproduce it from scratch (about 15 minutes)
 uv run python -m evals.extract_eval.run --model gemini-3.8-flash --allow-labelling-model --thinking low
@@ -50,6 +54,19 @@ uv run python -m evals.agent_eval.baseline show
 
 ## What to keep in mind
 
+- **Field recall is not like for like.** The live agent fills no
+  must-capture fields (0% over 210 P1 items), so the recall rows show what
+  `extract()` adds, not a contest between two capturing systems.
+- **Prices.** USD 3.03 per 1,000 notes is the introductory rate, which ends
+  2026-12-31; at the published rate from 2027 the same run costs USD 6.05.
+- **Limits of the checks in code.** The evidence check proves a topic's
+  quote is the rep's own words (at least two different words that are not
+  filler), not that it is about the campaign: "Nothing on pools" still passes;
+  that judgement is the model's, measured as over-claiming (0%). The call
+  summary is not checked against the topic evidence; the faithfulness judge
+  scores it. "<<<" and ">>>" inside a note are spaced out and a note over
+  10,000 characters is refused, but Model Armor (S-09) is the real screen.
+  Vague counts ("hundreds of beds") are kept as said.
 - **The next-step rule.** `extract()` records the next step (U-09) as
   "action | owner | date", keeping the action when no owner or date is said,
   as the answer key does. Against the same configuration without it, U-09
