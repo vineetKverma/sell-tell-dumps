@@ -231,6 +231,16 @@ def test_captured_but_wrong_value():
     ("spoke with contact", "no contact", False),
     ("spoke with target", "Spoke with the target", True),   # the same answer, worded with "the"
     ("spoke with contact", "Spoke with Rachel, the property manager", True),   # a conversation, whoever with
+    ("spoke with contact", "spoke with the front desk", False),   # front desk only: no conversation with the contact
+    ("spoke with contact", "Spoke with the receptionist", False),
+    ("spoke with front desk", "spoke with the front desk", True),
+    ("spoke with contact", "spoke with the lady at the front desk", False),   # a gatekeeper anywhere in the answer
+    ("spoke with contact", "spoke with Maria at reception", False),
+    ("spoke with contact", "spoke to the guy on the front desk", False),
+    ("spoke with contact", "spoke with the desk manager", True),   # "desk" alone is not a gatekeeper
+    ("no contact", "spoke with no one", True),                     # no contact, said either way
+    ("no contact", "Spoke to nobody", True),
+    ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),
     ("spoke with contact", "spoke with no one", False),      # not a conversation
@@ -252,6 +262,8 @@ def test_contact_outcome_accepts_target_or_alternate_against_spoke_with_contact(
     ("4 by 4 ft", "4x4 ft", True),  # approved: dimensions stored like 4x4
     ("36 X 48 in", "36x48 in", True),
     ("4x4", "4x6", False),
+    ("12 units", "112 units", False),   # containment only on word edges
+    ("2 trucks", "12 trucks", False),
 ])
 def test_value_agrees(expected, actual, ok):
     assert value_agrees(expected, actual) is ok

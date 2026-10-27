@@ -13,6 +13,7 @@ from app.extraction.extract import (
     UNCONFIRMED,
     ExtractResult,
     build_prompt,
+    evidence_ok,
     extract,
     postprocess,
     quote_in,
@@ -21,6 +22,6 @@ from app.extraction.extract import (
 
 __all__ = [
     "DISCUSSED", "NOT_DISCUSSED", "UNCONFIRMED", "ExtractResult", "Field", "Registry",
-    "build_prompt", "extract", "fields_for", "load_catalog", "load_registry", "postprocess",
+    "build_prompt", "evidence_ok", "extract", "fields_for", "load_catalog", "load_registry", "postprocess",
     "quote_in", "record_model",
 ]

@@ -7,9 +7,13 @@ must-capture field is optional -- null is the normal answer.
 After the call, code (not the model) settles each planned topic:
 
   - a topic the model marked discussed keeps that status only if its
-    ``evidence`` -- the rep's own words about the campaign -- really appears
-    in the dictation; otherwise it becomes ``unconfirmed`` (the live flow asks
-    the rep about it), never discussed;
+    ``evidence`` is the rep's own words: found in the dictation and at least
+    MIN_EVIDENCE_WORDS different words that are not filler (one word, such as
+    "pools", or "the pools", is not evidence). Otherwise it becomes ``unconfirmed`` (the live flow asks
+    the rep about it), never discussed, and its summary is dropped too. The
+    check proves the words are the rep's, not that they are about the
+    campaign ("Nothing on pools" is the rep's words): that judgement stays
+    the model's, and the eval measures it (over-claimed);
   - a planned topic the model left out is not discussed;
   - a topic label that is not one of the planned topics is reported as
     off-plan and dropped.
@@ -32,15 +36,24 @@ EVENT_TYPES = ("Meeting", "On-site visit", "Phone Call")
 DISCUSSED, NOT_DISCUSSED, UNCONFIRMED = "discussed", "not_discussed", "unconfirmed"
 NOT_STATED = ("", "not stated", "null", "none", "n/a")
 MIN_QUOTE_CHARS = 4
+# Measured on key v1.4: two words lose one right call in three runs; three
+# words, or refusing evidence made only of the label's words, lose 11 (reps
+# name a campaign by its own words).
+MIN_EVIDENCE_WORDS = 2
+# Words that do not count towards MIN_EVIDENCE_WORDS ("the pools" is one word).
+_FILLER = frozenset("a an the on of to for with and or in at by is was".split())
+# Five times the longest dictation in the eval sets (1,804 characters); a
+# longer note is refused before the call.
+MAX_NOTE_CHARS = 10_000
 # Fields that are a count and nothing else: a value without a digit ("turns")
 # is dropped. Other "how many" fields mix in text by definition (e.g. HL-03
 # "bed count, facility type and census"), so they are not checked this way.
 COUNT_FIELDS = ("U-10",)
 # A number as digits or spelled out ("twelve units", "a dozen keys").
 _HAS_NUMBER = re.compile(
-    r"\d|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"\d|\b(?:one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
-    r"hundred|thousand|dozen)\b", re.IGNORECASE)
+    r"zero|hundreds?|thousands?|dozens?)\b", re.IGNORECASE)
 
 
 class TopicResult(pydantic.BaseModel):
@@ -120,6 +133,9 @@ def build_prompt(note: str, planned: list[str], vertical: str,
         f"{i}. label: {t}\n   about: {descriptions.get(t) or '(no description; judge by the label)'}"
         for i, t in enumerate(planned, 1)
     ) or "(none)"
+    # The note cannot hold the block's own markers: "<<<" or ">>>" in it is
+    # spaced out, so text after it still reads as the dictation.
+    note = re.sub(r"([<>])(?=\1\1)", r"\1 ", note)
     return (f"{RULES}\nAccount vertical: {vertical}\n\nPlanned topics (the topic field is the label "
             f"only, never the description):\n{topic_lines}\n\nDictation:\n<<<\n{note}\n>>>")
 
@@ -160,6 +176,13 @@ def quote_in(quote: str, note: str) -> bool:
     return bool(parts)
 
 
+def evidence_ok(quote: str, note: str) -> bool:
+    """A topic's evidence: the rep's own words (``quote_in``) and at least
+    MIN_EVIDENCE_WORDS different words that are not filler."""
+    words = set(re.findall(r"\w+", _norm(quote or ""))) - _FILLER
+    return len(words) >= MIN_EVIDENCE_WORDS and quote_in(quote, note)
+
+
 @dataclass
 class ExtractResult:
     record: dict[str, Any] | None = None       # the settled record (see postprocess)
@@ -195,12 +218,13 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str]) -> ExtractRe
     for label in planned:
         t = by_label.get(label)
         status = t["status"] if t else NOT_DISCUSSED
-        if status == DISCUSSED and not quote_in(t.get("evidence", ""), note):
+        if status == DISCUSSED and not evidence_ok(t.get("evidence", ""), note):
             status = UNCONFIRMED
             unconfirmed.append(label)
         topics.append({"topic": label, "status": status,
                        "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
-                       "summary": (t or {}).get("summary", "") if status != NOT_DISCUSSED else ""})
+                       # an unconfirmed topic's summary is as unchecked as its evidence
+                       "summary": (t or {}).get("summary", "") if status == DISCUSSED else ""})
     fields = {k.replace("_", "-"): (None if v is None or _norm(v) in NOT_STATED else v)
               for k, v in (raw.get("must_capture") or {}).items()}
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count
@@ -232,6 +256,9 @@ def extract(note: str, planned: list[str], vertical: str, fields: list[Field], *
     from google.genai import types
 
     planned = list(dict.fromkeys(planned or ()))   # a title planned twice is one topic
+    if len(note or "") > MAX_NOTE_CHARS:            # refused before any call
+        return ExtractResult(error=f"dictation is {len(note)} characters; the limit is {MAX_NOTE_CHARS}",
+                             error_kind="call", usage={"seconds": 0.0})
     started = time.monotonic()
     try:        # the setup is inside too: a bad setting is an error result, not a crash
         schema = record_model(fields, planned)

@@ -323,6 +323,7 @@ def test_cost_and_latency_are_over_the_calls_the_model_answered():
     timed_out = {"usage": {"seconds": 120.0}}
     u = usage_summary([ok, ok, timed_out], "m", {"m": {"input_per_million": 1.0, "output_per_million": 1.0}})
     assert u["calls"] == 3 and u["input_tokens_per_note"] == 1000             # not 667
+    assert u["answered_calls"] == 2                                          # the calls the cost covers
     assert u["seconds_p95"] == 2.0 and u["cost_per_1000_notes_usd"] == pytest.approx(1.2)
 
 

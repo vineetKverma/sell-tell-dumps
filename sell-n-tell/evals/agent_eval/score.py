@@ -46,15 +46,29 @@ def _stated(value) -> bool:
 
 _SPOKE_WITH = re.compile(r"^spoke (?:with|to) (?:the |an? )?(\w+)(['’]s\b)?")
 _NOBODY = ("no", "nobody", "noone", "none")
+# "No contact" said either way: the key's wording, or "spoke with no one".
+_NO_CONTACT = re.compile(r"^(?:no contact|nobody|no one|spoke (?:with|to) (?:no one|nobody|noone|none))\b")
+# Front desk or gatekeeper only is not a conversation with the contact (the
+# event-type rule: an On-site visit), so it never counts as "spoke with contact".
+# Anywhere in the answer ("Maria at reception"); "desk" alone is not one (a
+# desk manager can be the contact).
+_GATEKEEPER = re.compile(r"\b(?:front desk|front-desk|frontdesk|reception|receptionist|gatekeeper|"
+                         r"security|concierge|doorman|lobby)\b")
 
 
 def _spoke_with(value: str) -> str | None:
     """"target", "alternate", "someone" (a conversation, with whoever: "spoke
     with contact", "spoke with Rachel, the manager", "spoke with the target's
-    assistant"), or None (no conversation: "spoke with no one")."""
-    m = _SPOKE_WITH.match(norm(value))
+    assistant"), "gatekeeper" ("spoke with Maria at reception"), "nobody"
+    ("no contact", "spoke with no one"), or None (anything else)."""
+    text = norm(value)
+    if _NO_CONTACT.match(text):
+        return "nobody"
+    m = _SPOKE_WITH.match(text)
     if not m or m.group(1) in _NOBODY:
         return None
+    if _GATEKEEPER.search(text):
+        return "gatekeeper"
     return m.group(1) if m.group(1) in ("target", "alternate") and not m.group(2) else "someone"
 
 
@@ -62,11 +76,14 @@ def field_value_agrees(field_id: str, expected: str, actual: str) -> bool:
     """value_agrees, plus one field rule: for U-02 (contact outcome) a KEY of
     "spoke with contact" -- a conversation is clear from the note but not
     whether it was the target or an alternate -- accepts any answer that says
-    the rep spoke with someone. A key that names target or alternate still has
-    to be matched ("spoke with the target" is the same answer)."""
+    the rep spoke with someone -- but not the front desk or a gatekeeper. A key
+    that names target or alternate still has to be matched ("spoke with the
+    target" is the same answer)."""
     if field_id == "U-02":
         e, a = _spoke_with(expected), _spoke_with(actual)
         if e and a:
+            if {"gatekeeper", "nobody"} & {e, a}:
+                return e == a
             return e == "someone" or e == a
     return value_agrees(expected, actual)
 
@@ -77,7 +94,12 @@ def value_agrees(expected: str, actual: str) -> bool:
     with, so the agent is held to the same bar as the key itself."""
     a, b = (_DIMENSION.sub(r"\1x", norm(x)) for x in (expected, actual))
     a, b = re.sub(r"[^\w$%./-]+", " ", a).strip(), re.sub(r"[^\w$%./-]+", " ", b).strip()
-    return a == b or (min(len(a), len(b)) >= 3 and (a in b or b in a))
+    # containment on word edges: "12 units" is in "12 units a month", not in "112 units"
+    return a == b or (min(len(a), len(b)) >= 3 and (_within(a, b) or _within(b, a)))
+
+
+def _within(part: str, whole: str) -> bool:
+    return re.search(r"(?<!\w)" + re.escape(part) + r"(?!\w)", whole) is not None
 
 
 # ---------------------------------------------------------------------------

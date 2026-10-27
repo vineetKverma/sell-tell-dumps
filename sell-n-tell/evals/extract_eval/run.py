@@ -169,7 +169,8 @@ def usage_summary(rows: list[dict], model: str, prices: dict) -> dict:
     tok_out = sum(u.get("output_tokens", 0) + u.get("thinking_tokens", 0) for u in use)
     secs = sorted(u["seconds"] for u in use if "seconds" in u)
     n = len(use) or 1
-    out = {"calls": len(rows), "input_tokens": tok_in, "output_tokens": tok_out,
+    # cost_usd covers the calls the model answered (a failed call has no tokens)
+    out = {"calls": len(rows), "answered_calls": len(use), "input_tokens": tok_in, "output_tokens": tok_out,
            "input_tokens_per_note": round(tok_in / n), "output_tokens_per_note": round(tok_out / n),
            "seconds_p50": secs[len(secs) // 2] if secs else None,
            "seconds_p95": secs[min(len(secs) - 1, int(len(secs) * 0.95))] if secs else None}
@@ -358,7 +359,7 @@ def main() -> None:
                             f"would ask): {entry['unconfirmed_topics_per_run']} per run.\n\n"
                             f"Cost: {usage['input_tokens_per_note']} input + {usage['output_tokens_per_note']} "
                             f"output tokens per note, {usage['seconds_p50']} s median / {usage['seconds_p95']} s p95 "
-                            f"per call; " + (f"${usage['cost_usd']} for {usage['calls']} calls, "
+                            f"per call; " + (f"${usage['cost_usd']} for {usage['answered_calls']} answered calls, "
                                              f"${usage['cost_per_1000_notes_usd']} per 1,000 notes"
                                              + (f" (${usage['cost_per_1000_notes_usd_from_2027']} from 2027)"
                                                 if "cost_per_1000_notes_usd_from_2027" in usage else "")
