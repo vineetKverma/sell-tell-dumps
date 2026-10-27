@@ -238,6 +238,11 @@ def test_captured_but_wrong_value():
     ("spoke with contact", "spoke with Maria at reception", False),
     ("spoke with contact", "spoke to the guy on the front desk", False),
     ("spoke with contact", "spoke with the desk manager", True),   # "desk" alone is not a gatekeeper
+    ("spoke with contact", "spoke with the security director", True),          # a title, not a gatekeeper
+    ("spoke with contact", "spoke with the reception manager", True),
+    ("spoke with contact", "spoke with the head of security", True),
+    ("spoke with contact", "spoke with the property manager in the lobby", True),   # a place, not a person
+    ("no contact", "left a voicemail", True),
     ("no contact", "spoke with no one", True),                     # no contact, said either way
     ("no contact", "Spoke to nobody", True),
     ("no contact", "spoke with the target", False),

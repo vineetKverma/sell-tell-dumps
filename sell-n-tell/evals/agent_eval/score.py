@@ -47,13 +47,17 @@ def _stated(value) -> bool:
 _SPOKE_WITH = re.compile(r"^spoke (?:with|to) (?:the |an? )?(\w+)(['’]s\b)?")
 _NOBODY = ("no", "nobody", "noone", "none")
 # "No contact" said either way: the key's wording, or "spoke with no one".
-_NO_CONTACT = re.compile(r"^(?:no contact|nobody|no one|spoke (?:with|to) (?:no one|nobody|noone|none))\b")
+_NO_CONTACT = re.compile(r"^(?:no contact|nobody|no one|no answer|left (?:a )?voicemail|"
+                         r"spoke (?:with|to) (?:no one|nobody|noone|none))\b")
 # Front desk or gatekeeper only is not a conversation with the contact (the
 # event-type rule: an On-site visit), so it never counts as "spoke with contact".
-# Anywhere in the answer ("Maria at reception"); "desk" alone is not one (a
-# desk manager can be the contact).
-_GATEKEEPER = re.compile(r"\b(?:front desk|front-desk|frontdesk|reception|receptionist|gatekeeper|"
-                         r"security|concierge|doorman|lobby)\b")
+# Anywhere in the answer ("Maria at reception"), but not as part of a title (a
+# security director, reception manager or head of security can be the
+# contact); "desk" or a place ("in the lobby") alone is not one.
+_GATEKEEPER = re.compile(r"(?<!head of )(?<!chief of )(?<!director of )"
+                         r"\b(?:front desk|front-desk|frontdesk|reception|receptionist|gatekeeper|"
+                         r"security|concierge|doorman)\b"
+                         r"(?!\s+(?:manager|director|supervisor|head|lead|chief|officer)\b)")
 
 
 def _spoke_with(value: str) -> str | None:

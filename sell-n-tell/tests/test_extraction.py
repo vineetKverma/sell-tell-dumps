@@ -314,8 +314,8 @@ POOLS_NOTE = "Shared mini fridge pricing with Frank. He wants a quote for 6 unit
 def test_one_word_is_not_evidence():
     from app.extraction import evidence_ok
     assert evidence_ok("pools", POOLS_NOTE) is False                         # one word, even the rep's
-    for filler in ("Nothing on pools"[8:], "pools pools", "the pools"):     # filler or a repeat adds nothing
-        assert evidence_ok(filler, POOLS_NOTE + " The pools pools.") is False, filler
+    for filler in ("Nothing on pools"[8:], "pools pools", "the pools", "no pools", "about it"):   # filler adds nothing
+        assert evidence_ok(filler, POOLS_NOTE + " The pools pools. No pools. About it.") is False, filler
     assert evidence_ok("6 units", POOLS_NOTE) is True
     assert evidence_ok("mini fridge", POOLS_NOTE) is True                    # reps name a campaign by its words
     # The limit, pinned: the rep's words that say the topic was NOT discussed
@@ -355,7 +355,7 @@ def test_a_count_in_plural_words_or_zero_is_kept(count):
     assert postprocess(raw(must_capture={"U_10": count}), NOTE, PLANNED).record["must_capture"]["U-10"] == count
 
 
-@pytest.mark.parametrize("vague", ["one-off order", "a one-time job", "a few units", "turns"])
+@pytest.mark.parametrize("vague", ["one-off order", "a one-time job", "a few units", "turns", "no one ordered", "no  one ordered"])
 def test_a_count_with_no_number_in_it_is_dropped_even_one_off(vague):
     assert postprocess(raw(must_capture={"U_10": vague}), NOTE, PLANNED).record["must_capture"]["U-10"] is None
 

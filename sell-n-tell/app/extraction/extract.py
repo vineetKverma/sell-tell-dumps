@@ -41,7 +41,8 @@ MIN_QUOTE_CHARS = 4
 # name a campaign by its own words).
 MIN_EVIDENCE_WORDS = 2
 # Words that do not count towards MIN_EVIDENCE_WORDS ("the pools" is one word).
-_FILLER = frozenset("a an the on of to for with and or in at by is was".split())
+# "no pools" and "about it" are one word too; a negation is the model's call (over-claimed).
+_FILLER = frozenset("a an the on of to for with and or in at by is was no not about it this that".split())
 # Five times the longest dictation in the eval sets (1,804 characters); a
 # longer note is refused before the call.
 MAX_NOTE_CHARS = 10_000
@@ -51,7 +52,7 @@ MAX_NOTE_CHARS = 10_000
 COUNT_FIELDS = ("U-10",)
 # A number as digits or spelled out ("twelve units", "a dozen keys").
 _HAS_NUMBER = re.compile(
-    r"\d|\b(?:one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"\d|\b(?:(?<!no )one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"zero|hundreds?|thousands?|dozens?)\b", re.IGNORECASE)
 
@@ -228,7 +229,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str]) -> ExtractRe
     fields = {k.replace("_", "-"): (None if v is None or _norm(v) in NOT_STATED else v)
               for k, v in (raw.get("must_capture") or {}).items()}
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count
-        if fields.get(fid) and not _HAS_NUMBER.search(fields[fid]):
+        if fields.get(fid) and not _HAS_NUMBER.search(re.sub(r"\s+", " ", fields[fid])):
             fields[fid] = None
     record = {"event_type": raw["event_type"], "executive_summary": raw.get("executive_summary", ""),
               "topics": topics, "must_capture": fields}
