@@ -69,9 +69,10 @@ uv run python -m evals.agent_eval.baseline show
   Vague counts ("hundreds of beds") are kept as said.
 - **The next-step rule.** `extract()` records the next step (U-09) as
   "action | owner | date", keeping the action when no owner or date is said,
-  as the answer key does. Against the same configuration without it, U-09
-  recall rose from 25.8% to 93.5% and P1 recall from 79.5% to 93.0%;
-  invented values went from 1.4% to 1.8%.
+  as the answer key does. Measured when it was added (`extract-20261020-174739`
+  against the same configuration without it), U-09 recall rose from 25.8% to
+  93.5% and P1 recall from 79.5% to 93.0%; invented values went from 1.4% to
+  1.8%.
 - **Event type.** The business confirmed that front desk or gatekeeper only is
   an On-site visit; the key (v1.4) and `extract()` follow it. The live agent
   keeps its earlier rule, because every wording tried in its prompt cost
