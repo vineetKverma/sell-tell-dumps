@@ -24,7 +24,7 @@ against the live agent's committed baseline (three full runs after PR #11 merged
 
 ¹ Not like for like: the live agent fills no must-capture fields.
 
-`extract-20261027-161300`: the code as it is after the PR #13 review fixes.
+`extract-20261027-161300`: the code as it is after the PR #13 review fixes. Rules changed after that run (more filler words; "no one" and spacing in the U-10 number check; the U-02 voicemail and title rules) were re-checked on its saved records (2026-10-27): no discussed topic and no U-10 value changes, and a re-score with the final scorer gives identical figures. The settling rules only reject more, and the prompt and schema did not change, so this is exact.
 
 The agent's 21.3% is a lower bound: an over-claim under a paraphrased label
 or as duplicate rows is not counted. `extract()`'s 0% is exact (labels are

@@ -277,7 +277,7 @@ now stated in `AIML-2929-model-comparison.md` and
 `AIML-2929-results-summary.md`. Finding 11 was resolved by measurement: the
 clause was dropped.
 
-## PR #13 review (Suresh) and two deep-review rounds
+## PR #13 review (Suresh) and the deep-review rounds
 
 | # | Finding | Fix |
 |---|---|---|
@@ -290,8 +290,24 @@ clause was dropped.
 | 7 | Prices from 2027; P1 recall not like for like | In the reports and the PR text |
 | 8 | Cost line counted failed calls | Counts answered calls |
 
+Deep-review rounds 3–5 (on the fixes above):
+
+| Finding | Fix |
+|---|---|
+| "no pools", "about it" passed the evidence check | Filler words also include no, not, about, it, this, that |
+| "no one ordered" counted as a number; two spaces got past the exception | "no one" is not a number; whitespace is collapsed first |
+| "left a voicemail" was not no contact | It is, like "no contact" and "spoke with no one" |
+| "security director", "reception manager", "head of security" read as gatekeepers | A gatekeeper term in a title is a contact; a place ("in the lobby") is not a gatekeeper |
+| A mixed answer ("left a voicemail, then spoke with the target") | Known limit: read by its first part; U-02 answers are normally one phrase |
+| "VP of security", "head of the security team" | Known limit: still read as gatekeepers |
+| Negation ("No pools this time") | Known limit, pinned by a test; measured as over-claiming |
+
 Final run of the fixed code: `extract-20261027-161300`, within run-to-run
-variation of the run before the fixes.
+variation of the run before the fixes. Rules changed after that run (more filler words; "no one" and spacing in the
+U-10 number check; the U-02 voicemail and title rules) were re-checked on its
+saved records (2026-10-27): no discussed topic and no U-10 value changes, and a
+re-score with the final scorer gives identical figures. The settling rules only
+reject more, and the prompt and schema did not change, so this is exact.
 
 ## Order of the fixes
 

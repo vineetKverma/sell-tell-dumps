@@ -33,6 +33,11 @@ re-run on key v1.4, against the live agent's committed baseline (three full runs
 gemini-3.8-flash, thinking low, global endpoint (`extract-20261027-161300`, the
 code after the PR #13 review fixes; before them, `extract-20261020-174739`
 measured 93.8 / 95.4 / 91.1 / 93.0 on the same rows, within run-to-run variation).
+Rules changed after that run (more filler words; "no one" and spacing in the
+U-10 number check; the U-02 voicemail and title rules) were re-checked on its
+saved records (2026-10-27): no discussed topic and no U-10 value changes, and a
+re-score with the final scorer gives identical figures. The settling rules only
+reject more, and the prompt and schema did not change, so this is exact.
 The agent row is the committed baseline: three full runs of the code as
 merged (disposition 67.8%; over-claim 20.0–23.0% across the runs).
 
