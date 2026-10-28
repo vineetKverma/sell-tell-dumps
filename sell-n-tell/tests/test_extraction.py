@@ -346,7 +346,7 @@ def test_a_dictation_over_the_limit_is_refused_before_any_call():
     from app.extraction.extract import MAX_NOTE_CHARS
     client = FakeClient(json.dumps(raw()))
     r = extract("x" * (MAX_NOTE_CHARS + 1), PLANNED, "HS", fields_for(CATALOG, "HS"), client=client, model="m")
-    assert r.record is None and r.error_kind == "call" and not client.prompts
+    assert r.record is None and r.error_kind == "input" and not client.prompts
 
 
 @pytest.mark.parametrize("count", ["hundreds of beds", "zero units", "dozens of rooms", "Thousands of keys",
@@ -355,7 +355,8 @@ def test_a_count_in_plural_words_or_zero_is_kept(count):
     assert postprocess(raw(must_capture={"U_10": count}), NOTE, PLANNED).record["must_capture"]["U-10"] == count
 
 
-@pytest.mark.parametrize("vague", ["one-off order", "a one-time job", "a few units", "turns", "no one ordered", "no  one ordered"])
+@pytest.mark.parametrize("vague", ["one-off order", "a one-time job", "a few units", "turns", "no one ordered", "no  one ordered",
+                                   "no-one ordered"])
 def test_a_count_with_no_number_in_it_is_dropped_even_one_off(vague):
     assert postprocess(raw(must_capture={"U_10": vague}), NOTE, PLANNED).record["must_capture"]["U-10"] is None
 

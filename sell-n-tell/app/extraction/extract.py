@@ -52,7 +52,7 @@ MAX_NOTE_CHARS = 10_000
 COUNT_FIELDS = ("U-10",)
 # A number as digits or spelled out ("twelve units", "a dozen keys").
 _HAS_NUMBER = re.compile(
-    r"\d|\b(?:(?<!no )one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"\d|\b(?:(?<!no )(?<!no-)one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"zero|hundreds?|thousands?|dozens?)\b", re.IGNORECASE)
 
@@ -196,6 +196,8 @@ class ExtractResult:
     # model behaviour, scored as a record that was never produced.
     # "internal": our own code failed after a valid reply (reading usage,
     # settling the record) -- a bug, never scored as the model's miss.
+    # "input": the dictation was refused before any call (over MAX_NOTE_CHARS)
+    # -- retrying cannot help.
     error_kind: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)   # tokens and seconds of the call
 
@@ -259,7 +261,7 @@ def extract(note: str, planned: list[str], vertical: str, fields: list[Field], *
     planned = list(dict.fromkeys(planned or ()))   # a title planned twice is one topic
     if len(note or "") > MAX_NOTE_CHARS:            # refused before any call
         return ExtractResult(error=f"dictation is {len(note)} characters; the limit is {MAX_NOTE_CHARS}",
-                             error_kind="call", usage={"seconds": 0.0})
+                             error_kind="input", usage={"seconds": 0.0})
     started = time.monotonic()
     try:        # the setup is inside too: a bad setting is an error result, not a crash
         schema = record_model(fields, planned)
