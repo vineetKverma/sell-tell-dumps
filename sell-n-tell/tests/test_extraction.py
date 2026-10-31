@@ -356,7 +356,8 @@ def test_a_count_in_plural_words_or_zero_is_kept(count):
 
 
 @pytest.mark.parametrize("vague", ["one-off order", "a one-time job", "a few units", "turns", "no one ordered", "no  one ordered",
-                                   "no-one ordered"])
+                                   "no-one ordered", "no–one ordered", "no—one ordered",
+                                   "no‑one ordered"])
 def test_a_count_with_no_number_in_it_is_dropped_even_one_off(vague):
     assert postprocess(raw(must_capture={"U_10": vague}), NOTE, PLANNED).record["must_capture"]["U-10"] is None
 

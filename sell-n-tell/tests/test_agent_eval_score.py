@@ -245,6 +245,11 @@ def test_captured_but_wrong_value():
     ("no contact", "left a voicemail", True),
     ("no contact", "spoke with no one", True),                     # no contact, said either way
     ("no contact", "Spoke to nobody", True),
+    ("no contact", "no-one available", True),                      # "no one" in any spelling
+    ("no contact", "noone available", True),
+    ("no contact", "spoke with no-one", True),
+    ("no contact", "no–one there", True),
+    ("spoke with contact", "spoke with no-one", False),
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),

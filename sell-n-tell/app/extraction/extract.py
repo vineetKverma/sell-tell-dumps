@@ -52,7 +52,7 @@ MAX_NOTE_CHARS = 10_000
 COUNT_FIELDS = ("U-10",)
 # A number as digits or spelled out ("twelve units", "a dozen keys").
 _HAS_NUMBER = re.compile(
-    r"\d|\b(?:(?<!no )(?<!no-)one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"\d|\b(?:(?<!no[ \-‐-―])one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"zero|hundreds?|thousands?|dozens?)\b", re.IGNORECASE)
 

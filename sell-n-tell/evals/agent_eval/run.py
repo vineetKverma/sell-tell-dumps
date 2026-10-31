@@ -323,7 +323,13 @@ def main() -> None:
         name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         out = RUNS / name
         out.mkdir(parents=True)
-        with app_running(args.base_url, start=not _healthy(args.base_url), log=out / "app.log"):
+        reuse = _healthy(args.base_url)
+        if reuse:
+            print(f"WARNING: using the app already running at {args.base_url}. Its BigQuery audit "
+                  "logging is its own setting; start it with BQ_ANALYTICS_ENABLED=false, or stop it "
+                  "and let the harness start one, so golden notes stay out of the audit table.",
+                  file=sys.stderr)
+        with app_running(args.base_url, start=not reuse, log=out / "app.log"):
             from evals.agent_eval.drive import SessionEndpointError
             print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
             try:

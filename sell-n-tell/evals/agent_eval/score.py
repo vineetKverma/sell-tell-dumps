@@ -46,9 +46,11 @@ def _stated(value) -> bool:
 
 _SPOKE_WITH = re.compile(r"^spoke (?:with|to) (?:the |an? )?(\w+)(['’]s\b)?")
 _NOBODY = ("no", "nobody", "noone", "none")
-# "No contact" said either way: the key's wording, or "spoke with no one".
-_NO_CONTACT = re.compile(r"^(?:no contact|nobody|no one|no answer|left (?:a )?voicemail|"
-                         r"spoke (?:with|to) (?:no one|nobody|noone|none))\b")
+# "No contact" said either way: the key's wording, or "spoke with no one"
+# ("no one", "no-one", "noone", any dash).
+_NO_ONE = r"no[ \-‐-―]?one"
+_NO_CONTACT = re.compile(rf"^(?:no contact|nobody|{_NO_ONE}|no answer|left (?:a )?voicemail|"
+                         rf"spoke (?:with|to) (?:{_NO_ONE}|nobody|none))\b")
 # Front desk or gatekeeper only is not a conversation with the contact (the
 # event-type rule: an On-site visit), so it never counts as "spoke with contact".
 # Anywhere in the answer ("Maria at reception"), but not as part of a title (a
