@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -395,7 +396,10 @@ def app_running(base_url: str, start: bool, log: Path | None = None):
     """With ``start``, run the app (uvicorn, same Python) for the duration and
     stop it afterwards, waiting until /healthz answers before driving cases.
     Otherwise use the app that is already running. The app's log goes to
-    ``log`` -- the run's own folder, so the next run does not overwrite it."""
+    ``log`` -- the run's own folder, so the next run does not overwrite it.
+    BigQuery audit logging is off in the started app: the golden notes are
+    real customer notes and must not reach the audit table. An app that is
+    already running keeps its own setting."""
     proc = None
     if start:
         port = urllib.parse.urlsplit(base_url).port or 8000
@@ -403,7 +407,9 @@ def app_running(base_url: str, start: bool, log: Path | None = None):
         log = log or RUNS / "app.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)],
-                                cwd=root, stdout=log.open("w", encoding="utf-8"), stderr=subprocess.STDOUT)
+                                cwd=root, stdout=log.open("w", encoding="utf-8"), stderr=subprocess.STDOUT,
+                                # wins over app/.env: load_dotenv keeps variables already set
+                                env={**os.environ, "BQ_ANALYTICS_ENABLED": "false"})
         deadline = time.monotonic() + APP_START_TIMEOUT_S
         while not _healthy(base_url):
             if proc.poll() is not None or time.monotonic() > deadline:

@@ -416,8 +416,12 @@ def test_the_app_log_goes_to_the_runs_own_folder(tmp_path, monkeypatch):
         def wait(self, timeout=None):
             return 0
 
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: Proc())
+    started = {}
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: started.update(kw) or Proc())
     monkeypatch.setattr(run, "_healthy", lambda _url: True)
+    monkeypatch.setenv("BQ_ANALYTICS_ENABLED", "true")
     with run.app_running("http://localhost:8000", start=True, log=tmp_path / "full-x" / "app.log"):
         pass
     assert (tmp_path / "full-x" / "app.log").exists()
+    # golden notes are customer data: never into the BigQuery audit table, whatever the shell or .env says
+    assert started["env"]["BQ_ANALYTICS_ENABLED"] == "false"

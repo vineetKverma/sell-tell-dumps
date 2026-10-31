@@ -126,10 +126,13 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   gemini-3.1-pro-preview), so their scores may flatter them. The run refuses
   them unless `--allow-labelling-model` is passed, and the scorecard then says
   so.
-- A topic is `discussed` only with the rep's own words as evidence, checked in
-  code; without them it is `unconfirmed` (the live flow would ask the rep) and
-  scores as not discussed. The scorecard reports how many such questions a run
-  would add.
+- A topic is `discussed` only if its evidence is found in the dictation and has
+  at least two different non-filler words, checked in code. That proves the
+  words are the rep's, not that they are about the campaign ("Nothing on
+  pools" passes); that judgement stays the model's and `over_claimed`
+  measures it. Otherwise the topic is `unconfirmed` (the live flow would ask
+  the rep), keeps no summary, and scores as not discussed. The scorecard
+  reports how many such questions a run would add.
 - `over_claimed` is the share of not-discussed campaigns marked discussed.
   Disposition is n/a: the record carries the facts behind it, not a code.
 - A run saves each settled record, not the model's raw reply. `--rescore`
