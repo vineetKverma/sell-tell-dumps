@@ -67,9 +67,10 @@ _GATEKEEPER = re.compile(r"(?<!head of )(?<!chief of )(?<!director of )"
 # ("the property manager at reception") is the contact met at the desk; a name
 # alone there ("Maria at reception") is read as the gatekeeper.
 _AT_DESK = re.compile(r"\s+(?:at|by|in) (?:the )?(?:front desk|front-desk|frontdesk|reception|lobby)\b")
-# Decision-maker roles only: an administrator or coordinator at reception is
-# as likely to be the front desk as the contact.
-_ROLE = re.compile(r"\b(?:manager|owner|director|gm|supervisor|president|ceo)\b")
+# Decision-maker roles only (the buyer too, as extract()'s rules name it): an
+# administrator or coordinator at reception is as likely to be the front desk
+# as the contact. Not a possessive: "the manager's assistant" is not the manager.
+_ROLE = re.compile(r"\b(?:manager|owner|director|gm|supervisor|president|ceo|cfo|coo|vp|buyer)\b(?!['’]s)")
 
 
 def _spoke_with(value: str) -> str | None:
@@ -113,14 +114,19 @@ def value_agrees(expected: str, actual: str) -> bool:
     """Same after normalising, or one contains the other ("12 units" and
     "12 units a month") -- the rule the two answer-key builds were compared
     with, so the agent is held to the same bar as the key itself."""
-    # "1,200" -> "1200" first, so the cleaning below does not split a number;
-    # "1,200.00" and "12.0" are the same numbers as "1200" and "12"
-    a, b = (re.sub(r"(\d)\.0+\b", r"\1", re.sub(r"(?<=\d),(?=\d{3}\b)", "", _DIMENSION.sub(r"\1x", norm(x))))
-            for x in (expected, actual))
+    a, b = (_same_number(_DIMENSION.sub(r"\1x", norm(x))) for x in (expected, actual))
     a, b = re.sub(r"[^\w$%./-]+", " ", a).strip(), re.sub(r"[^\w$%./-]+", " ", b).strip()
     # containment on word edges: "12 units" is in "12 units a month", not in
     # "112 units"; "$100" is not in "$100.50" or "$100,000"
     return a == b or (min(len(a), len(b)) >= 3 and (_within(a, b) or _within(b, a)))
+
+
+def _same_number(text: str) -> str:
+    """One way to write a number: "1,200" -> "1200" (so the cleaning does not
+    split it), "5.50" -> "5.5", "1,200.00" / "2.0x4" -> "1200" / "2x4"."""
+    text = re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", text)
+    text = re.sub(r"(\d\.\d*?[1-9])0+(?!\d)", r"\1", text)
+    return re.sub(r"(\d)\.0+(?!\d)", r"\1", text)
 
 
 def _within(part: str, whole: str) -> bool:

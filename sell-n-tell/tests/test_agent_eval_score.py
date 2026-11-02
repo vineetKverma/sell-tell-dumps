@@ -261,6 +261,9 @@ def test_captured_but_wrong_value():
     ("spoke with contact", "spoke with the office administrator at reception", False),   # a desk role
     ("spoke with contact", "spoke with the coordinator at reception", False),
     ("spoke with contact", "spoke with the engineer at the front desk", False),
+    ("spoke with contact", "spoke with the buyer at reception", True),          # decision-makers
+    ("spoke with contact", "spoke with the CFO at reception", True),
+    ("spoke with contact", "spoke with the general manager's assistant at reception", False),
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),
@@ -289,6 +292,11 @@ def test_contact_outcome_accepts_target_or_alternate_against_spoke_with_contact(
     ("$1,200", "$1,200.00", True),      # zero cents is the same amount
     ("12 units", "12.0 units", True),
     ("1.05", "1", False),
+    ("5.5", "5.50", True),              # trailing zeros are the same number
+    ("0.5", "0.50", True),
+    ("2x4", "2.0x4", True),
+    ("4 by 4", "4.0 by 4.0", True),
+    ("1.05", "1.5", False),
     ("120", "120.5 units", False),
     ("$1,200", "$1,200 a month", True),
     ("$100", "$100,000", False),        # a thousands separator is part of the number
