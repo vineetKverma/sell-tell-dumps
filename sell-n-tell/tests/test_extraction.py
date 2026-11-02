@@ -306,7 +306,7 @@ def test_two_titles_that_differ_only_in_case_keep_their_own_status():
         (planned[0], NOT_DISCUSSED), (planned[1], DISCUSSED)]
 
 
-# --- PR #13 review ---------------------------------------------------------------
+# --- evidence, prompt markers, note length, counts --------------------------------
 
 POOLS_NOTE = "Shared mini fridge pricing with Frank. He wants a quote for 6 units. Nothing on pools."
 
