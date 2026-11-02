@@ -258,6 +258,9 @@ def test_captured_but_wrong_value():
     ("no contact", "talked to nobody", True),
     ("spoke with contact", "spoke with the property manager at reception", True),   # met at the desk
     ("spoke with contact", "spoke with Maria at reception", False),                 # a name alone there
+    ("spoke with contact", "spoke with the office administrator at reception", False),   # a desk role
+    ("spoke with contact", "spoke with the coordinator at reception", False),
+    ("spoke with contact", "spoke with the engineer at the front desk", False),
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),
@@ -283,6 +286,9 @@ def test_contact_outcome_accepts_target_or_alternate_against_spoke_with_contact(
     ("12 units", "112 units", False),   # containment only on word edges
     ("2 trucks", "12 trucks", False),
     ("$100", "$100.50", False),         # a different amount, not a longer answer
+    ("$1,200", "$1,200.00", True),      # zero cents is the same amount
+    ("12 units", "12.0 units", True),
+    ("1.05", "1", False),
     ("120", "120.5 units", False),
     ("$1,200", "$1,200 a month", True),
     ("$100", "$100,000", False),        # a thousands separator is part of the number
