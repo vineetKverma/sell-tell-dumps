@@ -333,13 +333,13 @@ def main() -> None:
         name = f"{args.mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         out = RUNS / name
         out.mkdir(parents=True)
-        reuse = _healthy(args.base_url)
-        if reuse:
-            print(f"WARNING: using the app already running at {args.base_url}. Its BigQuery audit "
-                  "logging is its own setting; start it with BQ_ANALYTICS_ENABLED=false, or stop it "
-                  "and let the harness start one, so golden notes stay out of the audit table.",
-                  file=sys.stderr)
-        with app_running(args.base_url, start=not reuse, log=out / "app.log"):
+        with app_running(args.base_url, start=not _healthy(args.base_url), log=out / "app.log"):
+            # Golden notes are customer data: never sent to an app that writes
+            # them to the BigQuery audit table (its /healthz then reports "analytics").
+            if _analytics_on(args.base_url):
+                raise SystemExit(f"The app at {args.base_url} has BigQuery audit logging on. Stop it "
+                                 "(the harness starts its own with logging off) or restart it with "
+                                 "BQ_ANALYTICS_ENABLED=false.")
             from evals.agent_eval.drive import SessionEndpointError
             print(f"{args.mode}: {len(cases)} cases against {args.base_url}")
             try:
@@ -407,6 +407,16 @@ def _healthy(base_url: str) -> bool:
         return False
 
 
+def _analytics_on(base_url: str) -> bool:
+    """The app's /healthz carries an "analytics" key only when BigQuery audit
+    logging is on. An app that cannot be asked counts as on."""
+    import httpx
+    try:
+        return "analytics" in httpx.get(f"{base_url.rstrip('/')}/healthz", timeout=5).json()
+    except (httpx.HTTPError, ValueError):
+        return True
+
+
 @contextlib.contextmanager
 def app_running(base_url: str, start: bool, log: Path | None = None):
     """With ``start``, run the app (uvicorn, same Python) for the duration and
@@ -415,7 +425,7 @@ def app_running(base_url: str, start: bool, log: Path | None = None):
     ``log`` -- the run's own folder, so the next run does not overwrite it.
     BigQuery audit logging is off in the started app: the golden notes are
     real customer notes and must not reach the audit table. An app that is
-    already running keeps its own setting."""
+    already running is used only if its logging is off (see main)."""
     proc = out = None
     if start:
         port = urllib.parse.urlsplit(base_url).port or 8000

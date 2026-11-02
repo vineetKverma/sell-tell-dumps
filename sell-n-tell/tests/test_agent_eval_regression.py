@@ -427,6 +427,28 @@ def test_the_app_log_goes_to_the_runs_own_folder(tmp_path, monkeypatch):
     assert started["env"]["BQ_ANALYTICS_ENABLED"] == "false"
 
 
+def test_an_app_with_bigquery_logging_on_is_refused(monkeypatch):
+    import httpx
+    from evals.agent_eval import run
+
+    class Reply:
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            if self.body is None:
+                raise ValueError("not json")
+            return self.body
+
+    for body, on in (({"status": "ok"}, False), ({"status": "ok", "analytics": {}}, True), (None, True)):
+        monkeypatch.setattr(httpx, "get", lambda *_a, b=body, **_kw: Reply(b))
+        assert run._analytics_on("http://localhost:8000") is on, body
+    def down(*_a, **_kw):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(httpx, "get", down)
+    assert run._analytics_on("http://localhost:8000") is True             # can't ask: treated as on
+
+
 def test_a_run_records_the_apps_own_default_model(monkeypatch):
     import dotenv
     from pathlib import Path

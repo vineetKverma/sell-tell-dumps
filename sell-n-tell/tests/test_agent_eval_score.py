@@ -254,6 +254,10 @@ def test_captured_but_wrong_value():
     ("spoke with contact", "Met with Rachel, the GM", True),                   # other ways to say it
     ("spoke with contact", "talked to the maintenance supervisor", True),
     ("no contact", "Contact not available", True),
+    ("no contact", "met with no one", True),                       # the new verbs say "no contact" too
+    ("no contact", "talked to nobody", True),
+    ("spoke with contact", "spoke with the property manager at reception", True),   # met at the desk
+    ("spoke with contact", "spoke with Maria at reception", False),                 # a name alone there
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),
@@ -281,6 +285,9 @@ def test_contact_outcome_accepts_target_or_alternate_against_spoke_with_contact(
     ("$100", "$100.50", False),         # a different amount, not a longer answer
     ("120", "120.5 units", False),
     ("$1,200", "$1,200 a month", True),
+    ("$100", "$100,000", False),        # a thousands separator is part of the number
+    ("200", "1,200 units", False),
+    ("$1,200", "$1200", True),
 ])
 def test_value_agrees(expected, actual, ok):
     assert value_agrees(expected, actual) is ok

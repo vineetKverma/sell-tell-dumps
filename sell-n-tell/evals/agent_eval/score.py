@@ -45,14 +45,15 @@ def _stated(value) -> bool:
 
 
 # "spoke with", "talked to", "met with" or "met": a conversation.
-_SPOKE_WITH = re.compile(r"^(?:spoke (?:with|to)|talked (?:with|to)|met(?: with)?) (?:the |an? )?(\w+)(['’]s\b)?")
+_TALKED = r"(?:spoke (?:with|to)|talked (?:with|to)|met(?: with)?)"
+_SPOKE_WITH = re.compile(rf"^{_TALKED} (?:the |an? )?(\w+)(['’]s\b)?")
 _NOBODY = ("no", "nobody", "noone", "none")
 # "No contact" said either way: the key's wording, or "spoke with no one"
 # ("no one", "no-one", "noone", any dash).
 _NO_ONE = r"no[ \-‐-―]?one"
 _NO_CONTACT = re.compile(rf"^(?:no contact|nobody|{_NO_ONE}|no answer|left (?:a )?voicemail|"
                          rf"contact (?:was )?(?:not available|unavailable)|"
-                         rf"spoke (?:with|to) (?:{_NO_ONE}|nobody|none))\b")
+                         rf"{_TALKED} (?:{_NO_ONE}|nobody|none))\b")
 # Front desk or gatekeeper only is not a conversation with the contact (the
 # event-type rule: an On-site visit), so it never counts as "spoke with contact".
 # Anywhere in the answer ("Maria at reception"), but not as part of a title (a
@@ -62,6 +63,12 @@ _GATEKEEPER = re.compile(r"(?<!head of )(?<!chief of )(?<!director of )"
                          r"\b(?:front desk|front-desk|frontdesk|reception|receptionist|gatekeeper|"
                          r"security|concierge|doorman)\b"
                          r"(?!\s+(?:manager|director|supervisor|head|lead|chief|officer)\b)")
+# "at reception", "at the front desk": a place. Someone named by a role there
+# ("the property manager at reception") is the contact met at the desk; a name
+# alone there ("Maria at reception") is read as the gatekeeper.
+_AT_DESK = re.compile(r"\s+(?:at|by|in) (?:the )?(?:front desk|front-desk|frontdesk|reception|lobby)\b")
+_ROLE = re.compile(r"\b(?:manager|owner|director|gm|supervisor|engineer|administrator|president|vp|"
+                   r"superintendent|coordinator|buyer|partner|ceo|coo|cfo)\b")
 
 
 def _spoke_with(value: str) -> str | None:
@@ -78,6 +85,10 @@ def _spoke_with(value: str) -> str | None:
     named = m.group(1) if m.group(1) in ("target", "alternate") and not m.group(2) else None
     if named:                      # "spoke with the target at the front desk": the place is not the person
         return named
+    place = _AT_DESK.search(text)
+    person = text[:place.start()] if place else text
+    if place and _ROLE.search(person) and not _GATEKEEPER.search(person):
+        return "someone"
     return "gatekeeper" if _GATEKEEPER.search(text) else "someone"
 
 
@@ -101,15 +112,16 @@ def value_agrees(expected: str, actual: str) -> bool:
     """Same after normalising, or one contains the other ("12 units" and
     "12 units a month") -- the rule the two answer-key builds were compared
     with, so the agent is held to the same bar as the key itself."""
-    a, b = (_DIMENSION.sub(r"\1x", norm(x)) for x in (expected, actual))
+    # "1,200" -> "1200" first, so the cleaning below does not split a number
+    a, b = (re.sub(r"(?<=\d),(?=\d{3}\b)", "", _DIMENSION.sub(r"\1x", norm(x))) for x in (expected, actual))
     a, b = re.sub(r"[^\w$%./-]+", " ", a).strip(), re.sub(r"[^\w$%./-]+", " ", b).strip()
     # containment on word edges: "12 units" is in "12 units a month", not in
-    # "112 units"; "$100" is not in "$100.50"
+    # "112 units"; "$100" is not in "$100.50" or "$100,000"
     return a == b or (min(len(a), len(b)) >= 3 and (_within(a, b) or _within(b, a)))
 
 
 def _within(part: str, whole: str) -> bool:
-    return re.search(r"(?<!\w)(?<!\d[.,])" + re.escape(part) + r"(?!\w|[.,]\d)", whole) is not None
+    return re.search(r"(?<!\w)(?<!\d\.)" + re.escape(part) + r"(?!\w|\.\d)", whole) is not None
 
 
 # ---------------------------------------------------------------------------
