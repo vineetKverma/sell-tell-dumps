@@ -250,6 +250,10 @@ def test_captured_but_wrong_value():
     ("no contact", "spoke with no-one", True),
     ("no contact", "no–one there", True),
     ("spoke with contact", "spoke with no-one", False),
+    ("spoke with contact", "spoke with the target at the front desk", True),   # the place is not the person
+    ("spoke with contact", "Met with Rachel, the GM", True),                   # other ways to say it
+    ("spoke with contact", "talked to the maintenance supervisor", True),
+    ("no contact", "Contact not available", True),
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),
@@ -274,6 +278,9 @@ def test_contact_outcome_accepts_target_or_alternate_against_spoke_with_contact(
     ("4x4", "4x6", False),
     ("12 units", "112 units", False),   # containment only on word edges
     ("2 trucks", "12 trucks", False),
+    ("$100", "$100.50", False),         # a different amount, not a longer answer
+    ("120", "120.5 units", False),
+    ("$1,200", "$1,200 a month", True),
 ])
 def test_value_agrees(expected, actual, ok):
     assert value_agrees(expected, actual) is ok

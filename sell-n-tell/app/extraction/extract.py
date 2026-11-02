@@ -43,8 +43,8 @@ MIN_EVIDENCE_WORDS = 2
 # Words that do not count towards MIN_EVIDENCE_WORDS ("the pools" is one word).
 # "no pools" and "about it" are one word too; a negation is the model's call (over-claimed).
 _FILLER = frozenset("a an the on of to for with and or in at by is was no not about it this that".split())
-# Five times the longest dictation in the eval sets (1,804 characters); a
-# longer note is refused before the call.
+# About five times the longest dictation in the eval sets (1,804 characters);
+# a longer note is refused before the call.
 MAX_NOTE_CHARS = 10_000
 # Fields that are a count and nothing else: a value without a digit ("turns")
 # is dropped. Other "how many" fields mix in text by definition (e.g. HL-03
@@ -52,7 +52,7 @@ MAX_NOTE_CHARS = 10_000
 COUNT_FIELDS = ("U-10",)
 # A number as digits or spelled out ("twelve units", "a dozen keys").
 _HAS_NUMBER = re.compile(
-    r"\d|\b(?:(?<!\bno[ \-‐-―])one(?!-(?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"\d|\b(?:(?<!\bno[ \-‐-―])one(?![ -](?:off|time)\b)|couple|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"zero|hundreds?|thousands?|dozens?)\b", re.IGNORECASE)
 
@@ -127,16 +127,23 @@ Rules:
 """
 
 
+def _unmark(text: str) -> str:
+    """No text in the prompt can hold the dictation block's markers: "<<<" or
+    ">>>" is spaced out, so a note, title or description cannot close the
+    block or open a fake one. (The label the model returns is still fixed to
+    the planned title by the schema.)"""
+    return re.sub(r"([<>])(?=\1\1)", r"\1 ", text)
+
+
 def build_prompt(note: str, planned: list[str], vertical: str,
                  descriptions: dict[str, str] | None = None) -> str:
     descriptions = descriptions or {}
     topic_lines = "\n".join(
-        f"{i}. label: {t}\n   about: {descriptions.get(t) or '(no description; judge by the label)'}"
+        f"{i}. label: {_unmark(t)}\n   about: "
+        f"{_unmark(descriptions.get(t) or '(no description; judge by the label)')}"
         for i, t in enumerate(planned, 1)
     ) or "(none)"
-    # The note cannot hold the block's own markers: "<<<" or ">>>" in it is
-    # spaced out, so text after it still reads as the dictation.
-    note = re.sub(r"([<>])(?=\1\1)", r"\1 ", note)
+    note = _unmark(note)
     return (f"{RULES}\nAccount vertical: {vertical}\n\nPlanned topics (the topic field is the label "
             f"only, never the description):\n{topic_lines}\n\nDictation:\n<<<\n{note}\n>>>")
 

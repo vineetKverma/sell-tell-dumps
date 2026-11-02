@@ -4,8 +4,10 @@ so a report is checked against the runs' own numbers, not retyped.
     uv run python -m evals.extract_eval.compare evals/runs/extract-A evals/runs/extract-B ...
 
 Per run (the golden set unless --set): model, thinking, location, the key it
-was scored on (dataset sha256, first 8), means over the repeats, errors,
-dropped labels, cost and latency.
+was scored on (dataset sha256, first 8), what decides whether two runs compare
+(--limit, campaign descriptions, a labelling model, the judge, summaries not
+judged), means over the repeats, value accuracy, errors, dropped labels, cost
+and latency.
 """
 
 from __future__ import annotations
@@ -29,7 +31,12 @@ def row(run: Path, set_name: str) -> dict:
             "location": s.get("location") or "global",
             "key": (entry.get("key_sha256") or (s.get("dataset_sha256") if set_name == "golden" else "") or "")[:8],
             "repeats": s.get("repeats"), "invalid": entry.get("invalid"),
+            "limit": s.get("limit"), "descriptions": "yes" if s.get("registry") else "titles only",
+            "labelling_model": "yes" if s.get("labelled_the_golden_set") else "no",
+            "judge": s.get("judge_model"), "unjudged": entry.get("unjudged_summaries"),
             **{c: (scores.get(c) or {}).get("mean") for c in COLUMNS},
+            "value_acc_P1": (entry.get("value_accuracy") or {}).get("P1"),
+            "value_acc_all": (entry.get("value_accuracy") or {}).get("all"),
             "errors": entry.get("schema_or_call_errors"), "dropped": entry.get("dropped_topic_labels"),
             "unconfirmed": entry.get("unconfirmed_topics_per_run"),
             "usd_per_1k": use.get("cost_per_1000_notes_usd"), "usd_per_1k_2027": use.get("cost_per_1000_notes_usd_from_2027"),
@@ -38,7 +45,8 @@ def row(run: Path, set_name: str) -> dict:
 
 
 def table(rows: list[dict]) -> str:
-    head = ["run", "model", "thinking", "location", "key", "repeats", *COLUMNS, "errors", "dropped",
+    head = ["run", "model", "thinking", "location", "key", "repeats", "limit", "descriptions",
+            "labelling_model", "judge", "unjudged", *COLUMNS, "value_acc_P1", "value_acc_all", "errors", "dropped",
             "unconfirmed", "usd_per_1k", "usd_per_1k_2027", "p50_s", "p95_s", "in_tok", "out_tok", "invalid"]
     def fmt(h, v):
         if v is None:

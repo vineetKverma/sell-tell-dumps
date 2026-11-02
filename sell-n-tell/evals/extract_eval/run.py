@@ -159,6 +159,12 @@ MAX_ERROR_RATE = 0.10
 MAX_UNJUDGED_RATE = 0.10
 
 
+def _mean_pct(values: list) -> float | None:
+    """Mean over the repeats, in percent; None when no repeat had any."""
+    vals = [v * 100 for v in values if v is not None]
+    return round(sum(vals) / len(vals), 2) if vals else None
+
+
 def usage_summary(rows: list[dict], model: str, prices: dict) -> dict:
     """Tokens, time and (when the model's price is set in prices.json) cost of
     the extraction calls in one run. Thinking tokens are billed as output.
@@ -326,6 +332,9 @@ def main() -> None:
                  "dropped_topic_labels": dropped,
                  "unconfirmed_topics_per_run": round(unconfirmed / args.repeats, 1),
                  "usage": usage, "scores": summarise(runs) if runs else {},
+                 # recall counts any filled field; this is how many of those match the key
+                 "value_accuracy": {p: _mean_pct([(r["all"]["fields"].get(p) or {}).get("value_accuracy")
+                                                  for r in runs]) for p in ("P1", "all")},
                  "spread": variance(runs) if runs else {}}
         calls, failed = len(cases) * args.repeats, errors - reply_errors
         if failed > MAX_ERROR_RATE * calls:

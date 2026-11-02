@@ -223,6 +223,9 @@ def test_compare_reads_each_runs_own_numbers(monkeypatch, tmp_path):
     assert r["model"] == "stand-in" and r["thinking"] == "low" and r["repeats"] == 2
     assert r["topic_status"] == summary["sets"]["golden"]["scores"]["topic_status"]["mean"]
     assert r["key"] == summary["dataset_sha256"][:8] and r["errors"] == 0
+    # what decides whether two runs compare is in the row, not only in the run's folder
+    assert r["limit"] == 4 and r["labelling_model"] == "no" and r["judge"] == summary["judge_model"]
+    assert r["value_acc_P1"] == summary["sets"]["golden"]["value_accuracy"]["P1"]
     assert compare.row(out, "topup") == {"run": out.name, "missing": "no topup set"}
     assert "| stand-in | low |" in compare.table([r])
 

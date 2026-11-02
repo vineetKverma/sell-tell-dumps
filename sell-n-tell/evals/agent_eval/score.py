@@ -44,12 +44,14 @@ def _stated(value) -> bool:
     return value not in (None, "") and norm(value) not in ("not stated", "null", "none", "n/a")
 
 
-_SPOKE_WITH = re.compile(r"^spoke (?:with|to) (?:the |an? )?(\w+)(['’]s\b)?")
+# "spoke with", "talked to", "met with" or "met": a conversation.
+_SPOKE_WITH = re.compile(r"^(?:spoke (?:with|to)|talked (?:with|to)|met(?: with)?) (?:the |an? )?(\w+)(['’]s\b)?")
 _NOBODY = ("no", "nobody", "noone", "none")
 # "No contact" said either way: the key's wording, or "spoke with no one"
 # ("no one", "no-one", "noone", any dash).
 _NO_ONE = r"no[ \-‐-―]?one"
 _NO_CONTACT = re.compile(rf"^(?:no contact|nobody|{_NO_ONE}|no answer|left (?:a )?voicemail|"
+                         rf"contact (?:was )?(?:not available|unavailable)|"
                          rf"spoke (?:with|to) (?:{_NO_ONE}|nobody|none))\b")
 # Front desk or gatekeeper only is not a conversation with the contact (the
 # event-type rule: an On-site visit), so it never counts as "spoke with contact".
@@ -73,9 +75,10 @@ def _spoke_with(value: str) -> str | None:
     m = _SPOKE_WITH.match(text)
     if not m or m.group(1) in _NOBODY:
         return None
-    if _GATEKEEPER.search(text):
-        return "gatekeeper"
-    return m.group(1) if m.group(1) in ("target", "alternate") and not m.group(2) else "someone"
+    named = m.group(1) if m.group(1) in ("target", "alternate") and not m.group(2) else None
+    if named:                      # "spoke with the target at the front desk": the place is not the person
+        return named
+    return "gatekeeper" if _GATEKEEPER.search(text) else "someone"
 
 
 def field_value_agrees(field_id: str, expected: str, actual: str) -> bool:
@@ -100,12 +103,13 @@ def value_agrees(expected: str, actual: str) -> bool:
     with, so the agent is held to the same bar as the key itself."""
     a, b = (_DIMENSION.sub(r"\1x", norm(x)) for x in (expected, actual))
     a, b = re.sub(r"[^\w$%./-]+", " ", a).strip(), re.sub(r"[^\w$%./-]+", " ", b).strip()
-    # containment on word edges: "12 units" is in "12 units a month", not in "112 units"
+    # containment on word edges: "12 units" is in "12 units a month", not in
+    # "112 units"; "$100" is not in "$100.50"
     return a == b or (min(len(a), len(b)) >= 3 and (_within(a, b) or _within(b, a)))
 
 
 def _within(part: str, whole: str) -> bool:
-    return re.search(r"(?<!\w)" + re.escape(part) + r"(?!\w)", whole) is not None
+    return re.search(r"(?<!\w)(?<!\d[.,])" + re.escape(part) + r"(?!\w|[.,]\d)", whole) is not None
 
 
 # ---------------------------------------------------------------------------

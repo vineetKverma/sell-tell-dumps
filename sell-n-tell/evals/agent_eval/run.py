@@ -416,20 +416,22 @@ def app_running(base_url: str, start: bool, log: Path | None = None):
     BigQuery audit logging is off in the started app: the golden notes are
     real customer notes and must not reach the audit table. An app that is
     already running keeps its own setting."""
-    proc = None
+    proc = out = None
     if start:
         port = urllib.parse.urlsplit(base_url).port or 8000
         root = Path(__file__).resolve().parents[2]
         log = log or RUNS / "app.log"
         log.parent.mkdir(parents=True, exist_ok=True)
+        out = log.open("w", encoding="utf-8")
         proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)],
-                                cwd=root, stdout=log.open("w", encoding="utf-8"), stderr=subprocess.STDOUT,
+                                cwd=root, stdout=out, stderr=subprocess.STDOUT,
                                 # wins over app/.env: load_dotenv keeps variables already set
                                 env={**os.environ, "BQ_ANALYTICS_ENABLED": "false"})
         deadline = time.monotonic() + APP_START_TIMEOUT_S
         while not _healthy(base_url):
             if proc.poll() is not None or time.monotonic() > deadline:
                 proc.kill()
+                out.close()
                 raise SystemExit(f"The app did not start. See {log}")
             time.sleep(2)
         print(f"app started (pid {proc.pid}); log: {log}")
@@ -442,6 +444,8 @@ def app_running(base_url: str, start: bool, log: Path | None = None):
                 proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 proc.kill()
+        if out is not None:
+            out.close()
 
 
 def read_run(path: Path) -> list[dict]:
