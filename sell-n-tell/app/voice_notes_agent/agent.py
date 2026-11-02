@@ -28,6 +28,7 @@ from google.genai import types
 
 from . import notes_workflow
 from .live_credentials import build_prewarmed_live_client
+from .model import DEFAULT_AGENT_MODEL
 from .prompt_blocks import format_planned_topics_block
 from .tools import commit_visit_notes, stage_visit_notes
 
@@ -108,7 +109,7 @@ agent = Agent(
     name="voice_notes_logger",
     model=Gemini(
         model=os.getenv(
-            "VOICE_NOTES_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
+            "VOICE_NOTES_AGENT_MODEL", DEFAULT_AGENT_MODEL
         ),
         client=live_client,
     ),

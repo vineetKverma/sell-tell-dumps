@@ -425,3 +425,18 @@ def test_the_app_log_goes_to_the_runs_own_folder(tmp_path, monkeypatch):
     assert (tmp_path / "full-x" / "app.log").exists()
     # golden notes are customer data: never into the BigQuery audit table, whatever the shell or .env says
     assert started["env"]["BQ_ANALYTICS_ENABLED"] == "false"
+
+
+def test_a_run_records_the_apps_own_default_model(monkeypatch):
+    import dotenv
+    from pathlib import Path
+    from evals.agent_eval import run
+
+    monkeypatch.delenv("VOICE_NOTES_AGENT_MODEL", raising=False)
+    monkeypatch.setattr(dotenv, "dotenv_values", lambda _path: {})
+    app = Path(run.__file__).resolve().parents[2] / "app" / "voice_notes_agent"
+    default = run._default_agent_model()
+    assert run._agent_model() == default
+    # the agent uses the same constant, not its own copy of the name
+    assert '"VOICE_NOTES_AGENT_MODEL", DEFAULT_AGENT_MODEL' in (app / "agent.py").read_text(encoding="utf-8")
+    assert f'"{default}"' not in (app / "agent.py").read_text(encoding="utf-8")

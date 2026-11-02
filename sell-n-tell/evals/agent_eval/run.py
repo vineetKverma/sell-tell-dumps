@@ -235,12 +235,22 @@ def _git_commit() -> str:
 
 
 def _agent_model() -> str:
-    import os
-
     from dotenv import dotenv_values
     env = dotenv_values(Path(__file__).resolve().parents[2] / "app" / ".env")
     return (os.getenv("VOICE_NOTES_AGENT_MODEL") or env.get("VOICE_NOTES_AGENT_MODEL")
-            or "gemini-live-2.5-flash-native-audio")
+            or _default_agent_model())
+
+
+def _default_agent_model() -> str:
+    """The app's own default (voice_notes_agent/model.py), read from the file:
+    importing the package would build the agent and log in to Google."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "app" / "voice_notes_agent" / "model.py"
+    spec = importlib.util.spec_from_file_location("_agent_model_default", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.DEFAULT_AGENT_MODEL
 
 
 def final_scores(mode: str, name: str, cases, raw: list[dict], rollup: dict, ref: dict | None) -> dict:

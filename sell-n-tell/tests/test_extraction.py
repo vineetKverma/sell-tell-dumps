@@ -350,7 +350,8 @@ def test_a_dictation_over_the_limit_is_refused_before_any_call():
 
 
 @pytest.mark.parametrize("count", ["hundreds of beds", "zero units", "dozens of rooms", "Thousands of keys",
-                                   "a couple of units"])
+                                   "a couple of units",
+                                   "casino one location", "Reno one property"])   # "no" ending a word is not "no one"
 def test_a_count_in_plural_words_or_zero_is_kept(count):
     assert postprocess(raw(must_capture={"U_10": count}), NOTE, PLANNED).record["must_capture"]["U-10"] == count
 
