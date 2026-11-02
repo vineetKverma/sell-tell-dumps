@@ -42,6 +42,11 @@ _DEFAULT_TOOL_EXECUTION_TIMEOUT_S = 60.0
 _DEFAULT_MAX_CONSECUTIVE_ERRORS = 3
 _TIMEOUT_FUZZ_S = 0.05
 _READBACK_CHECK_INTERVAL_S = 0.5
+_DEFAULT_AUDIO_SAMPLE_RATE_HZ = 24000
+_DEFAULT_AUDIO_BYTES_PER_SAMPLE = 2  # 16-bit linear PCM mono
+_DEFAULT_AUDIO_BYTES_PER_SECOND = (
+    _DEFAULT_AUDIO_SAMPLE_RATE_HZ * _DEFAULT_AUDIO_BYTES_PER_SAMPLE
+)
 
 
 class SilenceWatchdog:
@@ -87,6 +92,7 @@ class SilenceWatchdog:
         self._last_activity_time = time.monotonic()
         self._voice_grace_until = 0.0
         self._cumulative_grace_budget_remaining_s = max_unverified_grace_s
+        self._playback_end = 0.0
 
         self.wake_event = asyncio.Event()
         self.user_spoke_event = asyncio.Event()
@@ -129,6 +135,7 @@ class SilenceWatchdog:
         self._voice_grace_until = 0.0
         self._cumulative_grace_budget_remaining_s = self.max_unverified_grace_s
         self._last_activity_time = time.monotonic()
+        self._playback_end = 0.0
         self.is_agent_turn = False
         self.is_tool_executing = False
         self._tool_start_time = 0.0
@@ -143,6 +150,14 @@ class SilenceWatchdog:
         self._cumulative_grace_budget_remaining_s = self.max_unverified_grace_s
         self.agent_turn_finished_event.clear()
         self.wake_event.set()
+
+    def on_agent_audio(self, byte_count: int) -> None:
+        """Accumulate streamed audio bytes into a running playback cursor."""
+        if self.is_agent_turn and byte_count > 0:
+            self._playback_end = (
+                max(self._playback_end, time.monotonic())
+                + byte_count / _DEFAULT_AUDIO_BYTES_PER_SECOND
+            )
 
     def on_tool_execution_start(self) -> None:
         """Called when a tool call begins executing."""
@@ -162,12 +177,14 @@ class SilenceWatchdog:
 
     def on_agent_turn_complete(self) -> None:
         """Called when Gemini emits turn_complete."""
+        now = time.monotonic()
+        self._last_activity_time = max(now, self._playback_end)
+
         self.is_agent_turn = False
         self.is_tool_executing = False
         self._tool_start_time = 0.0
         self._voice_grace_until = 0.0
         self._cumulative_grace_budget_remaining_s = self.max_unverified_grace_s
-        self._last_activity_time = time.monotonic()
         self.agent_turn_finished_event.set()
         self.wake_event.set()
 
@@ -177,6 +194,7 @@ class SilenceWatchdog:
         self.is_agent_turn = False
         self.is_tool_executing = False
         self._tool_start_time = 0.0
+        self._playback_end = 0.0
         self.agent_turn_finished_event.set()
         self.user_spoke_event.set()
         self.wake_event.set()
@@ -333,7 +351,9 @@ class SilenceWatchdog:
             raise
 
         await self._wait_for_agent_turn()
-        self._last_activity_time = time.monotonic()
+        self._last_activity_time = max(
+            self._last_activity_time, time.monotonic()
+        )
 
         if is_final:
             await asyncio.sleep(self.goodbye_grace_s)
@@ -379,7 +399,9 @@ class SilenceWatchdog:
 
         if self.is_agent_turn or self.is_tool_executing:
             await self._wait_for_agent_turn()
-            self._last_activity_time = time.monotonic()
+            self._last_activity_time = max(
+                self._last_activity_time, time.monotonic()
+            )
             return False
 
         if turn_guard.needs_readback_nudge(self.session_id):

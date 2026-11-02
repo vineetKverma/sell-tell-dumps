@@ -144,3 +144,4 @@ def cleanup_session(session_id: str) -> None:
     _NUDGE_SENT.pop(session_id, None)
     _AWAITING_TOOL.pop(session_id, None)
     logger.debug("turn_guard state cleaned up for session_id=%s", session_id)
+

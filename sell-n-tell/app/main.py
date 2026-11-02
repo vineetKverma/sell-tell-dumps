@@ -40,10 +40,6 @@ from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.events import Event
 from google.adk.models.google_llm import Gemini
-from google.adk.plugins.bigquery_agent_analytics_plugin import (
-    BigQueryAgentAnalyticsPlugin,
-    BigQueryLoggerConfig,
-)
 from google.adk.runners import Runner
 from google.adk.sessions import (
     BaseSessionService,
@@ -118,6 +114,13 @@ from voice_notes_agent.live_credentials import start_background_refresh  # noqa:
 from voice_notes_agent.rate_limit import once_more_on_429  # noqa: E402
 from voice_notes_agent.silence_watchdog import SilenceWatchdog  # noqa: E402
 
+from app.analytics import (
+    build_bigquery_analytics_plugin,
+    get_analytics_status,
+    prewarm_analytics_plugins,
+    shutdown_analytics_plugins,
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -161,13 +164,25 @@ async def _periodic_staged_notes_prune():
 async def lifespan(app: FastAPI):
     asyncio.ensure_future(start_background_refresh(live_client))
     prune_task = asyncio.ensure_future(_periodic_staged_notes_prune())
+
+    # Pre-warm BigQuery audit plugin off the request path at server startup (AIML-2823)
+    if "_analytics_plugins" in globals() and _analytics_plugins:
+        await prewarm_analytics_plugins(_analytics_plugins)
+
     yield
+
     prune_task.cancel()
+
+    # Flush pending cloud session persistence tasks first before draining audit queue
     if "session_service" in globals() and hasattr(session_service, "flush"):
         logger.info(
             "Flushing pending cloud session persistence tasks on shutdown..."
         )
         await session_service.flush()
+
+    # Flush pending BigQuery audit logs on shutdown (AIML-2823)
+    if "_analytics_plugins" in globals() and _analytics_plugins:
+        await shutdown_analytics_plugins(_analytics_plugins)
 
 
 app = FastAPI(
@@ -497,52 +512,38 @@ VOICE_NOTES_AUTO_CLOSE_DELAY_S = int(
 # ---------------------------------------------------------------------------
 
 _BQ_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
-_BQ_DATASET = os.getenv("BQ_ANALYTICS_DATASET_ID", "voice_notes_agent_events")
+_BQ_DATASET = os.getenv("BQ_ANALYTICS_DATASET_ID")
 _BQ_TABLE = os.getenv("BQ_ANALYTICS_TABLE_ID", "agent_events")
 _BQ_LOCATION = os.getenv("BQ_ANALYTICS_LOCATION", "US")
 
-# Hard-disabled pending a non-blocking replacement (see PR notes / ticket):
-# BigQueryAgentAnalyticsPlugin's first-use setup (auth + gRPC channel +
-# dataset/table resolution) runs synchronously inside runner.run_live()'s
-# startup path. In this environment that added a ~40s delay before every
-# live dictation could connect (measured: ~40s with plugin enabled vs
-# ~0.2s disabled). Rather than patch this specific plugin, a separate
-# off-request-path traceability mechanism is planned. Default is FALSE
-# until that lands -- do not flip this on without re-verifying startup
-# latency first.
-_BQ_ANALYTICS_ENABLED = os.getenv(
-    "BQ_ANALYTICS_ENABLED", "false"
-).strip().lower() in {"1", "true", "yes", "on"}
+# AIML-2823: BigQuery audit logging via ADK's BigQueryAgentAnalyticsPlugin.
+# To prevent the ~10-40s startup delay previously observed:
+# 1. Credentials are supplied from pre-warmed live_client (bypassing off-GCP metadata server timeouts).
+# 2. create_views=False avoids running 20+ sequential CREATE OR REPLACE VIEW DDL queries at startup.
+# 3. The plugin is pre-warmed in lifespan() at server boot off the request path (0ms WebSocket latency).
+_BQ_ANALYTICS_ENABLED = (
+    os.getenv("BQ_ANALYTICS_ENABLED", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 _analytics_plugins: list = []
-if _BQ_ANALYTICS_ENABLED and _BQ_PROJECT:
-    try:
-        _analytics_plugins.append(
-            BigQueryAgentAnalyticsPlugin(
-                project_id=_BQ_PROJECT,
-                dataset_id=_BQ_DATASET,
-                table_id=_BQ_TABLE,
-                location=_BQ_LOCATION,
-                config=BigQueryLoggerConfig(
-                    event_allowlist=None,
-                ),
-            )
-        )
-    except Exception:
-        logger.exception(
-            "Failed to initialize BigQueryAgentAnalyticsPlugin (dataset=%s); "
-            "continuing without audit logging.",
-            _BQ_DATASET,
-        )
-elif not _BQ_ANALYTICS_ENABLED:
-    logger.warning(
-        "BigQuery audit logging disabled via BQ_ANALYTICS_ENABLED "
-        "(see module docstring for why)."
+if _BQ_ANALYTICS_ENABLED:
+    # live_client credentials are used to bypass off-GCP metadata server latency.
+    # Note: start_background_refresh swaps credentials on live_client each cycle,
+    # while the BigQuery plugin retains this initial credential object and relies on
+    # google-auth's built-in on-demand refresh.
+    _bq_creds = getattr(getattr(live_client, "_api_client", None), "_credentials", None)
+    _plugin = build_bigquery_analytics_plugin(
+        project_id=_BQ_PROJECT,
+        dataset_id=_BQ_DATASET,
+        table_id=_BQ_TABLE,
+        location=_BQ_LOCATION,
+        credentials=_bq_creds,
     )
+    if _plugin is not None:
+        _analytics_plugins.append(_plugin)
 else:
-    logger.warning(
-        "GOOGLE_CLOUD_PROJECT not set -- BigQuery audit logging disabled."
-    )
+    logger.info("BigQuery audit logging disabled via BQ_ANALYTICS_ENABLED.")
 
 
 # Guided flow retired: one Runner, one agent. (Previously a RUNNERS dict
@@ -586,8 +587,11 @@ Gemini.connect = _instrumented_gemini_connect
 @app.get("/healthz", summary="Health check")
 async def healthz() -> dict:
     """Liveness/readiness probe. No auth, no state -- just confirms the
-    process is up and serving requests."""
-    return {"status": "ok"}
+    process is up and serving requests, exposing plugin audit health."""
+    res: dict[str, Any] = {"status": "ok"}
+    if _BQ_ANALYTICS_ENABLED:
+        res["analytics"] = get_analytics_status()
+    return res
 
 
 @app.get("/api/config", summary="Frontend configuration")
@@ -964,7 +968,7 @@ async def _run_dictation_session(
     # so this doesn't silently break a second time in the same way.
     _agent_model = runner.agent.model
     model_name = getattr(_agent_model, "model", None) or _agent_model
-    is_native_audio = "native-audio" in model_name.lower()
+    is_native_audio = "native-audio" in model_name.lower() or "live" in model_name.lower()
 
     # Patient automatic VAD so multi-sentence DICTATION isn't chopped into tiny
     # turns. With the Live API's short default silence window, every pause
@@ -1257,6 +1261,10 @@ async def _run_dictation_session(
                         if getattr(part, "inline_data", None) is not None:
                             _cancel_nudges()
                             silence_watchdog.on_agent_turn_start()
+                            raw_audio = (
+                                getattr(part.inline_data, "data", None) or b""
+                            )
+                            silence_watchdog.on_agent_audio(len(raw_audio))
                         if getattr(part, "function_call", None) is not None:
                             _cancel_nudges()
                             silence_watchdog.on_agent_turn_start()

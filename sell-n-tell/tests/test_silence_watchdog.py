@@ -7,12 +7,16 @@ cancellation, timeout recovery, and clean WebSocket termination.
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.voice_notes_agent import notes_workflow
-from app.voice_notes_agent.silence_watchdog import SilenceWatchdog
+from app.voice_notes_agent.silence_watchdog import (
+    _DEFAULT_AUDIO_BYTES_PER_SECOND,
+    SilenceWatchdog,
+)
 
 
 @pytest.mark.asyncio
@@ -551,3 +555,116 @@ class TestSilenceWatchdog:
         self.mock_queue.send_content.assert_not_called()
         assert self.watchdog.consecutive_silence_count == 0
         self.mock_ws.close.assert_not_called()
+
+    async def test_agent_audio_accumulates_and_projects_playback_end(self):
+        """Streaming 48,000 bytes (1s at 24kHz 16-bit mono) projects last_activity ~1s into the future."""
+        half_second_bytes = _DEFAULT_AUDIO_BYTES_PER_SECOND // 2
+
+        self.watchdog.on_agent_turn_start()
+        t_start = time.monotonic()
+        self.watchdog.on_agent_audio(half_second_bytes)
+        self.watchdog.on_agent_audio(half_second_bytes)
+        assert self.watchdog._playback_end >= t_start + 0.95
+        assert self.watchdog._playback_end <= t_start + 1.10
+
+        self.watchdog.on_agent_turn_complete()
+        expected_end = self.watchdog._last_activity_time
+        # Duration is 48000 / 48000 = 1.0s
+        assert expected_end >= t_start + 0.95
+        assert expected_end <= t_start + 1.10
+
+    async def test_watchdog_does_not_fire_silence_nudge_during_projected_playback(
+        self,
+    ):
+        """Silence timeout does not count down while estimated playback is still active."""
+        self.watchdog.silence_timeout_s = 0.08
+        self.watchdog.settle_delay_s = 0.01
+        # Keep the nudge's own turn open so a second nudge can't fire before the assertions
+        self.watchdog.agent_turn_timeout_s = 5.0
+
+        ready = asyncio.Event()
+        task = asyncio.create_task(
+            self.watchdog.run(self.mock_queue, self.mock_ws, ready_event=ready)
+        )
+        ready.set()
+        await asyncio.sleep(
+            0.01
+        )  # let run() take its initial last_activity snapshot
+
+        # Simulate agent turn delivering 0.5s of playback
+        self.watchdog.on_agent_turn_start()
+        self.watchdog.on_agent_audio(_DEFAULT_AUDIO_BYTES_PER_SECOND // 2)
+        self.watchdog.on_agent_turn_complete()
+
+        # Without projection the nudge would fire at ~0.09s (0.08s timeout + 0.01s settle)
+        await asyncio.sleep(0.3)
+        self.mock_queue.send_content.assert_not_called()
+
+        # Wait until playback (0.50s) + silence timeout (0.08s) + settle delay (0.01s) expires
+        await asyncio.sleep(0.5)
+        assert self.mock_queue.send_content.called
+        assert self.watchdog.consecutive_silence_count == 1
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    async def test_user_speech_interrupts_and_resets_projected_playback(self):
+        """Barge-in speech overrides future playback projection and resets activity to now."""
+        tolerance_s = 0.05
+        self.watchdog.on_agent_turn_start()
+        self.watchdog.on_agent_audio(_DEFAULT_AUDIO_BYTES_PER_SECOND)
+        self.watchdog.on_agent_turn_complete()
+
+        # Projected into future
+        assert self.watchdog._last_activity_time > time.monotonic() + 0.5
+
+        # User speaks
+        t_speech = time.monotonic()
+        self.watchdog.on_user_speech()
+
+        # _last_activity_time must be reset to speech timestamp, not left in the future
+        assert abs(self.watchdog._last_activity_time - t_speech) < tolerance_s
+        assert self.watchdog._playback_end == 0.0
+
+    async def test_zero_audio_bytes_defaults_to_immediate_clock(self):
+        """Turn with zero audio bytes (e.g. text/tool only) sets last_activity_time to now."""
+        tolerance_s = 0.05
+        self.watchdog.on_agent_turn_start()
+        t_start = time.monotonic()
+        self.watchdog.on_agent_turn_complete()
+
+        assert abs(self.watchdog._last_activity_time - t_start) < tolerance_s
+        assert self.watchdog._playback_end == 0.0
+
+    async def test_idempotent_agent_turn_start_preserves_audio_accumulation(
+        self,
+    ):
+        """Repeated calls to on_agent_turn_start within the same turn do not alter playback cursor."""
+        chunk_bytes = 12000
+        self.watchdog.on_agent_turn_start()
+        self.watchdog.on_agent_audio(chunk_bytes)
+        cursor_after_first = self.watchdog._playback_end
+        assert cursor_after_first > 0.0
+
+        # Subsequent chunk triggering turn start should not reset
+        self.watchdog.on_agent_turn_start()
+        assert self.watchdog._playback_end == cursor_after_first
+
+    async def test_playback_cursor_accounts_for_inter_phrase_gap(self):
+        """Audio chunks arriving after an idle gap project from arrival time, not turn start."""
+        quarter_sec_bytes = _DEFAULT_AUDIO_BYTES_PER_SECOND // 4
+        half_sec_bytes = _DEFAULT_AUDIO_BYTES_PER_SECOND // 2
+
+        self.watchdog.on_agent_turn_start()
+        self.watchdog.on_agent_audio(quarter_sec_bytes)
+
+        # Idle gap exceeding first chunk playback duration
+        await asyncio.sleep(0.35)
+        t_second = time.monotonic()
+        self.watchdog.on_agent_audio(half_sec_bytes)
+        self.watchdog.on_agent_turn_complete()
+
+        expected_end = self.watchdog._last_activity_time
+        assert expected_end >= t_second + 0.45
+        assert expected_end <= t_second + 0.55

@@ -79,3 +79,4 @@ app/
     mock_db.py                  Mock config registry + CRM store
   static/                       Frontend (UI + audio worklets + client VAD + Service Worker)
 Dockerfile                      Cloud Run container definition
+```
