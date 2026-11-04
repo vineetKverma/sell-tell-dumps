@@ -167,9 +167,19 @@ the cost; 3.8 default has P1 recall 57.1% (fails the proposed ≥ 60%).
 
 ### 6a. AIML-2929 — final PR figures (what the PR description quotes)
 
-Run `extract-20261102-172210` on `3b97f61`, re-scored with the final scorer
-(same figures); golden key v1.4, 3 runs, scores are the mean, cost and time
-cover the answered calls; gemini-3.8-flash, thinking low, global endpoint.
+**Current:** run `extract-20261104-235607` on `090f8f5` (unconfirmed topics
+keep their summary); golden key v1.4 (`32a1988b`), 3 runs, gemini-3.8-flash,
+thinking low, global endpoint. Event type 95.7, topic status 94.9,
+over-claimed 0.0, faithfulness 92.2, P1 / all recall 90.5 / 91.4, invented
+1.6, value accuracy P1 / all 80.9 / 78.5, errors 0 of 270, unconfirmed 0.0,
+USD 3.02 / 6.04, p50 / p95 3.81 / 9.06 s. Event type moved 90.7 → 95.7 with
+no prompt, schema or key change (model-side variation); no topic was
+unconfirmed, so the summary change did not touch this run.
+
+Previous (kept for reference): run `extract-20261102-172210` on `3b97f61`,
+re-scored with the final scorer (same figures); golden key v1.4, 3 runs,
+scores are the mean, cost and time cover the answered calls;
+gemini-3.8-flash, thinking low, global endpoint.
 
 | Score | Value |
 |---|---|
