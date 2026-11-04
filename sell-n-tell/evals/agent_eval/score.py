@@ -94,7 +94,8 @@ def _spoke_with(value: str) -> str | None:
         return named
     place = _AT_DESK.search(text)
     person = text[:place.start()] if place else text
-    if place and _ROLE.search(person) and not _GATEKEEPER.search(person):
+    # The verb is not part of the person: "spoke to the manager" is the manager.
+    if place and _ROLE.search(re.sub(rf"^{_TALKED} ", "", person)) and not _GATEKEEPER.search(person):
         return "someone"
     return "gatekeeper" if _GATEKEEPER.search(text) else "someone"
 

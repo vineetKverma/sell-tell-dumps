@@ -271,6 +271,11 @@ def test_captured_but_wrong_value():
     ("spoke with contact", "spoke with the general manager at reception", True),
     ("spoke with contact", "spoke with the office manager at reception", True),           # a title: intended
     ("spoke with contact", "spoke with the assistant manager at reception", True),
+    ("spoke with contact", "spoke to the manager at reception", True),          # the verb's "to" is not "assistant to"
+    ("spoke with contact", "talked to the director at the front desk", True),
+    ("spoke with contact", "spoke to the owner at the front desk", True),
+    ("spoke with contact", "spoke to buyer at reception", True),
+    ("spoke with contact", "spoke to the assistant to the manager at reception", False),   # still the gatekeeper
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),
