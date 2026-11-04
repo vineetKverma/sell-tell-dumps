@@ -14,7 +14,7 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 | **AIML-2898** golden dataset | **Done** (merged with PR #10). Key now v1.4 | — |
 | **AIML-2702** eval harness | **Merged** (PR #10, squash, 2026-10-15) | — |
 | **AIML-2928** ADK 2.10 + prompt fixes | **Merged** (PR #11, squash, 2026-10-26, `a416029`), approved by Suresh. Baseline = three full runs of the merged code (81.0 / 80.0 / 67.8 / 56.3) | — |
-| **AIML-2929** `extract()` go/no-go | **PR #13 open** to `development`, reviewer's last round READY. Code is **frozen**; dev head `1fbae31` pushed (evidence-floor limits documented, U-02 note) | Update the description header line, post the two last replies and resolve, Suresh's approval, then **Squash** merge with a plain message (§6a) |
+| **AIML-2929** `extract()` go/no-go | **PR #13 open** to `development`, dev head `1fbae31` pushed (evidence-floor limits documented, U-02 note, unconfirmed topics keep their summary, role read after the verb); fresh golden run in §6a | Description updated, replies posted; each thread resolved only after Suresh verifies; then his approval and a **Squash** merge with a plain message (§6a) |
 | **AIML-3011 / 3116 / 3117** dialogue steps + `extract()` in the live flow | 8-pointer split into three 3-pointers at Bobby's ask (§11) | Pick in order after 2929 merges |
 | **AIML-3004** | Dev merge **on hold** until 2929 merges | — |
 | **Dev deployment** | Tested end to end; 12 gaps posted to the team (§10) | App fixes 2-6 when Suresh confirms; no code changes until then |
