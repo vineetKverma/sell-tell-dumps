@@ -264,6 +264,13 @@ def test_captured_but_wrong_value():
     ("spoke with contact", "spoke with the buyer at reception", True),          # decision-makers
     ("spoke with contact", "spoke with the CFO at reception", True),
     ("spoke with contact", "spoke with the general manager's assistant at reception", False),
+    ("spoke with contact", "spoke with the assistant to the manager at reception", False),   # the same gatekeeper
+    ("spoke with contact", "spoke with the assistant of the owner at the front desk", False),
+    ("spoke with contact", "spoke with the secretary to the director at reception", False),
+    ("spoke with contact", "spoke with the director of operations at reception", True),   # "of" after the role
+    ("spoke with contact", "spoke with the general manager at reception", True),
+    ("spoke with contact", "spoke with the office manager at reception", True),           # a title: intended
+    ("spoke with contact", "spoke with the assistant manager at reception", True),
     ("no contact", "spoke with the target", False),
     ("spoke with target", "Spoke with Rachel, the property manager", False),
     ("spoke with contact", "left a voicemail", False),

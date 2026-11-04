@@ -70,8 +70,12 @@ _GATEKEEPER = re.compile(r"(?<!head of )(?<!chief of )(?<!director of )"
 _AT_DESK = re.compile(r"\s+(?:at|by|in) (?:the )?(?:front desk|front-desk|frontdesk|reception|lobby)\b")
 # Decision-maker roles only (the buyer too, as extract()'s rules name it): an
 # administrator or coordinator at reception is as likely to be the front desk
-# as the contact. Not a possessive: "the manager's assistant" is not the manager.
-_ROLE = re.compile(r"\b(?:manager|owner|director|gm|supervisor|president|ceo|cfo|coo|vp|buyer)\b(?!['’]s)")
+# as the contact. Not a possessive: "the manager's assistant" is not the manager,
+# nor is "the assistant to the manager" or "the secretary of the owner".
+# A title with a role word in it ("the office manager", "the assistant manager")
+# is the contact on purpose: reps name decision-makers that way.
+_ROLE = re.compile(r"(?<!\bto )(?<!\bto the )(?<!\bof )(?<!\bof the )"
+                   r"\b(?:manager|owner|director|gm|supervisor|president|ceo|cfo|coo|vp|buyer)\b(?!['’]s)")
 
 
 def _spoke_with(value: str) -> str | None:
