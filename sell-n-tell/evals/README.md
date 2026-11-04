@@ -131,7 +131,9 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   words are the rep's, not that they are about the campaign ("Nothing on
   pools" passes); that judgement stays the model's and `over_claimed`
   measures it. Otherwise the topic is `unconfirmed` (the live flow would ask
-  the rep), keeps no summary, and scores as not discussed. The scorecard
+  the rep), drops its evidence but keeps its summary (the question to the rep
+  is built from it; the status marks it unverified), and scores as not
+  discussed. The faithfulness judge sees those summaries too. The scorecard
   reports how many such questions a run would add.
 - `over_claimed` is the share of not-discussed campaigns marked discussed.
   Disposition is n/a: the record carries the facts behind it, not a code.

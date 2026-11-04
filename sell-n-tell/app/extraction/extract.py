@@ -10,7 +10,11 @@ After the call, code (not the model) settles each planned topic:
     ``evidence`` is the rep's own words: found in the dictation and at least
     MIN_EVIDENCE_WORDS different words that are not filler (one word, such as
     "pools", or "the pools", is not evidence). Otherwise it becomes ``unconfirmed`` (the live flow asks
-    the rep about it), never discussed, and its summary is dropped too. The
+    the rep about it), never discussed, and its evidence is dropped. Its
+    summary is kept, marked unverified by the ``unconfirmed`` status: it is
+    what the model heard, so the live flow builds the rep's question from it.
+    This assumes the rep confirms an unconfirmed topic before the record is
+    committed; unconfirmed text must never be saved as confirmed. The
     check proves the words are the rep's, not that they are about the
     campaign ("Nothing on pools" is the rep's words): that judgement stays
     the model's, and the eval measures it (over-claimed);
@@ -237,8 +241,9 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str]) -> ExtractRe
             unconfirmed.append(label)
         topics.append({"topic": label, "status": status,
                        "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
-                       # an unconfirmed topic's summary is as unchecked as its evidence
-                       "summary": (t or {}).get("summary", "") if status == DISCUSSED else ""})
+                       # kept for an unconfirmed topic (the rep's question is built from it);
+                       # the status marks it unverified
+                       "summary": (t or {}).get("summary", "") if status != NOT_DISCUSSED else ""})
     fields = {k.replace("_", "-"): (None if v is None or _norm(v) in NOT_STATED else v)
               for k, v in (raw.get("must_capture") or {}).items()}
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count

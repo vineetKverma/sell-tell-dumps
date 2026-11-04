@@ -324,7 +324,7 @@ def test_one_word_is_not_evidence():
     assert evidence_ok("Nothing on pools", POOLS_NOTE) is True
     over = raw(topics=[{"topic": PLANNED[1], "status": "discussed", "evidence": "pools", "summary": "Pool promo."}])
     t = postprocess(over, POOLS_NOTE, PLANNED).record["topics"][1]
-    assert t["status"] == UNCONFIRMED and t["summary"] == ""
+    assert t["status"] == UNCONFIRMED and t["evidence"] == ""
 
 
 @pytest.mark.xfail(strict=True, reason="known limit: words are counted over the whole quote")
@@ -339,11 +339,20 @@ def test_a_possessive_is_one_word():
     assert evidence_ok("pool's", "Asked about the pool's season.") is False
 
 
-def test_an_unconfirmed_topic_keeps_no_summary():
+def test_an_unconfirmed_topic_keeps_its_summary_but_not_its_evidence():
     r = postprocess(raw(topics=[{"topic": PLANNED[0], "status": "discussed",
                                  "evidence": "they asked about the pool promo",
                                  "summary": "Rep pitched the pool promo and they agreed to 20 cases."}]), NOTE, PLANNED)
-    assert r.record["topics"][0]["status"] == UNCONFIRMED and r.record["topics"][0]["summary"] == ""
+    t = r.record["topics"][0]
+    assert t["status"] == UNCONFIRMED and t["evidence"] == ""       # the part that failed the check
+    assert t["summary"] == "Rep pitched the pool promo and they agreed to 20 cases."   # what the rep is asked about
+    assert r.unconfirmed == [PLANNED[0]]
+
+
+def test_a_topic_not_discussed_keeps_no_summary():
+    r = postprocess(raw(topics=[{"topic": PLANNED[0], "status": "not_discussed",
+                                 "evidence": "", "summary": "Not raised."}]), NOTE, PLANNED)
+    assert r.record["topics"][0]["summary"] == ""
 
 
 def test_the_dictation_cannot_close_its_own_block():
