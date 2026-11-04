@@ -14,7 +14,10 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 | **AIML-2898** golden dataset | **Done** (merged with PR #10). Key now v1.4 | — |
 | **AIML-2702** eval harness | **Merged** (PR #10, squash, 2026-10-15) | — |
 | **AIML-2928** ADK 2.10 + prompt fixes | **Merged** (PR #11, squash, 2026-10-26, `a416029`), approved by Suresh. Baseline = three full runs of the merged code (81.0 / 80.0 / 67.8 / 56.3) | — |
-| **AIML-2929** `extract()` go/no-go | **Branch pushed** (`feature/AIML-2929-text-extraction`, on `development` after PR #11): 20 files, baseline re-exported with over-claimed gated. PR to raise | Raise the PR to `development`; Suresh's go/no-go answer comes on it |
+| **AIML-2929** `extract()` go/no-go | **PR #13 open** to `development`, reviewer's last round READY. Code is **frozen**; dev head `0d2b5bd` pushed (evidence-floor limits documented, U-02 note) | Update the description header line, post the two last replies and resolve, Suresh's approval, then **Squash** merge with a plain message (§6a) |
+| **AIML-3011 / 3116 / 3117** dialogue steps + `extract()` in the live flow | 8-pointer split into three 3-pointers at Bobby's ask (§11) | Pick in order after 2929 merges |
+| **AIML-3004** | Dev merge **on hold** until 2929 merges | — |
+| **Dev deployment** | Tested end to end; 12 gaps posted to the team (§10) | App fixes 2-6 when Suresh confirms; no code changes until then |
 | **AIML-3037** Python 3.11+ runtime | Backlog (raised from the PR #11 review) | — |
 | **AIML-3054** scorecard counters (disposition loss, needless reminders) | Backlog (raised from the PR #11 review) | — |
 | **AIML-2957** golden-data tests in CI | Backlog | — |
@@ -23,13 +26,19 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 
 ### 1. Branches
 
-- `development` holds PR #10 (eval harness) and PR #11 (AIML-2928), plus
-  AIML-2910 (silence watchdog, another team's).
-- `feature/AIML-2929-text-extraction`: rebuilt on `development` after PR #11
-  as one commit: `extract()`, its eval, the harness's per-run app log and
-  never-replied count, and the over-claimed metric gated in the baseline.
+- `origin/development` (`b2266c4`) holds PR #10 (eval harness), PR #11
+  (AIML-2928), AIML-2910 and PR #14 AIML-3006 (silence watchdog), AIML-2823
+  (BigQuery audit logging; `/healthz` gains an `analytics` key when on) and
+  PR #16 (default model `gemini-3.8-live`, set in `voice_notes_agent/agent.py`;
+  AIML-2929 moves the name into a new `voice_notes_agent/model.py`, same value).
+  Pull `development` before comparing against it.
+- `feature/AIML-2929-text-extraction`: development merged in twice; head
+  `0d2b5bd`.
 - An automated review of these branches gave several rounds of findings; the
   triage is in `AIML-2929-review-findings.md`.
+- Commit hygiene: one short line per commit ("AIML-2929: …"), never review
+  rounds or tool names. Five pushed 2929 commits still carry "review round" /
+  "PR #13 review" wording; the Squash merge replaces them.
 - `pyproject.toml` / `uv.lock` are managed with uv and never hand-edited.
 - Stage files by path; never `git add -A`.
 
@@ -156,6 +165,46 @@ Default thinking: same quality on topics/event type, 3× slower and 2–3×
 the cost; 3.8 default has P1 recall 57.1% (fails the proposed ≥ 60%).
 2.5-flash (regional): 91.6 / 92.3 / 2.0% over-claimed, $3.90, 8.1 s.
 
+### 6a. AIML-2929 — final PR figures (what the PR description quotes)
+
+Run `extract-20261102-172210` on `3b97f61`, re-scored with the final scorer
+(same figures); golden key v1.4, 3 runs, scores are the mean, cost and time
+cover the answered calls; gemini-3.8-flash, thinking low, global endpoint.
+
+| Score | Value |
+|---|---|
+| Event type | 90.7% |
+| Topic status | 95.3% |
+| Over-claimed | 0.0% |
+| Faithfulness | 90.3% |
+| P1 / all field recall | 90.3% / 91.2% |
+| Invented values | 1.5% |
+| Value accuracy P1 / all | 80.2% / 77.0% (compare's mean over repeats) |
+| U-02 | 158/159 under all four rule variants (`tools/u02_variants.py`) |
+
+**Closing steps:** description header becomes "**Results** (run
+`extract-20261102-172210` on `3b97f61`, re-scored with the final scorer, same
+figures; golden key v1.4, 3 runs, scores are the mean, cost and time cover the
+answered calls; gemini-3.8-flash, thinking low, global endpoint):"; post the
+replies on the zero-cents nit and the role-at-reception comment, resolve; ask
+Suresh; Squash merge as `AIML-2929: text extraction with a fixed schema, and
+its eval`.
+
+**Freeze rule:** the U-02 and amount rules are regex over free text and never
+converge. New wording edge cases go to a scorer follow-up ticket, reply "Logged
+for the scorer follow-up; it changes value accuracy only, not the go/no-go
+figures." Only a real `extract()` bug or a go/no-go number change goes in.
+
+**What the late scorer work covered** (in `evals/agent_eval/score.py`):
+spoke/talked/met with no-one forms; "contact not available"; a named target
+beats a gatekeeper; decision-maker roles at the desk (`_ROLE`, not possessive)
+count as the contact; amounts compare after `_same_number` (thousands
+separators, trailing zeros, `.0`) with `_within` on word edges. The harness
+refuses an app whose `/healthz` shows `analytics` (or cannot be asked) and
+starts its own with `BQ_ANALYTICS_ENABLED=false`, because golden notes are
+customer notes. `extract()`: evidence needs 2 non-filler words, `_unmark`
+spaces out `<<<`/`>>>`, notes over 10,000 chars are `error_kind="input"`.
+
 **ACs** (Jira text as rewritten):
 1. Schema-valid JSON for every case, no repair; discussed only with a quote;
    unit tests without a model — **met**: 0 errors / 0 dropped labels across
@@ -185,8 +234,12 @@ coverage figure "26%" was counted on damaged names → 66%.
 
 - Dharun: the token-refresh bug (a refresh to `oauth2.googleapis.com` times
   out and kills the live stream). Team: Docker image from `uv.lock`.
-- Suresh: the 26% → 66% correction to the proposal; the AIML-2929 results
-  message (drafted, to go with the PR).
+- Suresh: the 26% → 66% correction to the proposal; AIML-2929 approval on
+  PR #13; confirm dev-deployment items 1, 2, 5 (rate limit, one connection
+  per session, resumption) and 7-9 of the gaps list (§10).
+- Team chat (SellNTell updates): dev test results and the 12-gap list posted;
+  reply to Sainitheesh on `instruction_for_model` posted.
+- Bobby: AIML-3011 split reply (§11).
 - Jira: AIML-2929 (ACs + link the report); AIML-2957 and AIML-2962 linked to
   AIML-2702.
 
@@ -209,6 +262,80 @@ AIML-2929 is its go/no-go for `extract()`. Registry coverage corrected to
 mapping ("confidence, reconfirm when unsure") is in `extract()` as
 evidence-checked topics → `unconfirmed`.
 
+### 10. Dev deployment — tested, gaps posted
+
+Sainitheesh deployed `a074174` to the dev environment (Cloud Run
+`sellntell-dev`, us-central1, `prj-hds-np-data`, revision
+`sellntell-dev-00002-hqt`). Callers need a Google ID token and must be on the
+invoker list. The deployed build is older than `origin/development`: no
+silence watchdog, no 2928 prompt fixes, no BigQuery logging, old model.
+
+**Service settings:** min/max instances 0/5, concurrency 160, timeout 600 s,
+ingress `internal-and-cloud-load-balancing`, `BQ_ANALYTICS_ENABLED=false`,
+`VOICE_NOTES_AGENT_MODEL=gemini-live-2.5-flash-native-audio` (pinned, so a
+redeploy alone keeps the old model), `VOICE_NOTES_VAD_SILENCE_MS=2000`,
+`VOICE_NOTES_RECONNECT_SAME_SESSION=false`.
+
+**How to test it:** only from **Cloud Shell**. On the corporate VPN the DNS
+has no record (public DNS has Cloudflare IPs) and the path asks for TLS
+renegotiation that Python cannot do; curl works for REST only. Turning the
+VPN off is not allowed. `gcloud run services proxy` is refused (ingress is
+load-balancer only). Three test scripts, kept outside the repo (synthetic
+notes, no customer data), run in Cloud Shell with
+`export ID_TOKEN=$(gcloud auth print-identity-token)`: a smoke test (healthz,
+session, WS, one turn), typed scenarios (7 scenarios + protocol guards), and a
+voice test (Cloud TTS
+speech streamed as 16 kHz PCM: transcription, pauses, barge-in, silence,
+noise, multi-topic, 3 at once). Each test leaves sessions under
+`smoketest`/`demotest`/`voicetest` in Agent Engine (no TTL).
+
+**Measured:** 94% of words heard (91% with noise); agent speaks ~3.5 s after
+the rep stops; a visit saves in 12-22 s; waits through a 1.5 s pause; stops
+0.2 s after barge-in and applies the correction; saves only on a yes; skipped
+planned topic asked; off-plan topic captured; Meeting and Phone Call right;
+3/3 parallel visits saved; 4409 on a second connection; 1008 on a bad id.
+
+**Gaps posted to the team** (can't do yet): 1 no silence nudge (old build);
+2 pauses over ~2 s end the turn; 3 read-back after a correction doesn't say
+the new value (`notes_workflow.py` change list); 4 unknown session or another
+`user_id` drops with 1006 (`get_session` raises genai 400 at `main.py` ~1015,
+uncaught); 5 `instruction_for_model` and the raw ADK event stream reach the
+client; 6 typed text logged in full ("Upstream text"); 7 no session TTL,
+resumption on; 8 `user_id` not tied to the caller, no rate limit; 9
+one-connection lock is per instance, max 5; 10 model pinned, BigQuery off;
+11 no browser access (ID token, ingress) and no VPN DNS; 12 cold start.
+Fixable by: redeploy + env (1, 10, plus prompt fixes, CORS, np fallbacks);
+small app changes (2-6); after a decision (7-9); deployment/network (11, 12).
+Items 3 and 4 are also in current development.
+
+**Sainitheesh's questions** (deployment message): we answered 3, 4, 6 as ours
+(log text length only, delete session after commit + short TTL, CORS from
+env / strip `instruction_for_model` from the client copy / remove np
+fallbacks) and gave suggestions for 1, 2, 5 for Suresh to confirm. His
+follow-up on `instruction_for_model`: confirmed the plan — in the downstream
+task, copy the event and delete only that key from function responses before
+`send_text`; the model keeps the original. The UI reads `confirmation_text`,
+`status`, `error`, `missing_topics`, `session_id`, `closing_statement` from
+responses and fills the card from the `stage_visit_notes` call args, so a
+one-key removal keeps everything it needs. Also told him: missing Agent Engine
+ID already fails at startup, project has no np default, we'll add a project
+startup check.
+
+**Eval and the demo:** not needed for the demo. The golden set never goes to
+the deployed URL (customer notes; no TTL, full logging there). Optional: one
+local `agent_eval quick` on the commit before a redeploy. There is no
+committed agent baseline file (`evals/baselines/golden_v1.json` absent).
+
+### 11. AIML-3011 split (Bobby asked for 3-point stories)
+
+| Story | Title | Points |
+|---|---|---|
+| AIML-3011 | Dialogue steps kept in session state (step machine, state in Agent Engine, resume after restart; not used by the live flow yet) | 3 |
+| AIML-3116 | Live agent with one tool, `extract()` in the flow (`dictation_done()`, read-back and topic question from our code, `behavioral_rules.yaml` cut down) | 3 |
+| AIML-3117 | Save gate, corrections, and harness conversations (save only from WAITING_FOR_YES after the latest read-back; harness scripts: happy, skipped topic, correction, no reply) | 3 |
+
+Order 3011 → 3116 → 3117. 3116 and 3117 had no sprint when created.
+
 ### Guided is preserved
 
 Tag `archive/guided-flow` on `9433908`:
@@ -226,7 +353,8 @@ git checkout archive/guided-flow -- app/voice_notes_agent/tools_guided.py
 | **AIML-2702** | Eval harness | **Merged** (PR #10) |
 | **AIML-2898** | Curate the vertical golden dataset | **Done**; data in `gs://sellntell-eval-np` |
 | **AIML-2928** | ADK 2.10 + prompt fixes (5 pts) | **Merged** (PR #11) |
-| **AIML-2929** | Text extraction with a fixed schema, go/no-go (5 pts) | **Done, measured** (§6 above); PR to raise |
+| **AIML-2929** | Text extraction with a fixed schema, go/no-go (5 pts) | **PR #13 open**, READY; closing steps in §6a |
+| **AIML-3011 / 3116 / 3117** | Dialogue steps, one-tool live agent, save gate (3 pts each) | Backlog / sprint (§11) |
 | **AIML-2957** | Run the golden-data tests in CI | Backlog |
 | **AIML-2962** | Web UI and WebSocket follow the session contract | Backlog |
 | **AIML-2751** | Remove the guided flow | **Merged** into `development` |
@@ -261,7 +389,9 @@ we know it worked.
 
 ## 3. Architecture
 
-Checked against `development` at `85b108c`.
+Checked against `development` at `85b108c`; since then development also has
+the BigQuery plugin (AIML-2823), the AIML-3006 watchdog changes and the
+`gemini-3.8-live` default (§1).
 
 ```
 browser mic (16 kHz Int16 PCM, 20 ms chunks)
