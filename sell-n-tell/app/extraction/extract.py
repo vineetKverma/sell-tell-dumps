@@ -186,7 +186,11 @@ def quote_in(quote: str, note: str) -> bool:
 
 def evidence_ok(quote: str, note: str) -> bool:
     """A topic's evidence: the rep's own words (``quote_in``) and at least
-    MIN_EVIDENCE_WORDS different words that are not filler."""
+    MIN_EVIDENCE_WORDS different words that are not filler.
+
+    Known limits, kept: the words are counted over the whole quote, so two
+    one-word parts around an ellipsis pass ("Frank ... pools"), and an
+    apostrophe splits a word ("pool's" is two)."""
     words = set(re.findall(r"\w+", _norm(quote or ""))) - _FILLER
     return len(words) >= MIN_EVIDENCE_WORDS and quote_in(quote, note)
 

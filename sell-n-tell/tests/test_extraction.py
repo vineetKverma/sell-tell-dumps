@@ -327,6 +327,18 @@ def test_one_word_is_not_evidence():
     assert t["status"] == UNCONFIRMED and t["summary"] == ""
 
 
+@pytest.mark.xfail(strict=True, reason="known limit: words are counted over the whole quote")
+def test_one_word_each_side_of_an_ellipsis_is_not_evidence():
+    from app.extraction import evidence_ok
+    assert evidence_ok("Frank ... pools", POOLS_NOTE) is False
+
+
+@pytest.mark.xfail(strict=True, reason="known limit: an apostrophe splits a word")
+def test_a_possessive_is_one_word():
+    from app.extraction import evidence_ok
+    assert evidence_ok("pool's", "Asked about the pool's season.") is False
+
+
 def test_an_unconfirmed_topic_keeps_no_summary():
     r = postprocess(raw(topics=[{"topic": PLANNED[0], "status": "discussed",
                                  "evidence": "they asked about the pool promo",

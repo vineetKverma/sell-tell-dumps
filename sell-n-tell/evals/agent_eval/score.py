@@ -49,7 +49,8 @@ _TALKED = r"(?:spoke (?:with|to)|talked (?:with|to)|met(?: with)?)"
 _SPOKE_WITH = re.compile(rf"^{_TALKED} (?:the |an? )?(\w+)(['’]s\b)?")
 _NOBODY = ("no", "nobody", "noone", "none")
 # "No contact" said either way: the key's wording, or "spoke with no one"
-# ("no one", "no-one", "noone", any dash).
+# ("no one", "no-one", "noone", any dash). "No answer" and "left a voicemail"
+# are the same outcome on purpose: the key's "no contact" means no conversation.
 _NO_ONE = r"no[ \-‐-―]?one"
 _NO_CONTACT = re.compile(rf"^(?:no contact|nobody|{_NO_ONE}|no answer|left (?:a )?voicemail|"
                          rf"contact (?:was )?(?:not available|unavailable)|"
