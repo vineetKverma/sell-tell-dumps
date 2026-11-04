@@ -14,7 +14,7 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 | **AIML-2898** golden dataset | **Done** (merged with PR #10). Key now v1.4 | — |
 | **AIML-2702** eval harness | **Merged** (PR #10, squash, 2026-10-15) | — |
 | **AIML-2928** ADK 2.10 + prompt fixes | **Merged** (PR #11, squash, 2026-10-26, `a416029`), approved by Suresh. Baseline = three full runs of the merged code (81.0 / 80.0 / 67.8 / 56.3) | — |
-| **AIML-2929** `extract()` go/no-go | **PR #13 open** to `development`, reviewer's last round READY. Code is **frozen**; dev head `090f8f5` pushed (evidence-floor limits documented, U-02 note) | Update the description header line, post the two last replies and resolve, Suresh's approval, then **Squash** merge with a plain message (§6a) |
+| **AIML-2929** `extract()` go/no-go | **PR #13 open** to `development`, reviewer's last round READY. Code is **frozen**; dev head `1fbae31` pushed (evidence-floor limits documented, U-02 note) | Update the description header line, post the two last replies and resolve, Suresh's approval, then **Squash** merge with a plain message (§6a) |
 | **AIML-3011 / 3116 / 3117** dialogue steps + `extract()` in the live flow | 8-pointer split into three 3-pointers at Bobby's ask (§11) | Pick in order after 2929 merges |
 | **AIML-3004** | Dev merge **on hold** until 2929 merges | — |
 | **Dev deployment** | Tested end to end; 12 gaps posted to the team (§10) | App fixes 2-6 when Suresh confirms; no code changes until then |
@@ -33,7 +33,7 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
   AIML-2929 moves the name into a new `voice_notes_agent/model.py`, same value).
   Pull `development` before comparing against it.
 - `feature/AIML-2929-text-extraction`: development merged in twice; head
-  `090f8f5`.
+  `1fbae31`.
 - An automated review of these branches gave several rounds of findings; the
   triage is in `AIML-2929-review-findings.md`.
 - Commit hygiene: one short line per commit ("AIML-2929: …"), never review
@@ -167,7 +167,7 @@ the cost; 3.8 default has P1 recall 57.1% (fails the proposed ≥ 60%).
 
 ### 6a. AIML-2929 — final PR figures (what the PR description quotes)
 
-**Current:** run `extract-20261104-235607` on `090f8f5` (unconfirmed topics
+**Current:** run `extract-20261104-235607` on `090f8f5`, re-scored on `1fbae31` (same figures; unconfirmed topics
 keep their summary); golden key v1.4 (`32a1988b`), 3 runs, gemini-3.8-flash,
 thinking low, global endpoint. Event type 95.7, topic status 94.9,
 over-claimed 0.0, faithfulness 92.2, P1 / all recall 90.5 / 91.4, invented
