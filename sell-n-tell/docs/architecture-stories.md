@@ -93,7 +93,8 @@ Acceptance criteria:
 - Each discussed topic gets one code from the registry; a topic not
   discussed has none. The schema allows only the registry's codes.
 - A code other than 99 is kept only with the rep's words for it, checked in
-  code; otherwise it is 99. The scorecard counts these fallbacks.
+  code by the same rule as a topic's evidence; otherwise it is 99. The
+  scorecard counts these fallbacks.
 - Without the option, `extract()`'s prompt, schema and record are unchanged.
 - Unit tests cover the code check, the 99 fallback, the schema and scoring.
 - Disposition is scored on the golden set and compared with the agent's

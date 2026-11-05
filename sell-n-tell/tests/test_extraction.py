@@ -410,6 +410,14 @@ def test_a_code_stays_only_with_the_reps_words_for_it():
     assert t["disposition_code"] == 99 and t["outcome_evidence"] == "" and r.codes_downgraded == [PLANNED[0]]
 
 
+def test_one_outcome_word_is_not_enough_to_keep_a_code():
+    said = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+            "disposition_code": "8", "outcome_evidence": "pricing"}           # in the note, but one word
+    r = postprocess(coded(said), NOTE, PLANNED, sorted(CODES))
+    t = r.record["topics"][0]
+    assert t["disposition_code"] == 99 and t["outcome_evidence"] == "" and r.codes_downgraded == [PLANNED[0]]
+
+
 def test_a_discussed_topic_always_has_a_code_and_others_have_none():
     no_code = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing"}
     unconfirmed = {"topic": PLANNED[1], "status": "discussed", "evidence": "pool heaters",

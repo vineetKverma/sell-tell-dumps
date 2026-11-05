@@ -26,7 +26,8 @@ With ``dispositions`` (AIML-3004), each discussed topic also gets a code from
 the registry, and code settles it too:
 
   - a code other than 99 stays only if ``outcome_evidence`` -- the rep's own
-    words for that outcome -- appears in the dictation; otherwise it becomes
+    words for that outcome -- passes the same check as a topic's evidence (in
+    the dictation, with two different non-filler words); otherwise it becomes
     99 (manual review);
   - a discussed topic with no code is 99; a topic that is not discussed (or
     unconfirmed) has no code.
@@ -258,7 +259,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                 codes: list[int] | None = None) -> ExtractResult:
     """Settle the validated model output into the record (code, not model).
     With ``codes``: a discussed topic keeps a code other than 99 only if the
-    rep's words for it are in the note, otherwise 99; a missing code is 99;
+    rep's words for it pass ``evidence_ok``, otherwise 99; a missing code is 99;
     a topic that is not discussed has none."""
     by_label = {}
     off_plan = []
@@ -291,7 +292,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                 given = (t or {}).get("disposition_code")
                 code = int(given) if given not in (None, "") else NONE_FITS
                 outcome = (t or {}).get("outcome_evidence", "")
-                if code != NONE_FITS and not quote_in(outcome, note):
+                if code != NONE_FITS and not evidence_ok(outcome, note):   # the topic evidence's rule
                     code, outcome = NONE_FITS, ""
                     downgraded.append(label)
                 if code == NONE_FITS:
