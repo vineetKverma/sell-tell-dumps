@@ -418,6 +418,21 @@ def test_one_outcome_word_is_not_enough_to_keep_a_code():
     assert t["disposition_code"] == 99 and t["outcome_evidence"] == "" and r.codes_downgraded == [PLANNED[0]]
 
 
+def test_the_words_of_a_failed_check_are_kept_outside_the_record():
+    thin = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+            "disposition_code": "8", "outcome_evidence": "pricing"}
+    unsure = {"topic": PLANNED[1], "status": "discussed", "evidence": "pool heaters",
+              "disposition_code": "2", "outcome_evidence": "ordered heaters"}
+    r = postprocess(coded(thin, unsure), NOTE, PLANNED, sorted(CODES))
+    assert r.rejected == {PLANNED[0]: {"disposition_code": 8, "outcome_evidence": "pricing"},
+                          PLANNED[1]: {"evidence": "pool heaters", "disposition_code": 2,
+                                       "outcome_evidence": "ordered heaters"}}
+    assert "pricing" not in [t["outcome_evidence"] for t in r.record["topics"]]       # still not in the record
+    assert postprocess(raw(), NOTE, PLANNED).rejected == {}                           # nothing failed, nothing kept
+    r = postprocess(raw(topics=[unsure]), NOTE, PLANNED)                               # without codes: evidence only
+    assert r.rejected == {PLANNED[1]: {"evidence": "pool heaters"}}
+
+
 def test_a_discussed_topic_always_has_a_code_and_others_have_none():
     no_code = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing"}
     unconfirmed = {"topic": PLANNED[1], "status": "discussed", "evidence": "pool heaters",

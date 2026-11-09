@@ -154,6 +154,8 @@ def run_once(cases, catalog, client, model: str, registry, judge, thinking=None,
             s = score_row(case, None, codes)
         return {"id": case.id, "score": s, "record": res.record, "error": res.error,
                 "error_kind": res.error_kind, "codes_downgraded": res.codes_downgraded,
+                # the model's words for each failed check (not in the record)
+                "rejected": res.rejected,
                 "unconfirmed": res.unconfirmed, "off_plan_labels": res.off_plan,
                 "described": sorted(descriptions), "usage": res.usage}
     with ThreadPoolExecutor(WORKERS) as pool:

@@ -250,6 +250,10 @@ class ExtractResult:
     usage: dict[str, Any] = field(default_factory=dict)   # tokens and seconds of the call
     # topics whose code fell back to 99 because its evidence was not in the note
     codes_downgraded: list[str] = field(default_factory=list)
+    # what the model quoted for each check that failed, by topic: its evidence
+    # (unconfirmed) or its code and outcome words (set to 99). Never in the
+    # record; kept so an eval run can show why a check failed.
+    rejected: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 NONE_FITS = 99
@@ -274,13 +278,17 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
             off_plan.append(t["topic"])
         else:
             by_label.setdefault(label, t)          # first entry wins; duplicates ignored
-    topics, unconfirmed, downgraded = [], [], []
+    topics, unconfirmed, downgraded, rejected = [], [], [], {}
     for label in planned:
         t = by_label.get(label)
         status = t["status"] if t else NOT_DISCUSSED
         if status == DISCUSSED and not evidence_ok(t.get("evidence", ""), note):
             status = UNCONFIRMED
             unconfirmed.append(label)
+            rejected[label] = {"evidence": t.get("evidence", ""),
+                               **({"disposition_code": int(t["disposition_code"]) if t.get("disposition_code")
+                                   not in (None, "") else None,
+                                   "outcome_evidence": t.get("outcome_evidence", "")} if codes else {})}
         topic = {"topic": label, "status": status,
                  "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
                  # kept for an unconfirmed topic (the rep's question is built from it);
@@ -293,6 +301,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                 code = int(given) if given not in (None, "") else NONE_FITS
                 outcome = (t or {}).get("outcome_evidence", "")
                 if code != NONE_FITS and not evidence_ok(outcome, note):   # the topic evidence's rule
+                    rejected[label] = {"disposition_code": code, "outcome_evidence": outcome}
                     code, outcome = NONE_FITS, ""
                     downgraded.append(label)
                 if code == NONE_FITS:
@@ -307,7 +316,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
     record = {"event_type": raw["event_type"], "executive_summary": raw.get("executive_summary", ""),
               "topics": topics, "must_capture": fields}
     return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan,
-                         codes_downgraded=downgraded)
+                         codes_downgraded=downgraded, rejected=rejected)
 
 
 def thinking_config(thinking: str | int | None):
