@@ -47,7 +47,7 @@ from evals.agent_eval.baseline import summarise  # noqa: E402
 from evals.agent_eval.cases import EVALSET, GOLDEN_DIR, dataset_sha256, load_cases, load_priorities  # noqa: E402
 from evals.agent_eval.judge import DEFAULT_MODEL as JUDGE_MODEL  # noqa: E402
 from evals.agent_eval.run import scorecard  # noqa: E402
-from evals.agent_eval.score import aggregate, score_case, variance  # noqa: E402
+from evals.agent_eval.score import aggregate, norm, score_case, variance  # noqa: E402
 
 RUNS = ROOT / "evals" / "runs"
 # The top-up and synthetic sets sit next to the golden folder (fetched from
@@ -212,29 +212,37 @@ def disposition_detail(rows: list[dict]) -> dict:
     - codes right where the key says 99 and where it says a real code, and
       what answering 99 every time would score -- 99 is the fallback, so part
       of the score can come from it;
-    - of the real codes kept, how many rest on outcome words that are just
-      the topic's own evidence again -- the code check passes those, though
-      they say nothing about the outcome.
+    - of the real codes kept on the topics the key scores, how many rest on
+      outcome words that are just the topic's own evidence again -- the code
+      check passes those, though they say nothing about the outcome. A real
+      code on a topic the key does not score (a contested label) is counted
+      apart: it cannot be judged.
     """
     def same(a: str, b: str) -> bool:
         return bool(a) and " ".join(a.casefold().split()) == " ".join(b.casefold().split())
-    key_99, key_real, kept, repeated = [0, 0], [0, 0], 0, 0
+    key_99, key_real, kept, repeated, unscored = [0, 0], [0, 0], 0, 0, 0
     for row in rows:
+        scored = set()
         for t in (row.get("score") or {}).get("topics", []):
             if "code_ok" in t:
+                scored.add(norm(t["topic"]))
                 side = key_99 if t["expected_code"] == 99 else key_real
                 side[0] += bool(t["code_ok"])
                 side[1] += 1
         for t in (row.get("record") or {}).get("topics", []):
             if t.get("disposition_code") not in (None, 99):
-                kept += 1
-                repeated += same(t.get("outcome_evidence", ""), t.get("evidence", ""))
+                if norm(t["topic"]) in scored:
+                    kept += 1
+                    repeated += same(t.get("outcome_evidence", ""), t.get("evidence", ""))
+                else:
+                    unscored += 1
     total = key_99[1] + key_real[1]
     pct = lambda right, of: round(100 * right / of, 1) if of else None  # noqa: E731
     return {"key_99": {"right": key_99[0], "of": key_99[1], "pct": pct(*key_99)},
             "key_real_code": {"right": key_real[0], "of": key_real[1], "pct": pct(*key_real)},
             "always_99_pct": pct(key_99[1], total),
-            "real_codes_kept": kept, "kept_on_the_topic_evidence_again": repeated}
+            "real_codes_kept": kept, "kept_on_the_topic_evidence_again": repeated,
+            "real_codes_on_topics_not_scored": unscored}
 
 
 def detail_line(d: dict) -> str:
@@ -243,7 +251,9 @@ def detail_line(d: dict) -> str:
     return (f"\n\nDisposition by the key's code, over all repeats: {k99['right']}/{k99['of']} right where the key "
             f"says 99 ({k99['pct']}%), {real['right']}/{real['of']} where it says a real code ({real['pct']}%); "
             f"answering 99 every time would score {d['always_99_pct']}%. Of {d['real_codes_kept']} real codes "
-            f"kept, {d['kept_on_the_topic_evidence_again']} rest on the topic's own evidence quoted again.")
+            f"kept, {d['kept_on_the_topic_evidence_again']} rest on the topic's own evidence quoted again"
+            + (f"; {d['real_codes_on_topics_not_scored']} more are on topics the key does not score"
+               if d.get("real_codes_on_topics_not_scored") else "") + ".")
 
 
 def rescore_rows(cases, rows: list[dict], codes: bool = False) -> list[dict]:

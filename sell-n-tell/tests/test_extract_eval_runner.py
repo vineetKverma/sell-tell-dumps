@@ -474,6 +474,12 @@ def test_disposition_detail_splits_by_the_keys_code_and_counts_repeated_evidence
     assert d["key_real_code"] == {"right": 1, "of": 2, "pct": 50.0}
     assert d["always_99_pct"] == 50.0
     assert d["real_codes_kept"] == 2 and d["kept_on_the_topic_evidence_again"] == 1
-    assert "1/2 right where the key says 99" in detail_line(d)
+    assert d["real_codes_on_topics_not_scored"] == 0
+    assert "1/2 right where the key says 99" in detail_line(d) and "does not score" not in detail_line(d)
+    contested = row(2, True, 2, "pool pricing", "placed an order")
+    contested["record"]["topics"][1].update(status="discussed", disposition_code=8)   # U: the key does not score it
+    d = disposition_detail([contested])
+    assert d["real_codes_kept"] == 1 and d["real_codes_on_topics_not_scored"] == 1
+    assert "1 more are on topics the key does not score" in detail_line(d)
     empty = disposition_detail([])
     assert empty["key_99"]["pct"] is None and empty["always_99_pct"] is None
