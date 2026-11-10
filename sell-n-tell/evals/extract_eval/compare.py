@@ -41,6 +41,10 @@ def row(run: Path, set_name: str) -> dict:
             "unconfirmed": entry.get("unconfirmed_topics_per_run"),
             # codes set to 99 for want of the rep's words (runs with --dispositions)
             "codes_to_99": entry.get("codes_downgraded_per_run"),
+            # disposition where the key says 99 / a real code, and what always answering 99 scores
+            "disp_key_99": ((entry.get("disposition_detail") or {}).get("key_99") or {}).get("pct"),
+            "disp_key_real": ((entry.get("disposition_detail") or {}).get("key_real_code") or {}).get("pct"),
+            "always_99": (entry.get("disposition_detail") or {}).get("always_99_pct"),
             "usd_per_1k": use.get("cost_per_1000_notes_usd"), "usd_per_1k_2027": use.get("cost_per_1000_notes_usd_from_2027"),
             "p50_s": use.get("seconds_p50"), "p95_s": use.get("seconds_p95"),
             "in_tok": use.get("input_tokens_per_note"), "out_tok": use.get("output_tokens_per_note")}
@@ -49,7 +53,7 @@ def row(run: Path, set_name: str) -> dict:
 def table(rows: list[dict]) -> str:
     head = ["run", "model", "thinking", "location", "key", "repeats", "limit", "descriptions",
             "labelling_model", "judge", "unjudged", *COLUMNS, "value_acc_P1", "value_acc_all", "errors", "dropped",
-            "unconfirmed", "codes_to_99", "usd_per_1k", "usd_per_1k_2027", "p50_s", "p95_s", "in_tok", "out_tok", "invalid"]
+            "unconfirmed", "codes_to_99", "disp_key_99", "disp_key_real", "always_99", "usd_per_1k", "usd_per_1k_2027", "p50_s", "p95_s", "in_tok", "out_tok", "invalid"]
     def fmt(h, v):
         if v is None:
             return ""

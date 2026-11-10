@@ -3,6 +3,11 @@
 Read from the agent's own registry (resources/dispositions.yaml), so both
 choose from the same list with the same cues: codes 1-10 plus 99, "outcome
 not covered".
+
+The file is read here, not through ``voice_notes_agent.notes_workflow``, on
+purpose: importing anything from that package builds the live agent and logs
+in, which extract() and its eval must not need. A test holds the two readers
+to the same codes and labels.
 """
 
 from __future__ import annotations

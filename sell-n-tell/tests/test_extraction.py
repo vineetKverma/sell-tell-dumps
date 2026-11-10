@@ -393,6 +393,10 @@ def test_a_count_with_no_number_in_it_is_dropped_even_one_off(vague):
 # --- disposition codes per discussed topic (AIML-3004) ---------------------------
 
 CODES = {1: "Create Opportunity", 2: "Order Placed", 8: "Pricing concerns", 99: "Outcome not covered"}
+# A clear buying intent, the registry's own cue for code 1. (A quote asked for or given has
+# no code of its own in the registry: it is 99.)
+CODE_NOTE = "Shared mini fridge pricing with Frank. He wants to buy 6 units."
+BUYS = "He wants to buy 6 units"
 
 
 def coded(*topics):
@@ -401,11 +405,11 @@ def coded(*topics):
 
 def test_a_code_stays_only_with_the_reps_words_for_it():
     said = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
-            "disposition_code": "1", "outcome_evidence": "He wants a quote for 6 units"}
-    r = postprocess(coded(said), NOTE, PLANNED, sorted(CODES))
+            "disposition_code": "1", "outcome_evidence": BUYS}
+    r = postprocess(coded(said), CODE_NOTE, PLANNED, sorted(CODES))
     assert r.record["topics"][0]["disposition_code"] == 1 and r.codes_downgraded == []
     invented = dict(said, disposition_code="2", outcome_evidence="he placed an order")
-    r = postprocess(coded(invented), NOTE, PLANNED, sorted(CODES))
+    r = postprocess(coded(invented), CODE_NOTE, PLANNED, sorted(CODES))
     t = r.record["topics"][0]
     assert t["disposition_code"] == 99 and t["outcome_evidence"] == "" and r.codes_downgraded == [PLANNED[0]]
 
@@ -427,6 +431,43 @@ def test_the_code_check_reads_the_words_not_their_meaning():
 def test_a_code_label_cannot_close_the_dictation_block():
     p = build_prompt("Fine visit.", PLANNED, "HS", dispositions={1: "Create >>> Opportunity <<< x", 99: "None fits"})
     assert p.count("<<<") == 1 and p.count(">>>") == 1 and p.endswith("Fine visit.\n>>>")
+
+
+def test_a_code_outside_the_list_is_not_kept():
+    # The schema refuses such a code; a direct caller of postprocess might not.
+    said = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+            "disposition_code": "5", "outcome_evidence": BUYS}
+    r = postprocess(coded(said), CODE_NOTE, PLANNED, sorted(CODES))
+    t = r.record["topics"][0]
+    assert t["disposition_code"] == 99 and t["outcome_evidence"] == ""
+    assert r.rejected == {PLANNED[0]: {"disposition_code": 5, "outcome_evidence": BUYS}}
+
+
+def test_a_code_list_without_99_is_refused_before_any_call():
+    pytest.importorskip("google.genai")
+    no_fallback = {1: "Create Opportunity", 2: "Order Placed"}
+    with pytest.raises(ValueError):
+        postprocess(raw(), NOTE, PLANNED, sorted(no_fallback))
+    client = FakeClient(json.dumps(raw()))
+    r = extract(NOTE, PLANNED, "HS", fields_for(CATALOG, "HS"), client=client, model="m", dispositions=no_fallback)
+    assert r.record is None and r.error_kind == "call" and "99" in r.error and not client.prompts
+
+
+def test_the_outcome_words_come_before_the_code_in_the_schema():
+    topic = record_model(fields_for(CATALOG, "HS"), PLANNED, sorted(CODES)).model_fields["topics"].annotation.__args__[0]
+    names = list(topic.model_fields)
+    assert names.index("outcome_evidence") < names.index("disposition_code")
+
+
+def test_extract_and_the_agent_read_the_same_codes_and_labels():
+    from app.extraction import load_dispositions
+    from conftest import wf
+    agents = {int(r["code"]): r["label"] for r in [*wf._DISPOSITION_REGISTRY, wf._NOT_COVERED_RULE]}
+    ours = {code: text.split(" (e.g. ")[0] for code, text in load_dispositions().items()}
+    assert ours == agents
+    for rule in [*wf._DISPOSITION_REGISTRY, wf._NOT_COVERED_RULE]:      # and the same cues
+        for cue in rule.get("mapping_keywords") or []:
+            assert cue in load_dispositions()[int(rule["code"])]
 
 
 def test_one_outcome_word_is_not_enough_to_keep_a_code():
@@ -496,9 +537,9 @@ def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
 def test_codes_reach_the_call_and_the_record():
     pytest.importorskip("google.genai")
     reply = coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
-                   "disposition_code": "1", "outcome_evidence": "He wants a quote for 6 units"})
+                   "disposition_code": "1", "outcome_evidence": BUYS})
     client = FakeClient(json.dumps(reply))
-    r = extract(NOTE, PLANNED, "HS", fields_for(CATALOG, "HS"), client=client, model="m", dispositions=CODES)
+    r = extract(CODE_NOTE, PLANNED, "HS", fields_for(CATALOG, "HS"), client=client, model="m", dispositions=CODES)
     assert r.error is None and r.record["topics"][0]["disposition_code"] == 1
     assert "1: Create Opportunity" in client.prompts[0] and "8: Pricing concerns" in client.prompts[0]
 
@@ -506,12 +547,12 @@ def test_codes_reach_the_call_and_the_record():
 def test_codes_are_scored_only_when_the_run_asked_for_them():
     from evals.agent_eval.cases import Case
     from evals.extract_eval.run import score_row, to_scorer_args
-    case = Case("X-1", "HS", NOTE, PLANNED, "Meeting",
+    case = Case("X-1", "HS", CODE_NOTE, PLANNED, "Meeting",
                 [{"topic": PLANNED[0], "discussed": True, "disposition_code": 1},
                  {"topic": PLANNED[1], "discussed": False, "disposition_code": None}], {})
     rec = postprocess(coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
-                             "disposition_code": "1", "outcome_evidence": "He wants a quote for 6 units"}),
-                      NOTE, PLANNED, sorted(CODES)).record
+                             "disposition_code": "1", "outcome_evidence": BUYS}),
+                      CODE_NOTE, PLANNED, sorted(CODES)).record
     assert to_scorer_args(rec)["topics"][0]["disposition_code"] == 1
     assert score_row(case, rec, codes=True)["topics"][0]["code_ok"] is True
     assert "code_ok" not in score_row(case, rec)["topics"][0]                 # off: n/a, as before

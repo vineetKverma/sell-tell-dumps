@@ -143,6 +143,11 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   non-filler words) becomes 99. That proves the words are the rep's, not
   that they state that outcome; whether the code is right is what the
   disposition score measures. Disposition is then scored and compared.
+  99 is the fallback, so the scorecard also gives disposition where the key
+  says 99 and where it says a real code, what answering 99 every time would
+  score, and how many kept codes rest on the topic's own evidence quoted
+  again. The golden set scores 30 topics; three repeats at temperature 0 are
+  near-identical, so read disposition as about 30 results, not 90.
 - A run saves each settled record, not the model's raw reply; next to it,
   `rejected` keeps the model's words for each check that failed (a topic's
   evidence, or a code's outcome words), so a miss can be traced. `--rescore`

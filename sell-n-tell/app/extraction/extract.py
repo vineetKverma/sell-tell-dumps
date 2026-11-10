@@ -111,13 +111,15 @@ def record_model(fields: list[Field], planned: list[str] | None = None,
     if labels:
         extra["topic"] = (Literal[labels], pydantic.Field(description="The planned topic's label."))
     if codes:
+        # The words come before the code, so the model quotes the rep first
+        # and chooses the code from what it quoted.
+        extra["outcome_evidence"] = (str, pydantic.Field(
+            default="", description="For a code other than 99: the rep's own words about the outcome, "
+                                    "copied verbatim from the dictation. Empty otherwise."))
         extra["disposition_code"] = (Optional[Literal[tuple(str(c) for c in codes)]], pydantic.Field(
             default=None, description="For a discussed topic: the outcome code that matches what the rep "
                                       "said about this campaign; 99 when no code fits or no outcome was "
                                       "stated. Null when not discussed."))
-        extra["outcome_evidence"] = (str, pydantic.Field(
-            default="", description="For a code other than 99: the rep's own words about the outcome, "
-                                    "copied verbatim from the dictation. Empty otherwise."))
     if extra:
         topic = pydantic.create_model("PlannedTopic", __base__=TopicResult, **extra)
     return pydantic.create_model(
@@ -265,12 +267,21 @@ class ExtractResult:
 NONE_FITS = 99
 
 
+def _code_of(topic: dict[str, Any] | None) -> int | None:
+    """The code the model gave a topic, as a number; None when it gave none."""
+    given = (topic or {}).get("disposition_code")
+    return None if given in (None, "") else int(given)
+
+
 def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                 codes: list[int] | None = None) -> ExtractResult:
     """Settle the validated model output into the record (code, not model).
-    With ``codes``: a discussed topic keeps a code other than 99 only if the
-    rep's words for it pass ``evidence_ok``, otherwise 99; a missing code is 99;
-    a topic that is not discussed has none."""
+    With ``codes``: a discussed topic keeps a code other than 99 only if it
+    is one of ``codes`` and the rep's words for it pass ``evidence_ok``,
+    otherwise 99; a missing code is 99; a topic that is not discussed has
+    none. ``codes`` must include 99, the code every fallback writes."""
+    if codes and NONE_FITS not in codes:
+        raise ValueError(f"the disposition codes must include {NONE_FITS}, the fallback")
     by_label = {}
     off_plan = []
     planned = list(dict.fromkeys(planned))         # a title planned twice is one topic
@@ -291,10 +302,9 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
         if status == DISCUSSED and not evidence_ok(t.get("evidence", ""), note):
             status = UNCONFIRMED
             unconfirmed.append(label)
-            rejected[label] = {"evidence": t.get("evidence", ""),
-                               **({"disposition_code": int(t["disposition_code"]) if t.get("disposition_code")
-                                   not in (None, "") else None,
-                                   "outcome_evidence": t.get("outcome_evidence", "")} if codes else {})}
+            rejected[label] = {"evidence": t.get("evidence", "")}
+            if codes:
+                rejected[label].update(disposition_code=_code_of(t), outcome_evidence=t.get("outcome_evidence", ""))
         topic = {"topic": label, "status": status,
                  "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
                  # kept for an unconfirmed topic (the rep's question is built from it);
@@ -303,10 +313,12 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
         if codes:
             code, outcome = None, ""
             if status == DISCUSSED:
-                given = (t or {}).get("disposition_code")
-                code = int(given) if given not in (None, "") else NONE_FITS
+                code = _code_of(t)
+                code = NONE_FITS if code is None else code
                 outcome = (t or {}).get("outcome_evidence", "")
-                if code != NONE_FITS and not evidence_ok(outcome, note):   # the topic evidence's rule
+                # A code outside the list (the schema refuses it; a direct caller might not),
+                # or one whose words fail the topic evidence's rule, is not kept.
+                if code != NONE_FITS and (code not in codes or not evidence_ok(outcome, note)):
                     rejected[label] = {"disposition_code": code, "outcome_evidence": outcome}
                     code, outcome = NONE_FITS, ""
                     downgraded.append(label)
@@ -353,6 +365,8 @@ def extract(note: str, planned: list[str], vertical: str, fields: list[Field], *
     started = time.monotonic()
     try:        # the setup is inside too: a bad setting is an error result, not a crash
         codes = sorted(dispositions) if dispositions else None
+        if codes and NONE_FITS not in codes:        # refused before any call: no code to fall back to
+            raise ValueError(f"dispositions must include code {NONE_FITS}, the fallback")
         schema = record_model(fields, planned, codes)
         config = types.GenerateContentConfig(temperature=0, response_mime_type="application/json",
                                              response_schema=schema, thinking_config=thinking_config(thinking))

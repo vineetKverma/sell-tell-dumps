@@ -444,9 +444,36 @@ def test_with_dispositions_the_codes_are_asked_for_scored_and_kept_on_rescore(mo
     assert summary["dispositions"] is True and all("99: Outcome not covered" in p for p in model.prompts)
     assert golden["scores"]["disposition"]["mean"] == 0.0              # nothing discussed: every code a miss
     assert golden["codes_downgraded_per_run"] == 0.0
+    detail = golden["disposition_detail"]
+    assert detail["key_99"]["right"] == detail["key_real_code"]["right"] == 0 and detail["real_codes_kept"] == 0
+    assert "Disposition by the key's code" in (out / "scorecard_golden.md").read_text(encoding="utf-8")
 
     monkeypatch.setattr(run, "_client", lambda location: pytest.fail("a re-score must not call the model"))
     monkeypatch.setattr(sys, "argv", ["run", "--rescore", str(out)])
     run.main()
     after = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert after["dispositions"] is True and after["sets"]["golden"]["scores"] == golden["scores"]
+
+
+def test_disposition_detail_splits_by_the_keys_code_and_counts_repeated_evidence():
+    from evals.extract_eval.run import detail_line, disposition_detail
+
+    def row(expected, ok, code, evidence, outcome):
+        return {"score": {"topics": [{"topic": "T", "expected_code": expected, "code_ok": ok},
+                                     {"topic": "U"}]},                     # the key says not discussed: not counted
+                "record": {"topics": [{"topic": "T", "status": "discussed", "disposition_code": code,
+                                       "evidence": evidence, "outcome_evidence": outcome},
+                                      {"topic": "U", "status": "not_discussed", "disposition_code": None}]}}
+    rows = [row(99, True, 99, "pool pricing", ""),                          # the fallback, right
+            row(99, False, 1, "pool pricing", "wants to buy two"),          # a real code where the key says 99
+            row(2, True, 2, "pool pricing", "Pool  PRICING"),               # kept on the topic's evidence again
+            row(3, False, 99, "pool pricing", ""),
+            {"score": None, "record": None}]                                # a failed call: nothing to count
+    d = disposition_detail(rows)
+    assert d["key_99"] == {"right": 1, "of": 2, "pct": 50.0}
+    assert d["key_real_code"] == {"right": 1, "of": 2, "pct": 50.0}
+    assert d["always_99_pct"] == 50.0
+    assert d["real_codes_kept"] == 2 and d["kept_on_the_topic_evidence_again"] == 1
+    assert "1/2 right where the key says 99" in detail_line(d)
+    empty = disposition_detail([])
+    assert empty["key_99"]["pct"] is None and empty["always_99_pct"] is None

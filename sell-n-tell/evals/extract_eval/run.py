@@ -206,6 +206,46 @@ def usage_summary(rows: list[dict], model: str, prices: dict) -> dict:
     return out
 
 
+def disposition_detail(rows: list[dict]) -> dict:
+    """What the one disposition figure hides, over every repeat's rows:
+
+    - codes right where the key says 99 and where it says a real code, and
+      what answering 99 every time would score -- 99 is the fallback, so part
+      of the score can come from it;
+    - of the real codes kept, how many rest on outcome words that are just
+      the topic's own evidence again -- the code check passes those, though
+      they say nothing about the outcome.
+    """
+    def same(a: str, b: str) -> bool:
+        return bool(a) and " ".join(a.casefold().split()) == " ".join(b.casefold().split())
+    key_99, key_real, kept, repeated = [0, 0], [0, 0], 0, 0
+    for row in rows:
+        for t in (row.get("score") or {}).get("topics", []):
+            if "code_ok" in t:
+                side = key_99 if t["expected_code"] == 99 else key_real
+                side[0] += bool(t["code_ok"])
+                side[1] += 1
+        for t in (row.get("record") or {}).get("topics", []):
+            if t.get("disposition_code") not in (None, 99):
+                kept += 1
+                repeated += same(t.get("outcome_evidence", ""), t.get("evidence", ""))
+    total = key_99[1] + key_real[1]
+    pct = lambda right, of: round(100 * right / of, 1) if of else None  # noqa: E731
+    return {"key_99": {"right": key_99[0], "of": key_99[1], "pct": pct(*key_99)},
+            "key_real_code": {"right": key_real[0], "of": key_real[1], "pct": pct(*key_real)},
+            "always_99_pct": pct(key_99[1], total),
+            "real_codes_kept": kept, "kept_on_the_topic_evidence_again": repeated}
+
+
+def detail_line(d: dict) -> str:
+    """The scorecard's sentence for ``disposition_detail``."""
+    k99, real = d["key_99"], d["key_real_code"]
+    return (f"\n\nDisposition by the key's code, over all repeats: {k99['right']}/{k99['of']} right where the key "
+            f"says 99 ({k99['pct']}%), {real['right']}/{real['of']} where it says a real code ({real['pct']}%); "
+            f"answering 99 every time would score {d['always_99_pct']}%. Of {d['real_codes_kept']} real codes "
+            f"kept, {d['kept_on_the_topic_evidence_again']} rest on the topic's own evidence quoted again.")
+
+
 def rescore_rows(cases, rows: list[dict], codes: bool = False) -> list[dict]:
     """Score saved records again against the current answer key (e.g. after a
     key correction). The judge's verdicts are kept: the summaries did not
@@ -353,7 +393,8 @@ def main() -> None:
                  "dropped_topic_labels": dropped,
                  "unconfirmed_topics_per_run": round(unconfirmed / args.repeats, 1),
                  # codes set to 99 because the rep's words for them were not in the note
-                 **({"codes_downgraded_per_run": round(downgraded / args.repeats, 1)} if args.dispositions else {}),
+                 **({"codes_downgraded_per_run": round(downgraded / args.repeats, 1),
+                     "disposition_detail": disposition_detail(all_rows)} if args.dispositions else {}),
                  "usage": usage, "scores": summarise(runs) if runs else {},
                  # recall counts any filled field; this is how many of those match the key
                  "value_accuracy": {p: _mean_pct([(r["all"]["fields"].get(p) or {}).get("value_accuracy")
@@ -391,6 +432,7 @@ def main() -> None:
                             f"would ask): {entry['unconfirmed_topics_per_run']} per run."
                             + (f" Disposition codes set to 99 for want of the rep's words: "
                                f"{entry['codes_downgraded_per_run']} per run." if args.dispositions else "")
+                            + (detail_line(entry["disposition_detail"]) if args.dispositions else "")
                             + "\n\n"
                             f"Cost: {usage['input_tokens_per_note']} input + {usage['output_tokens_per_note']} "
                             f"output tokens per note, {usage['seconds_p50']} s median / {usage['seconds_p95']} s p95 "
