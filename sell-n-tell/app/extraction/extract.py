@@ -31,6 +31,11 @@ the registry, and code settles it too:
     99 (manual review);
   - a discussed topic with no code is 99; a topic that is not discussed (or
     unconfirmed) has no code.
+
+That check proves the outcome words are the rep's, not that they state that
+outcome for that topic: a negated outcome ("did not place an order"), another
+topic's outcome, or the topic's own evidence quoted again all pass. Whether
+the code is right stays the model's call; the eval measures it as disposition.
 """
 
 from __future__ import annotations
@@ -179,7 +184,7 @@ def build_prompt(note: str, planned: list[str], vertical: str,
     note = _unmark(note)
     codes = ""
     if dispositions:
-        code_lines = "\n".join(f"  {c}: {label}" for c, label in dispositions.items())
+        code_lines = "\n".join(f"  {c}: {_unmark(label)}" for c, label in dispositions.items())
         codes = f"{CODES_RULE}\n\nOutcome codes:\n{code_lines}\n"
     return (f"{RULES}{codes}\nAccount vertical: {vertical}\n\nPlanned topics (the topic field is the label "
             f"only, never the description):\n{topic_lines}\n\nDictation:\n<<<\n{note}\n>>>")
@@ -252,7 +257,8 @@ class ExtractResult:
     codes_downgraded: list[str] = field(default_factory=list)
     # what the model quoted for each check that failed, by topic: its evidence
     # (unconfirmed) or its code and outcome words (set to 99). Never in the
-    # record; kept so an eval run can show why a check failed.
+    # record; kept so an eval run can show why a check failed. These are the
+    # rep's words: the live flow must not log them.
     rejected: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 

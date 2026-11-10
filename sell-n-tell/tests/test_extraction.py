@@ -410,6 +410,25 @@ def test_a_code_stays_only_with_the_reps_words_for_it():
     assert t["disposition_code"] == 99 and t["outcome_evidence"] == "" and r.codes_downgraded == [PLANNED[0]]
 
 
+def test_the_code_check_reads_the_words_not_their_meaning():
+    # The limit, pinned: the check proves the outcome words are the rep's, not
+    # that they state that outcome for that topic. Whether the code is right
+    # stays the model's call; the eval measures it as disposition.
+    note = ("Shared mini fridge pricing with Frank. He did not place an order. "
+            "For pool heaters they placed an order for 12 heaters.")
+    for words in ("place an order",                            # the rep said the opposite
+                  "they placed an order for 12 heaters",       # another topic's outcome
+                  "Shared mini fridge pricing with Frank"):    # the topic's evidence again
+        said = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
+                "disposition_code": "2", "outcome_evidence": words}
+        assert postprocess(coded(said), note, PLANNED, sorted(CODES)).record["topics"][0]["disposition_code"] == 2, words
+
+
+def test_a_code_label_cannot_close_the_dictation_block():
+    p = build_prompt("Fine visit.", PLANNED, "HS", dispositions={1: "Create >>> Opportunity <<< x", 99: "None fits"})
+    assert p.count("<<<") == 1 and p.count(">>>") == 1 and p.endswith("Fine visit.\n>>>")
+
+
 def test_one_outcome_word_is_not_enough_to_keep_a_code():
     said = {"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
             "disposition_code": "8", "outcome_evidence": "pricing"}           # in the note, but one word
@@ -477,23 +496,23 @@ def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
 def test_codes_reach_the_call_and_the_record():
     pytest.importorskip("google.genai")
     reply = coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
-                   "disposition_code": "8", "outcome_evidence": "mini fridge pricing"})
+                   "disposition_code": "1", "outcome_evidence": "He wants a quote for 6 units"})
     client = FakeClient(json.dumps(reply))
     r = extract(NOTE, PLANNED, "HS", fields_for(CATALOG, "HS"), client=client, model="m", dispositions=CODES)
-    assert r.error is None and r.record["topics"][0]["disposition_code"] == 8
-    assert "8: Pricing concerns" in client.prompts[0]
+    assert r.error is None and r.record["topics"][0]["disposition_code"] == 1
+    assert "1: Create Opportunity" in client.prompts[0] and "8: Pricing concerns" in client.prompts[0]
 
 
 def test_codes_are_scored_only_when_the_run_asked_for_them():
     from evals.agent_eval.cases import Case
     from evals.extract_eval.run import score_row, to_scorer_args
     case = Case("X-1", "HS", NOTE, PLANNED, "Meeting",
-                [{"topic": PLANNED[0], "discussed": True, "disposition_code": 8},
+                [{"topic": PLANNED[0], "discussed": True, "disposition_code": 1},
                  {"topic": PLANNED[1], "discussed": False, "disposition_code": None}], {})
     rec = postprocess(coded({"topic": PLANNED[0], "status": "discussed", "evidence": "mini fridge pricing",
-                             "disposition_code": "8", "outcome_evidence": "mini fridge pricing"}),
+                             "disposition_code": "1", "outcome_evidence": "He wants a quote for 6 units"}),
                       NOTE, PLANNED, sorted(CODES)).record
-    assert to_scorer_args(rec)["topics"][0]["disposition_code"] == 8
+    assert to_scorer_args(rec)["topics"][0]["disposition_code"] == 1
     assert score_row(case, rec, codes=True)["topics"][0]["code_ok"] is True
     assert "code_ok" not in score_row(case, rec)["topics"][0]                 # off: n/a, as before
     assert score_row(case, None, codes=True)["topics"][0]["code_ok"] is False  # a reply that was no record

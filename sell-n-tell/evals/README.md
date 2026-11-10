@@ -140,7 +140,9 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   With `--dispositions` (AIML-3004) each discussed topic also gets a code from
   the agent's registry, with the rep's words for it; a code other than 99
   whose words fail the topic evidence's check (in the note, two different
-  non-filler words) becomes 99. Disposition is then scored and compared.
+  non-filler words) becomes 99. That proves the words are the rep's, not
+  that they state that outcome; whether the code is right is what the
+  disposition score measures. Disposition is then scored and compared.
 - A run saves each settled record, not the model's raw reply; next to it,
   `rejected` keeps the model's words for each check that failed (a topic's
   evidence, or a code's outcome words), so a miss can be traced. `--rescore`
