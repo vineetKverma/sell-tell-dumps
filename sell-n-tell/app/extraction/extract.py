@@ -159,6 +159,11 @@ Rules:
 - Must-capture fields: fill a field only when the rep states it. Never infer, guess or
   pad; null is the normal answer. Store dimensions like 4x4, keeping the rep's unit if
   given. In Trades, trucks count the way units or properties do in other verticals.
+- Commercial outcome (U-04) and service issue (U-07) are categories. Start the value with
+  the category, in these words -- U-04: order placed, quote created, quote pending approval
+  or return/credit; U-07: backorder, mispick, damage, missing item, ETA request or warranty
+  -- then the detail after a colon ("order placed: PO received", "mispick: wrong keypad
+  sent"). If no category fits what the rep said, describe it without one.
 - Next step (U-09): when the rep says what will happen next, record it as
   "action | owner | date", leaving owner or date empty when the rep does not say them
   ("email quote | |", "follow up | | next week"). Record the action even with no owner
@@ -192,8 +197,10 @@ def build_prompt(note: str, planned: list[str], vertical: str,
         f"{_unmark(descriptions.get(t) or '(no description; judge by the label)')}"
         for i, t in enumerate(planned, 1)
     ) or "(none)"
-    # The same units postprocess copies the evidence from, each under its number.
-    note = "\n".join(f"[{i}] {_unmark(s)}" for i, s in enumerate(sentences(note), 1))
+    # The same units postprocess copies the evidence from, each under its number, run
+    # together as one text: one sentence per line made a lone "we spoke on the phone"
+    # outweigh the meeting around it (event type 237/258 against 245/258, D-80).
+    note = " ".join(f"[{i}] {_unmark(s)}" for i, s in enumerate(sentences(note), 1))
     codes = ""
     if dispositions:
         code_lines = "\n".join(f"  {c}: {_unmark(label)}" for c, label in dispositions.items())

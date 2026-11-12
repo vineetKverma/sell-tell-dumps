@@ -127,8 +127,9 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   them unless `--allow-labelling-model` is passed, and the scorecard then says
   so.
 - Evidence is given by sentence number (AIML-3152): the prompt shows the
-  dictation as numbered sentences (each line, split where a sentence ends),
-  the model lists the numbers, and code copies those sentences into the
+  dictation as numbered sentences (each line, split where a sentence ends,
+  run together as one text: one per line made event type worse), the model
+  lists the numbers, and code copies those sentences into the
   record. The model never types evidence, so it cannot misquote it; a number
   that is not a sentence of the note is ignored (a run saves those as
   `ignored_lines`). Evidence can be no finer than a sentence: a note with no
