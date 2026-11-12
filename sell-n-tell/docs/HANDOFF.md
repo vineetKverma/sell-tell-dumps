@@ -17,6 +17,7 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 | **AIML-2929** `extract()` go/no-go | **Merged** (PR #13, squash), approved by Suresh. Final head `1fbae31`; results in §6a | — |
 | **AIML-3011 / 3116 / 3117** dialogue steps + `extract()` in the live flow | 8-pointer split into three 3-pointers at Bobby's ask (§11) | Pick in order after 2929 merges |
 | **AIML-3004** disposition code per discussed topic | **Merged** (PR #17, squash), approved by Suresh. Final head `2aabf50`; run `extract-20261110-230607`: disposition 85.6% (agent 67.8%; 25 against 20 of 30 topics, p = 0.23), over-claimed 0%, no wrong code; details in decisions D-73 to D-77 | Follow-up story after the business answers (material left, a quote, a brand refusal): evidence by sentence number, the topic rule, the key correction |
+| **AIML-3152** extract() follow-up | **In progress**, branch `feature/AIML-3152-extract-followup`, no PR yet. Done and measured: evidence by sentence number (the model cites sentence numbers, code copies the words). Run `extract-20261112-151039`: disposition 90.0% (85.6%), topic status 98.2%, unconfirmed 0.0, over-claimed 1/300; value accuracy 75.0% (77.3%) from rewording, event type 237/258 (240); details in decision D-78 | Waits for the business answers (material left, a quote, another brand): the topic and quote rules, the answer-key correction, one more golden run, then the PR |
 | **Dev deployment** | Tested end to end; 12 gaps posted to the team (§10) | App fixes 2-6 when Suresh confirms; no code changes until then |
 | **AIML-3037** Python 3.11+ runtime | Backlog (raised from the PR #11 review) | — |
 | **AIML-3054** scorecard counters (disposition loss, needless reminders) | Backlog (raised from the PR #11 review) | — |
@@ -212,13 +213,14 @@ count as the contact; amounts compare after `_same_number` (thousands
 separators, trailing zeros, `.0`) with `_within` on word edges. The harness
 refuses an app whose `/healthz` shows `analytics` (or cannot be asked) and
 starts its own with `BQ_ANALYTICS_ENABLED=false`, because golden notes are
-customer notes. `extract()`: evidence needs 2 non-filler words, `_unmark`
+customer notes. `extract()`: evidence (the cited sentences) needs 2 non-filler words, `_unmark`
 spaces out `<<<`/`>>>`, notes over 10,000 chars are `error_kind="input"`.
 
 **ACs** (Jira text as rewritten):
 1. Schema-valid JSON for every case, no repair; discussed only with a quote;
    unit tests without a model — **met**: 0 errors / 0 dropped labels across
-   every golden, top-up and synthetic run; tests cover schema, quote check,
+   every golden, top-up and synthetic run; tests cover schema, the evidence
+   check (a quote then; sentence numbers since AIML-3152),
    mapping, label enum, usage, invalid runs.
 2. Golden event types follow the approved rule before scoring; baseline
    re-scored — **met** (v1.2, v1.3 and v1.4 manifests list every id).
@@ -231,7 +233,9 @@ spaces out `<<<`/`>>>`, notes over 10,000 chars are `error_kind="input"`.
 `campaigns.py` (registry repaired: the source file's Replace All damage;
 the visit's vertical wins for duplicates; ~300-char descriptions),
 `extract.py` (schema with topic labels as an enum of the planned titles,
-evidence quote checked in code → `unconfirmed`, count field U-10 needs a
+evidence checked in code → `unconfirmed` (a quote found in the note at
+first; since AIML-3152 the model cites sentence numbers and code copies the
+words), count field U-10 needs a
 number, usage tokens/time recorded, `thinking`).
 
 **Bugs found on the way (and the lesson):** labels came back as "Title:
