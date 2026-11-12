@@ -15,7 +15,7 @@ no disposition codes, so disposition is n/a and left out of the comparison.
 With ``--dispositions`` (AIML-3004) each discussed topic gets a code from the
 agent's registry, and disposition is scored and compared like the agent's.
 
-A topic extract() marks ``unconfirmed`` (no quote of the rep's words) counts
+A topic extract() marks ``unconfirmed`` (no sentence of the note behind it) counts
 as not discussed here: in the live flow the rep would be asked, so the count
 of unconfirmed topics is reported as the questions that would add.
 
@@ -154,8 +154,10 @@ def run_once(cases, catalog, client, model: str, registry, judge, thinking=None,
             s = score_row(case, None, codes)
         return {"id": case.id, "score": s, "record": res.record, "error": res.error,
                 "error_kind": res.error_kind, "codes_downgraded": res.codes_downgraded,
-                # the model's words for each failed check (not in the record)
+                # the sentence numbers and code the model gave for each failed check (not in the record)
                 "rejected": res.rejected,
+                # numbers the model cited that are not sentences of the note
+                "ignored_lines": res.ignored_lines,
                 "unconfirmed": res.unconfirmed, "off_plan_labels": res.off_plan,
                 "described": sorted(descriptions), "usage": res.usage}
     with ThreadPoolExecutor(WORKERS) as pool:
@@ -213,8 +215,9 @@ def disposition_detail(rows: list[dict]) -> dict:
       what answering 99 every time would score -- 99 is the fallback, so part
       of the score can come from it;
     - of the real codes kept on the topics the key scores, how many rest on
-      outcome words that are just the topic's own evidence again -- the code
-      check passes those, though they say nothing about the outcome. A real
+      the same sentences as the topic's own evidence -- the code check
+      passes those. One sentence can state both the topic and its outcome,
+      so this is a count to read, not an error count. A real
       code on a topic the key does not score (a contested label) is counted
       apart: it cannot be judged.
     """
@@ -251,7 +254,7 @@ def detail_line(d: dict) -> str:
     return (f"\n\nDisposition by the key's code, over all repeats: {k99['right']}/{k99['of']} right where the key "
             f"says 99 ({k99['pct']}%), {real['right']}/{real['of']} where it says a real code ({real['pct']}%); "
             f"answering 99 every time would score {d['always_99_pct']}%. Of {d['real_codes_kept']} real codes "
-            f"kept, {d['kept_on_the_topic_evidence_again']} rest on the topic's own evidence quoted again"
+            f"kept, {d['kept_on_the_topic_evidence_again']} rest on the same sentences as the topic's evidence"
             + (f"; {d['real_codes_on_topics_not_scored']} more are on topics the key does not score"
                if d.get("real_codes_on_topics_not_scored") else "") + ".")
 
@@ -402,7 +405,7 @@ def main() -> None:
                  # be 0 now the schema allows only the planned labels
                  "dropped_topic_labels": dropped,
                  "unconfirmed_topics_per_run": round(unconfirmed / args.repeats, 1),
-                 # codes set to 99 because the rep's words for them were not in the note
+                 # codes set to 99 because no sentence of the note with enough words was cited for them
                  **({"codes_downgraded_per_run": round(downgraded / args.repeats, 1),
                      "disposition_detail": disposition_detail(all_rows)} if args.dispositions else {}),
                  "usage": usage, "scores": summarise(runs) if runs else {},

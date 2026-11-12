@@ -126,11 +126,18 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   gemini-3.1-pro-preview), so their scores may flatter them. The run refuses
   them unless `--allow-labelling-model` is passed, and the scorecard then says
   so.
-- A topic is `discussed` only if its evidence is found in the dictation and has
-  at least two different non-filler words, checked in code. That proves the
-  words are the rep's, not that they are about the campaign ("Nothing on
-  pools" passes); that judgement stays the model's and `over_claimed`
-  measures it. Otherwise the topic is `unconfirmed` (the live flow would ask
+- Evidence is given by sentence number (AIML-3152): the prompt shows the
+  dictation as numbered sentences (each line, split where a sentence ends),
+  the model lists the numbers, and code copies those sentences into the
+  record. The model never types evidence, so it cannot misquote it; a number
+  that is not a sentence of the note is ignored (a run saves those as
+  `ignored_lines`). Evidence can be no finer than a sentence: a note with no
+  sentence end is one unit (30 of the 90 golden notes, 27 of them under 20 words).
+- A topic is `discussed` only if the sentences cited for it hold at least two
+  different non-filler words, checked in code. That proves the words are the
+  rep's, not that they are about the campaign ("Nothing on pools." passes);
+  that judgement stays the model's and `over_claimed` measures it. Otherwise
+  the topic is `unconfirmed` (the live flow would ask
   the rep), drops its evidence but keeps its summary (the question to the rep
   is built from it; the status marks it unverified), and scores as not
   discussed. The faithfulness judge sees those summaries too. The scorecard
@@ -138,19 +145,19 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
 - `over_claimed` is the share of not-discussed campaigns marked discussed.
   Disposition is n/a: the record carries the facts behind it, not a code.
   With `--dispositions` (AIML-3004) each discussed topic also gets a code from
-  the agent's registry, with the rep's words for it; a code other than 99
-  whose words fail the topic evidence's check (in the note, two different
-  non-filler words) becomes 99. That proves the words are the rep's, not
-  that they state that outcome; whether the code is right is what the
+  the agent's registry, with the sentences that state it; a code other than
+  99 whose sentences fail the topic evidence's check (sentences of the note,
+  two different non-filler words) becomes 99. That proves the words are the
+  rep's, not that they state that outcome; whether the code is right is what the
   disposition score measures. Disposition is then scored and compared.
   99 is the fallback, so the scorecard also gives disposition where the key
   says 99 and where it says a real code, what answering 99 every time would
-  score, and how many kept codes rest on the topic's own evidence quoted
-  again. The golden set scores 30 topics; three repeats at temperature 0 are
+  score, and how many kept codes rest on the same sentences as the topic's
+  evidence (one sentence can state both). The golden set scores 30 topics; three repeats at temperature 0 are
   near-identical, so read disposition as about 30 results, not 90.
 - A run saves each settled record, not the model's raw reply; next to it,
-  `rejected` keeps the model's words for each check that failed (a topic's
-  evidence, or a code's outcome words), so a miss can be traced. `--rescore`
+  `rejected` keeps the sentence numbers and code the model gave for each
+  check that failed, so a miss can be traced. `--rescore`
   re-scores those records against a changed answer key; a change to how a
   record is settled (the evidence check, the U-10 number rule) needs a fresh
   run.

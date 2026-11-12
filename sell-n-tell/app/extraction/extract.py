@@ -4,20 +4,28 @@ The schema (``record_model``) fixes the record's shape, so there is no repair
 step: a reply that does not validate is an error, never patched. Every
 must-capture field is optional -- null is the normal answer.
 
+Evidence is given by reference (AIML-3152): the prompt shows the dictation
+as numbered sentences (``sentences``), the model lists the numbers
+(``evidence_lines``, ``outcome_lines``), and code copies those sentences into
+the record. So evidence in the record is the rep's words by construction: the
+model never types it, and cannot misquote it. A number that is not a sentence
+of the note is ignored. Evidence can be no finer than a sentence: a note with
+no sentence ends is one unit, and citing it cites the whole note.
+
 After the call, code (not the model) settles each planned topic:
 
-  - a topic the model marked discussed keeps that status only if its
-    ``evidence`` is the rep's own words: found in the dictation and at least
-    MIN_EVIDENCE_WORDS different words that are not filler (one word, such as
-    "pools", or "the pools", is not evidence). Otherwise it becomes ``unconfirmed`` (the live flow asks
-    the rep about it), never discussed, and its evidence is dropped. Its
+  - a topic the model marked discussed keeps that status only if the
+    sentences it cites hold at least MIN_EVIDENCE_WORDS different words that
+    are not filler (no sentence cited, or only "Pools.", is not evidence).
+    Otherwise it becomes ``unconfirmed`` (the live flow asks the rep about
+    it), never discussed, and it keeps no evidence. Its
     summary is kept, marked unverified by the ``unconfirmed`` status: it is
     what the model heard, so the live flow builds the rep's question from it.
     This assumes the rep confirms an unconfirmed topic before the record is
     committed; unconfirmed text must never be saved as confirmed. The
     check proves the words are the rep's, not that they are about the
-    campaign ("Nothing on pools" is the rep's words): that judgement stays
-    the model's, and the eval measures it (over-claimed);
+    campaign ("Nothing on pools." is a sentence of the note): that judgement
+    stays the model's, and the eval measures it (over-claimed);
   - a planned topic the model left out is not discussed;
   - a topic label that is not one of the planned topics is reported as
     off-plan and dropped.
@@ -25,16 +33,16 @@ After the call, code (not the model) settles each planned topic:
 With ``dispositions`` (AIML-3004), each discussed topic also gets a code from
 the registry, and code settles it too:
 
-  - a code other than 99 stays only if ``outcome_evidence`` -- the rep's own
-    words for that outcome -- passes the same check as a topic's evidence (in
-    the dictation, with two different non-filler words); otherwise it becomes
-    99 (manual review);
+  - a code other than 99 stays only if the sentences in ``outcome_lines``
+    pass the same check as a topic's evidence (sentences of the note, with
+    two different non-filler words); otherwise it becomes 99 (manual review);
   - a discussed topic with no code is 99; a topic that is not discussed (or
     unconfirmed) has no code.
 
 That check proves the outcome words are the rep's, not that they state that
-outcome for that topic: a negated outcome ("did not place an order"), another
-topic's outcome, or the topic's own evidence quoted again all pass. Whether
+outcome for that topic: a sentence that negates the outcome ("He did not
+place an order."), another topic's outcome, or the topic's own evidence
+sentences again all pass. Whether
 the code is right stays the model's call; the eval measures it as disposition.
 """
 
@@ -54,10 +62,9 @@ from app.extraction.catalog import Field
 EVENT_TYPES = ("Meeting", "On-site visit", "Phone Call")
 DISCUSSED, NOT_DISCUSSED, UNCONFIRMED = "discussed", "not_discussed", "unconfirmed"
 NOT_STATED = ("", "not stated", "null", "none", "n/a")
-MIN_QUOTE_CHARS = 4
-# Measured on key v1.4: two words lose one right call in three runs; three
-# words, or refusing evidence made only of the label's words, lose 11 (reps
-# name a campaign by its own words).
+# Measured on key v1.4 with quoted evidence: two words lose one right call in
+# three runs; three words, or refusing evidence made only of the label's
+# words, lose 11 (reps name a campaign by its own words).
 MIN_EVIDENCE_WORDS = 2
 # Words that do not count towards MIN_EVIDENCE_WORDS ("the pools" is one word).
 # "no pools" and "about it" are one word too; a negation is the model's call (over-claimed).
@@ -79,10 +86,10 @@ _HAS_NUMBER = re.compile(
 class TopicResult(pydantic.BaseModel):
     topic: str = pydantic.Field(description="The planned topic's label, copied exactly.")
     status: Literal["discussed", "not_discussed"]
-    evidence: str = pydantic.Field(
-        default="",
-        description="For a discussed topic: the rep's exact words about this campaign's offer or "
-                    "products, copied verbatim from the dictation. Empty when not discussed.")
+    evidence_lines: list[int] = pydantic.Field(
+        default_factory=list,
+        description="For a discussed topic: the numbers of the dictation sentences where the rep talks "
+                    "about this campaign's offer or products. Empty when not discussed.")
     summary: str = pydantic.Field(
         default="", description="One sentence on this topic, using only what the rep said. "
                                 "Empty when not discussed.")
@@ -99,7 +106,7 @@ def record_model(fields: list[Field], planned: list[str] | None = None,
     label can only be one of those exact titles (an enum in the schema), so
     the model cannot return a label the code would fail to match. With
     ``codes``, each topic also carries a disposition code from that list (as
-    text: the schema's enums are strings) and the rep's words for it."""
+    text: the schema's enums are strings) and the sentences that state it."""
     captured = pydantic.create_model(
         "MustCapture",
         **{_key(f.id): (Optional[str], pydantic.Field(
@@ -111,11 +118,11 @@ def record_model(fields: list[Field], planned: list[str] | None = None,
     if labels:
         extra["topic"] = (Literal[labels], pydantic.Field(description="The planned topic's label."))
     if codes:
-        # The words come before the code, so the model quotes the rep first
-        # and chooses the code from what it quoted.
-        extra["outcome_evidence"] = (str, pydantic.Field(
-            default="", description="For a code other than 99: the rep's own words about the outcome, "
-                                    "copied verbatim from the dictation. Empty otherwise."))
+        # The sentences come before the code, so the model points at the
+        # rep's words first and chooses the code from them.
+        extra["outcome_lines"] = (list[int], pydantic.Field(
+            default_factory=list, description="For a code other than 99: the numbers of the dictation "
+                                              "sentences that state the outcome. Empty otherwise."))
         extra["disposition_code"] = (Optional[Literal[tuple(str(c) for c in codes)]], pydantic.Field(
             default=None, description="For a discussed topic: the outcome code that matches what the rep "
                                       "said about this campaign; 99 when no code fits or no outcome was "
@@ -145,9 +152,10 @@ Rules:
   Decide by what happened, not by words like "meeting" or "on site".
 - Topics: give one entry for every planned topic, with its label copied exactly. A topic
   is "discussed" ONLY if the rep talks about that campaign's offer or its products; a
-  related but different product does not count (use the description to tell). For a
-  discussed topic, "evidence" must be the rep's own words about it, copied verbatim from
-  the dictation. If you cannot quote such words, the topic is "not_discussed".
+  related but different product does not count (use the description to tell). The
+  dictation's sentences are numbered [1], [2], ... For a discussed topic, "evidence_lines"
+  must list the numbers of the sentences where the rep talks about it. If no sentence
+  does, the topic is "not_discussed". Never put the numbers in a summary or a field.
 - Must-capture fields: fill a field only when the rep states it. Never infer, guess or
   pad; null is the normal answer. Store dimensions like 4x4, keeping the rep's unit if
   given. In Trades, trucks count the way units or properties do in other verticals.
@@ -169,9 +177,10 @@ def _unmark(text: str) -> str:
 
 
 CODES_RULE = """- Outcome codes: for each discussed topic, choose the code below that matches the
-  outcome the rep stated for that campaign, and copy the rep's words about that outcome
-  into outcome_evidence. If no code fits, or the rep stated no outcome, the code is 99:
-  never pick a code because it sounds close. A topic that was not discussed has no code."""
+  outcome the rep stated for that campaign, and list the numbers of the sentences that
+  state that outcome in outcome_lines. If no code fits, or the rep stated no outcome,
+  the code is 99: never pick a code because it sounds close. A topic that was not
+  discussed has no code."""
 
 
 def build_prompt(note: str, planned: list[str], vertical: str,
@@ -183,7 +192,8 @@ def build_prompt(note: str, planned: list[str], vertical: str,
         f"{_unmark(descriptions.get(t) or '(no description; judge by the label)')}"
         for i, t in enumerate(planned, 1)
     ) or "(none)"
-    note = _unmark(note)
+    # The same units postprocess copies the evidence from, each under its number.
+    note = "\n".join(f"[{i}] {_unmark(s)}" for i, s in enumerate(sentences(note), 1))
     codes = ""
     if dispositions:
         code_lines = "\n".join(f"  {c}: {_unmark(label)}" for c, label in dispositions.items())
@@ -199,44 +209,31 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" .,;:!?\"'")
 
 
-def quote_in(quote: str, note: str) -> bool:
-    """The quote is the rep's own words: it, or every part of it around an
-    ellipsis, appears in the note (ignoring case, spacing and curly quotes).
-
-    Each part must be at least MIN_QUOTE_CHARS letters or digits, start and
-    end on word boundaries, and the parts must come in the order they appear
-    in the note -- so loose fragments ("a ... e ... i") or words stitched
-    together out of order do not pass as evidence.
-
-    A quote found whole is the rep's words even when the rep's own note has an
-    ellipsis in it ("Ok... he wants 6 units"), so that is tried first."""
-    hay, pos = _norm(note), 0
-
-    def find(part: str, start: int):
-        if len(re.sub(r"[\W_]", "", part)) < MIN_QUOTE_CHARS:
-            return None
-        return re.compile(r"(?<!\w)" + re.escape(part) + r"(?!\w)").search(hay, start)
-
-    if find(_norm(quote or ""), 0):
-        return True
-    parts = [p for p in (_norm(x) for x in re.split(r"\.\.\.|…", quote or "")) if p]
-    for part in parts:
-        found = find(part, pos)
-        if not found:
-            return False
-        pos = found.end()
-    return bool(parts)
+def sentences(note: str) -> list[str]:
+    """The dictation as the units the model cites by number: each line, split
+    where a sentence ends. The prompt numbers these from 1 and ``postprocess``
+    copies evidence from the same list, so a number means the same sentence
+    on both sides."""
+    return [s.strip() for line in (note or "").splitlines()
+            for s in re.split(r"(?<=[.!?])\s+", line) if s.strip()]
 
 
-def evidence_ok(quote: str, note: str) -> bool:
-    """A topic's evidence: the rep's own words (``quote_in``) and at least
-    MIN_EVIDENCE_WORDS different words that are not filler.
+def cited(lines: Any, units: list[str]) -> tuple[list[int], str]:
+    """The sentences behind the numbers the model gave: the numbers that are
+    sentences of the note (in order, each once; anything else is ignored) and
+    their text. Neighbouring sentences are joined by a space, others by
+    " ... "."""
+    ids = sorted({i for i in lines or [] if type(i) is int and 1 <= i <= len(units)})
+    text = ""
+    for n, i in enumerate(ids):
+        text += ("" if n == 0 else " " if i == ids[n - 1] + 1 else " ... ") + units[i - 1]
+    return ids, text
 
-    Known limits, kept: the words are counted over the whole quote, so two
-    one-word parts around an ellipsis pass ("Frank ... pools"), and an
-    apostrophe splits a word ("pool's" is two)."""
-    words = set(re.findall(r"\w+", _norm(quote or ""))) - _FILLER
-    return len(words) >= MIN_EVIDENCE_WORDS and quote_in(quote, note)
+
+def enough_words(text: str) -> bool:
+    """Evidence needs at least MIN_EVIDENCE_WORDS different words that are not
+    filler. Known limit, kept: an apostrophe splits a word ("pool's" is two)."""
+    return len(set(re.findall(r"\w+", _norm(text or ""))) - _FILLER) >= MIN_EVIDENCE_WORDS
 
 
 @dataclass
@@ -255,13 +252,16 @@ class ExtractResult:
     # -- retrying cannot help.
     error_kind: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)   # tokens and seconds of the call
-    # topics whose code fell back to 99 because its evidence was not in the note
+    # topics whose code fell back to 99 because the sentences cited for it failed the check
     codes_downgraded: list[str] = field(default_factory=list)
-    # what the model quoted for each check that failed, by topic: its evidence
-    # (unconfirmed) or its code and outcome words (set to 99). Never in the
-    # record; kept so an eval run can show why a check failed. These are the
-    # rep's words: the live flow must not log them.
+    # what the model gave for each check that failed, by topic: the sentence
+    # numbers of its evidence (unconfirmed) or its code and the numbers for it
+    # (set to 99). Never in the record; kept so an eval run can show why a
+    # check failed. Numbers and codes only, none of the rep's words.
     rejected: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # by topic, the numbers the model cited that are not sentences of the note
+    # (ignored when the evidence is copied); an eval run counts them
+    ignored_lines: dict[str, list[int]] = field(default_factory=dict)
 
 
 NONE_FITS = 99
@@ -276,8 +276,10 @@ def _code_of(topic: dict[str, Any] | None) -> int | None:
 def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                 codes: list[int] | None = None) -> ExtractResult:
     """Settle the validated model output into the record (code, not model).
+    Evidence is copied from the note's sentences by the numbers the model
+    gave (``cited``), never taken as text from the model.
     With ``codes``: a discussed topic keeps a code other than 99 only if it
-    is one of ``codes`` and the rep's words for it pass ``evidence_ok``,
+    is one of ``codes`` and the sentences cited for it pass ``enough_words``,
     otherwise 99; a missing code is 99; a topic that is not discussed has
     none. ``codes`` must include 99, the code every fallback writes."""
     if codes and NONE_FITS not in codes:
@@ -295,36 +297,44 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
             off_plan.append(t["topic"])
         else:
             by_label.setdefault(label, t)          # first entry wins; duplicates ignored
-    topics, unconfirmed, downgraded, rejected = [], [], [], {}
+    topics, unconfirmed, downgraded, rejected, ignored = [], [], [], {}, {}
+    units = sentences(note)
+    given = lambda t, name: list((t or {}).get(name) or [])  # noqa: E731  the numbers as the model gave them
     for label in planned:
         t = by_label.get(label)
         status = t["status"] if t else NOT_DISCUSSED
-        if status == DISCUSSED and not evidence_ok(t.get("evidence", ""), note):
+        lines, evidence = cited(given(t, "evidence_lines"), units)
+        stray = [i for i in given(t, "evidence_lines") + given(t, "outcome_lines")
+                 if not (type(i) is int and 1 <= i <= len(units))]
+        if stray:
+            ignored[label] = stray
+        if status == DISCUSSED and not enough_words(evidence):
             status = UNCONFIRMED
             unconfirmed.append(label)
-            rejected[label] = {"evidence": t.get("evidence", "")}
+            rejected[label] = {"evidence_lines": given(t, "evidence_lines")}
             if codes:
-                rejected[label].update(disposition_code=_code_of(t), outcome_evidence=t.get("outcome_evidence", ""))
+                rejected[label].update(disposition_code=_code_of(t), outcome_lines=given(t, "outcome_lines"))
         topic = {"topic": label, "status": status,
-                 "evidence": (t or {}).get("evidence", "") if status == DISCUSSED else "",
+                 "evidence": evidence if status == DISCUSSED else "",
+                 "evidence_lines": lines if status == DISCUSSED else [],
                  # kept for an unconfirmed topic (the rep's question is built from it);
                  # the status marks it unverified
                  "summary": (t or {}).get("summary", "") if status != NOT_DISCUSSED else ""}
         if codes:
-            code, outcome = None, ""
+            code, outcome_lines, outcome = None, [], ""
             if status == DISCUSSED:
                 code = _code_of(t)
                 code = NONE_FITS if code is None else code
-                outcome = (t or {}).get("outcome_evidence", "")
+                outcome_lines, outcome = cited(given(t, "outcome_lines"), units)
                 # A code outside the list (the schema refuses it; a direct caller might not),
-                # or one whose words fail the topic evidence's rule, is not kept.
-                if code != NONE_FITS and (code not in codes or not evidence_ok(outcome, note)):
-                    rejected[label] = {"disposition_code": code, "outcome_evidence": outcome}
-                    code, outcome = NONE_FITS, ""
+                # or one whose sentences fail the topic evidence's rule, is not kept.
+                if code != NONE_FITS and (code not in codes or not enough_words(outcome)):
+                    rejected[label] = {"disposition_code": code, "outcome_lines": given(t, "outcome_lines")}
+                    code = NONE_FITS
                     downgraded.append(label)
                 if code == NONE_FITS:
-                    outcome = ""
-            topic.update(disposition_code=code, outcome_evidence=outcome)
+                    outcome_lines, outcome = [], ""
+            topic.update(disposition_code=code, outcome_evidence=outcome, outcome_lines=outcome_lines)
         topics.append(topic)
     fields = {k.replace("_", "-"): (None if v is None or _norm(v) in NOT_STATED else v)
               for k, v in (raw.get("must_capture") or {}).items()}
@@ -334,7 +344,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
     record = {"event_type": raw["event_type"], "executive_summary": raw.get("executive_summary", ""),
               "topics": topics, "must_capture": fields}
     return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan,
-                         codes_downgraded=downgraded, rejected=rejected)
+                         codes_downgraded=downgraded, rejected=rejected, ignored_lines=ignored)
 
 
 def thinking_config(thinking: str | int | None):
