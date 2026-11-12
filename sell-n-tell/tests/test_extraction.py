@@ -107,6 +107,16 @@ def test_evidence_is_copied_from_the_cited_sentences_only(lines, ids, text):
     assert cited(lines, sentences(BULLETS)) == (ids, text)
 
 
+@pytest.mark.parametrize("lines", [3, "12", {"1": 1}, None, [[1]], True])
+def test_numbers_of_the_wrong_shape_are_no_evidence_and_do_not_raise(lines):
+    # The schema refuses these; a direct caller of postprocess might not.
+    odd = raw(topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": lines, "summary": "s",
+                       "outcome_lines": lines, "disposition_code": "2"}])
+    r = postprocess(odd, NOTE, PLANNED, [1, 2, 99])
+    assert r.record["topics"][0]["status"] == UNCONFIRMED and r.record["topics"][0]["disposition_code"] is None
+    json.dumps([r.record, r.rejected, r.ignored_lines])                          # still safe to save
+
+
 def test_the_model_cannot_put_its_own_words_in_the_evidence():
     typed = raw(topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": [2], "summary": "s",
                          "evidence": "they ordered 500 fridges", "outcome_evidence": "they ordered 500 fridges",

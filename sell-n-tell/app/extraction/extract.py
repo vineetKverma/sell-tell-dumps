@@ -42,8 +42,8 @@ the registry, and code settles it too:
 That check proves the outcome words are the rep's, not that they state that
 outcome for that topic: a sentence that negates the outcome ("He did not
 place an order."), another topic's outcome, or the topic's own evidence
-sentences again all pass. Whether
-the code is right stays the model's call; the eval measures it as disposition.
+sentences again all pass. Whether the code is right stays the model's call;
+the eval measures it as disposition.
 """
 
 from __future__ import annotations
@@ -299,7 +299,9 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
             by_label.setdefault(label, t)          # first entry wins; duplicates ignored
     topics, unconfirmed, downgraded, rejected, ignored = [], [], [], {}, {}
     units = sentences(note)
-    given = lambda t, name: list((t or {}).get(name) or [])  # noqa: E731  the numbers as the model gave them
+    def given(t, name):      # the numbers as the model gave them; anything that is not a list is no numbers
+        value = (t or {}).get(name)
+        return list(value) if isinstance(value, (list, tuple)) else []
     for label in planned:
         t = by_label.get(label)
         status = t["status"] if t else NOT_DISCUSSED
