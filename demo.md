@@ -354,6 +354,24 @@ Report the three verdict lines. A REGRESSION or INVALID against the old
 baseline is expected here (the old baseline is on key v1.4); what matters is
 that all three ran to the end.
 
+### Step 10b -- check each full run before using it
+
+After each run (or once for all three), numbers only:
+
+```powershell
+Get-ChildItem evals\runs -Directory -Filter "full-*" | ForEach-Object {
+  $f = Join-Path $_.FullName "final_scores.json"
+  if (Test-Path $f) {
+    $j = Get-Content $f -Raw | ConvertFrom-Json
+    "{0}  {1}  scored {2}/{3}  connection errors {4}  no reply {5}  [{6}]" -f $_.Name, $j.verdict, $j.scored, $j.cases, @($j.connection_errors).Count, @($j.no_reply).Count, ($j.problems -join "; ")
+  } else { "{0}  no final_scores.json (stopped early; do not use)" -f $_.Name }
+}
+```
+
+A run is usable for the baseline when it shows `scored` 81 or more of 90 and
+the only text in the brackets is "the golden set differs from the one the
+baseline was made on". Report the lines.
+
 ### Step 11 -- the new baseline, and the extract run compared with it
 
 With the three folder names from Step 10 in place of A, B, C:
