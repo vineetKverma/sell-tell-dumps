@@ -36,6 +36,31 @@ The last line must print `Python 3.12.x`. Without `--python 3.12`, uv took a
 newer Python for which `cffi` has no ready-made package, so it tried to build
 it and needed the Microsoft C++ Build Tools.
 
+## Step 0b -- gcloud and the Google sign-in (two test files and every run need it)
+
+Is it installed but not on the PATH?
+
+```powershell
+Test-Path "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"; Test-Path "${env:ProgramFiles(x86)}\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"
+```
+
+- A `True`: add that folder for this terminal, e.g.
+  `$env:Path = "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin;$env:Path"`
+- Both `False`: install it -- `winget install --id Google.CloudSDK -e`, or the
+  installer from https://cloud.google.com/sdk/docs/install (or the company
+  software portal, if downloads are blocked). Then restart VS Code fully.
+
+Then:
+
+```powershell
+gcloud --version
+gcloud auth login
+gcloud auth application-default login
+```
+
+Both sign-ins open the browser; use the work account. `app\.env` is made by
+hand from `app\.env.example` (never through this repository).
+
 ---
 
 ## Step 1 -- on development (done)
