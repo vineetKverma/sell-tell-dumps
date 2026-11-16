@@ -164,7 +164,29 @@ git push -u origin feature/AIML-3152-extract-followup
 
 ---
 
-## Later, once the eval data, `app/.env` and gcloud login are back
+## Later: the eval data, the `.env`, the tools, the runs
+
+### Step 5b -- the eval data and `app\.env` (needs Step 0b, the gcloud sign-in)
+
+```powershell
+New-Item -ItemType Directory -Force evals/v1 | Out-Null
+gcloud storage cp "gs://sellntell-eval-np/golden_v1.4/*" evals/v1/
+gcloud storage cp -r gs://sellntell-eval-np/reference evals/
+Get-ChildItem evals/v1, evals/reference
+```
+
+The listing must show `evals\v1`: `golden_v1.evalset.json`,
+`universal_fields.csv`, `vertical_fields.csv`; and `evals\reference`:
+`campaign_topics.csv`. A `gcloud storage cp` error (access denied, not found):
+stop and report it. Both folders are git-ignored: never commit them.
+
+```powershell
+Copy-Item app\.env.example app\.env
+notepad app\.env
+```
+
+Fill in the same values as the local `app\.env` (typed by hand, never through
+this repository).
 
 ### The tools, to `C:\tmp`
 
@@ -198,7 +220,7 @@ dcf4ee2b6c1a C:\tmp\value_recount.py
 713303e55553 C:\tmp\try_extract_ideas.py
 ```
 
-### Step 6 -- answer key v1.5 (from the restored v1.4 in `evals\v1`)
+### Step 6 -- answer key v1.5 (only after Step 5b lists the four files)
 
 ```powershell
 Copy-Item evals\v1\golden_v1.evalset.json C:\tmp\golden_v1.4.evalset.json
