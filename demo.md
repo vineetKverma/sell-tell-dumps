@@ -273,3 +273,33 @@ Report all of it. The last line lists, per run, the cases the judge marked
 not faithful (ids only, over the three repeats). The scorecard saying "the
 golden set differs from the baseline's" is expected: the agent baseline is
 re-measured after this.
+
+Done (results reported).
+
+### Step 9 -- what the judge objected to in HS-001 (flagged 3/3 after, 0/3 before)
+
+Prints the judge's objections for one case in both runs. They quote the
+summaries, so keep the output on this machine and report it in your own words
+or as a screenshot.
+
+```powershell
+foreach ($r in $before, $after) { "== $r"; Get-ChildItem "$r\raw_golden_r*.jsonl" | Get-Content | ConvertFrom-Json | Where-Object { $_.id -eq "HS-001" } | ForEach-Object { "  faithful: $($_.score.faithful) | unsupported: $(@($_.score.unsupported) -join ' || ')" } }
+```
+
+### Step 10 -- the agent baseline on key v1.5 (three full runs, about 1.5 hours each)
+
+The live agent reads the same outcome list, which now has the quote cue, and
+the key changed; so its baseline is measured again. The app starts by itself
+(port 8000 must be free). Run one after another, unattended:
+
+```powershell
+uv run python -m evals.agent_eval.run full
+uv run python -m evals.agent_eval.run full
+uv run python -m evals.agent_eval.run full
+```
+
+Each ends with a verdict and `evals\runs\full-<time>`; note the three names.
+Report the three verdict lines. A REGRESSION or INVALID against the old
+baseline is expected here (the old baseline is on key v1.4); what matters is
+that all three ran to the end.
+
