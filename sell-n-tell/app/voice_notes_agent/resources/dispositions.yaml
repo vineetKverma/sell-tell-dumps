@@ -15,8 +15,11 @@ dispositions:
   # Code 1 used to list "interested" and "send a quote". Interest alone, or a
   # request for a quote, has no code of its own and belongs under 99; those
   # cues pulled the agent to 1 instead (17 of the 47 disposition misses in
-  # the AIML-2702 baseline). Code 1 is now cued only by a clear buying intent
-  # or an explicit opportunity.
+  # the AIML-2702 baseline). Code 1 is now cued only by a clear buying intent,
+  # an explicit opportunity, or a quote the rep gave: the business confirmed
+  # that a quote given to the customer is Create Opportunity, until the list
+  # gets an option of its own for it (AIML-3152). A quote only asked for is
+  # still not cued here.
   - name: CREATE_OPPORTUNITY
     code: 1
     label: "Create Opportunity"
@@ -25,6 +28,8 @@ dispositions:
       - "ready to purchase"
       - "create an opportunity"
       - "new opportunity"
+      - "gave a quote"
+      - "quoted"
 
   - name: ORDER_PLACED
     code: 2

@@ -142,20 +142,25 @@ def record_model(fields: list[Field], planned: list[str] | None = None,
 RULES = """You turn a field sales rep's dictated visit note into one CRM record.
 
 Rules:
-- Event type: "Phone Call" if the rep says the conversation was by phone. Otherwise
-  "Meeting" if the rep had a conversation about the business with someone at the
-  customer -- the decision maker or another customer contact such as a manager,
-  supervisor or buyer, named or not ("met with Sarah", "the maintenance supervisor
-  wants a quote", "she told me"). Otherwise "On-site visit" -- including when the rep
-  only spoke to the front desk, a receptionist or another gatekeeper, only left samples
-  or materials, or the contact was not available ("Lendy was off today").
-  Decide by what happened, not by words like "meeting" or "on site".
+- Event type: "Phone Call" if the rep says the conversation was by phone -- but a visit
+  where the rep met a customer contact in person is a "Meeting" even when someone else,
+  such as the decision maker, was phoned during it. Otherwise "Meeting" if the rep had a
+  conversation about the business with someone at the customer -- the decision maker or
+  another customer contact such as a manager, supervisor or buyer, named or not ("met
+  with Sarah", "the maintenance supervisor wants a quote", "she told me"). Otherwise
+  "On-site visit" -- including when the rep only spoke to the front desk, a receptionist
+  or another gatekeeper, only left samples or materials, or the contact was not available
+  ("Lendy was off today"). Decide by what happened, not by words like "meeting" or
+  "on site".
 - Topics: give one entry for every planned topic, with its label copied exactly. A topic
-  is "discussed" ONLY if the rep talks about that campaign's offer or its products; a
-  related but different product does not count (use the description to tell). The
-  dictation's sentences are numbered [1], [2], ... For a discussed topic, "evidence_lines"
-  must list the numbers of the sentences where the rep talks about it. If no sentence
-  does, the topic is "not_discussed". Never put the numbers in a summary or a field.
+  is "discussed" ONLY if the rep talked with someone at the customer about that campaign's
+  offer, its products or its brand: the rep presenting it, or the customer's reaction to it
+  (including a refusal, or preferring another brand or vendor). Material, a flyer or a
+  voicemail left about it with no one spoken to does not count, and neither does a related
+  but different product (use the description to tell). The dictation's sentences are
+  numbered [1], [2], ... For a discussed topic, "evidence_lines" must list the numbers of
+  the sentences where the rep talks about it. If no sentence does, the topic is
+  "not_discussed". Never put the numbers in a summary or a field.
 - Must-capture fields: fill a field only when the rep states it. Never infer, guess or
   pad; null is the normal answer. Store dimensions like 4x4, keeping the rep's unit if
   given. In Trades, trucks count the way units or properties do in other verticals.

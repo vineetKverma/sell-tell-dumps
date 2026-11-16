@@ -44,7 +44,10 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 | faithfulness | the summaries say only what the rep said (checked by a judge model) |
 | field_recall_* / field_invented_rate | must-capture fields captured when stated, and filled in when not (0% until the agent captures fields) |
 
-Event type is scored against the business's rule (the answer key, v1.4).
+Event type is scored against the business's rule (the answer key, v1.4 on).
+Topic status follows the business's answers from key v1.5: a campaign is
+discussed only if the rep talked with someone at the customer about it;
+material or a voicemail left with no one spoken to is not discussed.
 The agent's prompt keeps its earlier rule -- "a person they met or spoke
 with, by name or by role" is a Meeting -- because every wording of the
 business rule tried in the prompt cost topic status and faithfulness. So
@@ -189,10 +192,10 @@ point `SELLNTELL_EVAL_DATA` at it:
 
 ```powershell
 New-Item -ItemType Directory -Force evals/v1 | Out-Null   # gcloud needs the folder to exist
-gcloud storage cp "gs://sellntell-eval-np/golden_v1.4/*" evals/v1/
+gcloud storage cp "gs://sellntell-eval-np/golden_v1.5/*" evals/v1/
 ```
 
-`golden_v1.4` is the answer key the committed baseline was made on; with any
+`golden_v1.5` is the answer key the committed baseline was made on; with any
 other version a run ends INVALID ("the golden set differs from the one the
 baseline was made on").
 

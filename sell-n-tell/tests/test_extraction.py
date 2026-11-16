@@ -277,10 +277,18 @@ def test_a_reply_that_does_not_fit_the_schema_is_an_error_never_repaired():
 def test_the_prompt_carries_the_rules_the_descriptions_and_the_note():
     p = build_prompt(NOTE, PLANNED, "HS", {PLANNED[0]: "Compact fridges and countertop microwaves."})
     assert "Phone Call" in p and "named or not" in p and "not available" in p   # event-type rule
-    assert "conversation about the business with someone at the" in p           # Meeting (Tobi, 2026-10-14)
-    assert "front desk, a receptionist or another gatekeeper" in p               # ... not the front desk
+    assert "conversation about the business with someone at the customer" in p  # Meeting, as the business defined it
+    assert "front desk, a receptionist\n  or another gatekeeper" in p            # ... not the front desk
     assert "interacting with anyone" not in p                                   # the old rule
-    assert "offer or its products" in p and '"evidence_lines"' in p              # topic rule + evidence
+    # The business answers (AIML-3152): met in person plus a phone call is a Meeting; the
+    # customer's reaction counts as discussed; material or a voicemail left with no one
+    # spoken to does not; a related but different product still does not.
+    assert 'met a customer contact in person is a "Meeting" even when someone else' in p
+    assert "talked with someone at the customer about that campaign's" in p
+    assert "preferring another brand or vendor" in p
+    assert "voicemail left about it with no one spoken to does not count" in p
+    assert "neither does a related\n  but different product" in p
+    assert '"evidence_lines"' in p                                               # evidence by number
     assert "numbered [1], [2]" in p and "Never put the numbers in a summary or a field" in p
     assert "verbatim" not in p                                                   # the model no longer copies words
     assert "4x4" in p and "trucks" in p                                          # approved field rules
@@ -452,8 +460,8 @@ def test_a_count_with_no_number_in_it_is_dropped_even_one_off(vague):
 # --- disposition codes per discussed topic (AIML-3004) ---------------------------
 
 CODES = {1: "Create Opportunity", 2: "Order Placed", 8: "Pricing concerns", 99: "Outcome not covered"}
-# A clear buying intent, the registry's own cue for code 1. (A quote asked for or given has
-# no code of its own in the registry: it is 99.)
+# A clear buying intent, the registry's own cue for code 1. (A quote the rep gave is code 1
+# too, by the business's answer; a quote only asked for is not cued.)
 CODE_NOTE = "Shared mini fridge pricing with Frank. He wants to buy 6 units."
 BUYS = [2]                          # the sentence that states it
 
@@ -600,6 +608,10 @@ def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
     codes = load_dispositions()
     assert list(codes) == [*range(1, 11), 99]
     assert codes[2].startswith("Order Placed (e.g. ") and codes[99].startswith("Outcome not covered")
+    # The business's answer (AIML-3152): a quote the rep gave is Create Opportunity. A quote
+    # only asked for, and interest alone, stay uncued: those cues pulled answers to 1.
+    assert "gave a quote" in codes[1] and "quoted" in codes[1]
+    assert "send a quote" not in codes[1] and "interested" not in codes[1]
 
 
 def test_codes_reach_the_call_and_the_record():
