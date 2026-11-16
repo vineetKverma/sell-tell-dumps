@@ -5,11 +5,25 @@ listed by their path in this repository; put each at the same path under
 `sell-n-tell\` on dev (tools go to `C:\tmp`). After copying, the fingerprint
 command must print exactly the values listed.
 
-Fingerprint command used below (prints one line per file):
+Fingerprint command used below (prints one line per file; plain PowerShell,
+needs nothing installed; paste it again in every new terminal):
 
 ```powershell
-function fp { uv run python -c "import hashlib,sys; [print(hashlib.sha256(open(f,'rb').read().replace(b'\r\n',b'\n')).hexdigest()[:12], f) for f in sys.argv[1:]]" @args }
+function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path $f).Path); $o = New-Object System.Collections.Generic.List[byte]; for ($i = 0; $i -lt $b.Length; $i++) { if (-not ($b[$i] -eq 13 -and $i + 1 -lt $b.Length -and $b[$i + 1] -eq 10)) { $o.Add($b[$i]) } }; $h = [Security.Cryptography.SHA256]::Create().ComputeHash($o.ToArray()); (($h | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 12) + ' ' + $f } }
 ```
+
+## Step 0 -- uv (needed for the tests and runs)
+
+```powershell
+Get-Command uv -ErrorAction SilentlyContinue; Test-Path "$env:USERPROFILE\.local\bin\uv.exe"
+```
+
+- If the second line says `True`, uv is installed but not on the PATH:
+  `$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"` (this terminal), then `uv --version`.
+- If both find nothing, install it (the official installer), then open a new terminal:
+  `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+
+Then, in `sell-n-tell`: `uv sync` (builds the environment from `uv.lock`; changes no file).
 
 ---
 
