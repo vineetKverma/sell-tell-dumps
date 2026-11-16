@@ -23,7 +23,18 @@ Get-Command uv -ErrorAction SilentlyContinue; Test-Path "$env:USERPROFILE\.local
 - If both find nothing, install it (the official installer), then open a new terminal:
   `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
 
-Then, in `sell-n-tell`: `uv sync` (builds the environment from `uv.lock`; changes no file).
+Then, in `sell-n-tell` (Python 3.12, as on the machine the code was made on;
+uv downloads it if needed; changes no file in the repo):
+
+```powershell
+uv python install 3.12
+uv sync --python 3.12
+uv run python --version
+```
+
+The last line must print `Python 3.12.x`. Without `--python 3.12`, uv took a
+newer Python for which `cffi` has no ready-made package, so it tried to build
+it and needed the Microsoft C++ Build Tools.
 
 ---
 
