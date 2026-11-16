@@ -286,6 +286,19 @@ or as a screenshot.
 foreach ($r in $before, $after) { "== $r"; Get-ChildItem "$r\raw_golden_r*.jsonl" | Get-Content | ConvertFrom-Json | Where-Object { $_.id -eq "HS-001" } | ForEach-Object { "  faithful: $($_.score.faithful) | unsupported: $(@($_.score.unsupported) -join ' || ')" } }
 ```
 
+Done: in HS-001 the summaries add a purpose ("met with ... to address the
+mis-picked amenities") the rep did not state.
+
+### Step 9b -- the same for the other cases flagged only after
+
+```powershell
+foreach ($c in "HL-003", "HL-010", "IS-005", "IS-013", "MH-011") { "== $c"; Get-ChildItem "$after\raw_golden_r*.jsonl" | Get-Content | ConvertFrom-Json | Where-Object { $_.id -eq $c -and $_.score.faithful -eq $false } | ForEach-Object { "  $(@($_.score.unsupported) -join ' || ')" } }
+```
+
+Report it as a screenshot (it quotes summaries). What is looked for: does the
+judge object to a purpose or link the rep did not state ("to address",
+"regarding", "in order to"), or to something else.
+
 ### Step 10 -- the agent baseline on key v1.5 (three full runs, about 1.5 hours each)
 
 The live agent reads the same outcome list, which now has the quote cue, and
