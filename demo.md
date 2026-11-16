@@ -87,6 +87,15 @@ And these four (they stay untracked on dev, never committed):
 | `sell-n-tell/evals/dataset/fix_left_material.py` | `evals\dataset\fix_left_material.py` |
 | `sell-n-tell/tests/test_dataset_fix_left_material.py` | `tests\test_dataset_fix_left_material.py` |
 
+All ten in one go, straight from this branch (the repository must be public
+while it runs):
+
+```powershell
+$base = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/sell-n-tell"
+$files = "app/extraction/__init__.py", "app/extraction/extract.py", "app/voice_notes_agent/resources/dispositions.yaml", "evals/README.md", "evals/extract_eval/run.py", "tests/test_extraction.py", "evals/dataset/__init__.py", "evals/dataset/fix_event_types.py", "evals/dataset/fix_left_material.py", "tests/test_dataset_fix_left_material.py"
+foreach ($f in $files) { New-Item -ItemType Directory -Force (Split-Path $f) | Out-Null; Invoke-WebRequest "$base/$f" -OutFile $f -UseBasicParsing }
+```
+
 ## Step 4 -- check and test
 
 ```powershell
@@ -142,6 +151,14 @@ git push -u origin feature/AIML-3152-extract-followup
 | `tools/value_recount.py` | `C:\tmp\value_recount.py` |
 | `tools/run_diff.py` | `C:\tmp\run_diff.py` |
 | `tools/try_extract_ideas.py` | `C:\tmp\try_extract_ideas.py` |
+
+All six in one go:
+
+```powershell
+New-Item -ItemType Directory -Force C:\tmp | Out-Null
+$tools = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/tools"
+foreach ($t in "disposition_misses.py", "sentence_check.py", "case_report.py", "value_recount.py", "run_diff.py", "try_extract_ideas.py") { Invoke-WebRequest "$tools/$t" -OutFile "C:\tmp\$t" -UseBasicParsing }
+```
 
 ```powershell
 fp C:\tmp\disposition_misses.py C:\tmp\sentence_check.py C:\tmp\case_report.py C:\tmp\value_recount.py C:\tmp\run_diff.py C:\tmp\try_extract_ideas.py
