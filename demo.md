@@ -254,15 +254,22 @@ After (this branch):
 uv run python -m evals.extract_eval.run --model gemini-3.8-flash --thinking low --allow-labelling-model --dispositions
 ```
 
-Note the folder (AFTER). Then, with both names filled in:
+Done: BEFORE = `extract-20261116-230453`, AFTER = `extract-20261116-231424`.
+
+### Step 8 -- the checks on the two runs (copy and run as is)
 
 ```powershell
-uv run python -m evals.extract_eval.compare evals\runs\BEFORE evals\runs\AFTER
-uv run python C:\tmp\case_report.py evals\runs\BEFORE evals\runs\AFTER
-uv run python C:\tmp\disposition_misses.py evals\runs\AFTER
-uv run python C:\tmp\sentence_check.py evals\runs\AFTER
-uv run python C:\tmp\value_recount.py evals\runs\AFTER
+$before = "evals\runs\extract-20261116-230453"
+$after = "evals\runs\extract-20261116-231424"
+uv run python -m evals.extract_eval.compare $before $after
+uv run python C:\tmp\case_report.py $before $after
+uv run python C:\tmp\disposition_misses.py $after
+uv run python C:\tmp\sentence_check.py $after
+uv run python C:\tmp\value_recount.py $after
+foreach ($r in $before, $after) { $ids = Get-ChildItem "$r\raw_golden_r*.jsonl" | Get-Content | ConvertFrom-Json | Where-Object { $_.score -and $_.score.faithful -eq $false } | ForEach-Object { $_.id }; "$r not faithful: $(@($ids).Count): $((@($ids) | Sort-Object) -join ', ')" }
 ```
 
-Report all five outputs. The scorecard saying "the golden set differs from the
-baseline's" is expected: the agent baseline is re-measured after this.
+Report all of it. The last line lists, per run, the cases the judge marked
+not faithful (ids only, over the three repeats). The scorecard saying "the
+golden set differs from the baseline's" is expected: the agent baseline is
+re-measured after this.
