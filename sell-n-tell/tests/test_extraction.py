@@ -87,7 +87,7 @@ def test_the_dictation_is_split_into_lines_and_sentences():
 
 def test_the_prompt_numbers_the_same_sentences_the_record_is_built_from():
     body = build_prompt(BULLETS, PLANNED, "HS").split("Dictation:\n<<<\n", 1)[1]
-    # one text, not one sentence per line (D-80)
+    # one text, not one sentence per line
     assert body == " ".join(f"[{i}] {u}" for i, u in enumerate(sentences(BULLETS), 1)) + "\n>>>"
     cites = raw(topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": [3], "summary": "s"}])
     t = postprocess(cites, BULLETS, PLANNED).record["topics"][0]
@@ -297,7 +297,7 @@ def test_the_prompt_carries_the_rules_the_descriptions_and_the_note():
     assert f"label: {PLANNED[1]}\n   about: (no description; judge by the label)" in p
     assert "never the description" in p
     assert "[1] Shared mini fridge pricing with Frank. [2] He wants a quote for 6 units.\n>>>" in p
-    assert "Start the value with\n  the category" in p and "U-07: backorder, mispick" in p      # U-04 / U-07 categories (D-80)
+    assert "Start the value with\n  the category" in p and "U-07: backorder, mispick" in p      # U-04 / U-07 categories
     assert "Account vertical: HS" in p
 
 

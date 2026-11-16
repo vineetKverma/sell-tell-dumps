@@ -204,7 +204,7 @@ def build_prompt(note: str, planned: list[str], vertical: str,
     ) or "(none)"
     # The same units postprocess copies the evidence from, each under its number, run
     # together as one text: one sentence per line made a lone "we spoke on the phone"
-    # outweigh the meeting around it (event type 237/258 against 245/258, D-80).
+    # outweigh the meeting around it (event type 237 of 258 right against 245).
     note = " ".join(f"[{i}] {_unmark(s)}" for i, s in enumerate(sentences(note), 1))
     codes = ""
     if dispositions:

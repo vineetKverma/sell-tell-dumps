@@ -44,11 +44,18 @@ Every run ends with a verdict and writes `evals/runs/<mode>-<time>/`:
 | faithfulness | the summaries say only what the rep said (checked by a judge model) |
 | field_recall_* / field_invented_rate | must-capture fields captured when stated, and filled in when not (0% until the agent captures fields) |
 
-Event type is scored against the business's rule (the answer key, v1.4 on).
+Event type is scored against the business's rule (the answer key, v1.4 on);
+a visit where the rep met a contact in person is a Meeting even when the
+decision maker was phoned during it.
 Topic status follows the business's answers from key v1.5: a campaign is
-discussed only if the rep talked with someone at the customer about it;
-material or a voicemail left with no one spoken to is not discussed.
-The agent's prompt keeps its earlier rule -- "a person they met or spoke
+discussed only if the rep talked with someone at the customer about it, the
+customer's reaction included (preferring another brand or vendor is
+discussed, code 5); material or a voicemail left with no one spoken to is not
+discussed. A quote the rep gave is code 1. `extract()` states these rules;
+the agent's prompt does not (it shares only the outcome list, with the quote
+cue), so on those cases the key scores the agent against rules it was not
+given.
+For event type the agent's prompt keeps its earlier rule -- "a person they met or spoke
 with, by name or by role" is a Meeting -- because every wording of the
 business rule tried in the prompt cost topic status and faithfulness. So
 about 8 golden cases count against the agent by design: 7 where the rep
@@ -157,8 +164,9 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   99 is the fallback, so the scorecard also gives disposition where the key
   says 99 and where it says a real code, what answering 99 every time would
   score, and how many kept codes rest on the same sentences as the topic's
-  evidence (one sentence can state both). The golden set scores 30 topics; three repeats at temperature 0 are
-  near-identical, so read disposition as about 30 results, not 90.
+  evidence (one sentence can state both). The golden set scores 28 topics
+  (key v1.5); three repeats at temperature 0 are near-identical, so read
+  disposition as about 28 results, not 84.
 - A run saves each settled record, not the model's raw reply; next to it,
   `rejected` keeps the sentence numbers and code the model gave for each
   check that failed, so a miss can be traced. `--rescore`

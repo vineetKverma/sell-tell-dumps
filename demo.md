@@ -299,6 +299,44 @@ Report it as a screenshot (it quotes summaries). What is looked for: does the
 judge object to a purpose or link the rep did not state ("to address",
 "regarding", "in order to"), or to something else.
 
+Done: no single pattern (an added purpose or result in 3 cases, one wrong
+name, the rest strict readings). The code stays as it is.
+
+### Step 9c -- three files tidied after the review (no change to the prompt)
+
+A comment and two test comments lost a reference to a document that is not in
+the repo, and the README now says 28 scored topics and states the rules. The
+prompt is byte-for-byte the same, so the runs above stand.
+
+```powershell
+$base = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup"
+foreach ($f in "app/extraction/extract.py", "tests/test_extraction.py", "evals/README.md") { Invoke-WebRequest "$base/sell-n-tell/$f" -OutFile $f -UseBasicParsing }
+Invoke-WebRequest "$base/tools/disposition_paired.py" -OutFile C:\tmp\disposition_paired.py -UseBasicParsing
+fp app/extraction/extract.py tests/test_extraction.py evals/README.md C:\tmp\disposition_paired.py
+git status --short
+uv run pytest tests/ -q
+```
+
+Expected:
+
+```
+095986de7591 app/extraction/extract.py
+d67dd332898b tests/test_extraction.py
+24727dfd6ecf evals/README.md
+8de3264c8f36 C:\tmp\disposition_paired.py
+```
+
+`git status --short`: those three as `M`, plus the two `??` helpers. Tests:
+344 passed, 1 xfailed. Do not commit yet (one commit after Step 11).
+
+Then the topic-by-topic comparison of the two runs (ids and counts only):
+
+```powershell
+uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-230453 --new evals\runs\extract-20261116-231424
+```
+
+Report its output.
+
 ### Step 10 -- the agent baseline on key v1.5 (three full runs, about 1.5 hours each)
 
 The live agent reads the same outcome list, which now has the quote cue, and
@@ -315,4 +353,37 @@ Each ends with a verdict and `evals\runs\full-<time>`; note the three names.
 Report the three verdict lines. A REGRESSION or INVALID against the old
 baseline is expected here (the old baseline is on key v1.4); what matters is
 that all three ran to the end.
+
+### Step 11 -- the new baseline, and the extract run compared with it
+
+With the three folder names from Step 10 in place of A, B, C:
+
+```powershell
+uv run python -m evals.agent_eval.baseline export evals\runs\full-A evals\runs\full-B evals\runs\full-C --allow-noisy quick:faithfulness
+git diff --stat
+uv run python -m evals.extract_eval.run --rescore evals\runs\extract-20261116-231424
+Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 40
+```
+
+- If the export names another score as too noisy and refuses, stop and
+  report the message.
+- `git diff --stat` must now also list `evals/baselines/golden_v1.json`.
+- The re-score makes no model call; it fills in the comparison with the new
+  baseline. Report the export's output and the scorecard's first 40 lines
+  (numbers only). The README's lines about the baseline get their new figures
+  from this before the commit.
+
+### Step 12 -- key v1.5 to the shared bucket (only once agreed)
+
+The README now tells people to fetch `golden_v1.5`, so the PR needs it there.
+Others read this bucket: run it only when you have decided to.
+
+```powershell
+gcloud storage cp evals\v1\golden_v1.evalset.json evals\v1\golden_v1.5.manifest.json evals\v1\universal_fields.csv evals\v1\vertical_fields.csv gs://sellntell-eval-np/golden_v1.5/
+gcloud storage ls gs://sellntell-eval-np/golden_v1.5/
+```
+
+### Step 13 -- the commit and the push (after Steps 9c to 12, and the README's final figures)
+
+Wait for the word: the README gets one more update from Step 11's numbers.
 
