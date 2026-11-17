@@ -392,6 +392,36 @@ Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 4
   (numbers only). The README's lines about the baseline get their new figures
   from this before the commit.
 
+### Step 11a -- why the export refused: each run's scores (numbers only, writes nothing)
+
+```powershell
+@'
+import json
+from pathlib import Path
+from evals.agent_eval.baseline import METRICS, ITEMS, summarise, threshold_for
+from evals.agent_eval.cases import load_cases, load_priorities, quick_subset
+from evals.agent_eval.score import aggregate
+runs = ["full-20261117-001317", "full-20261117-025305", "full-20261117-110639"]
+pr = load_priorities()
+q = {c.id for c in quick_subset(load_cases())}
+reps = []
+for d in runs:
+    reps += json.loads((Path("evals/runs") / d / "scores.json").read_text(encoding="utf-8"))["cases"]
+for mode, rolls in (("full", [aggregate(s, pr) for s in reps]),
+                    ("quick", [aggregate([x for x in s if x["id"] in q], pr) for s in reps])):
+    summ = summarise(rolls)
+    for name, read, _ in METRICS:
+        if name not in summ or name.startswith("field"):
+            continue
+        vals = [read(r["all"]) for r in rolls]
+        items = [ITEMS[name](r["all"]) for r in rolls] if name in ITEMS else []
+        print(f"{mode:5} {name:13} runs " + " ".join("n/a" if v is None else f"{v*100:5.1f}" for v in vals)
+              + f"  items {items}  limit {threshold_for(summ[name], one_item_floor=False):.1f}")
+'@ | uv run python -
+```
+
+Report the lines.
+
 ### Step 12 -- key v1.5 to the shared bucket (only once agreed)
 
 The README now tells people to fetch `golden_v1.5`, so the PR needs it there.
