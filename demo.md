@@ -374,10 +374,11 @@ baseline was made on". Report the lines.
 
 ### Step 11 -- the new baseline, and the extract run compared with it
 
-With the three folder names from Step 10 in place of A, B, C:
+First run Step 10b once more: `full-20261117-110639` must read like the other
+two (scored 90/90, connection errors 0, no reply 0). Then:
 
 ```powershell
-uv run python -m evals.agent_eval.baseline export evals\runs\full-A evals\runs\full-B evals\runs\full-C --allow-noisy quick:faithfulness
+uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-001317 evals\runs\full-20261117-025305 evals\runs\full-20261117-110639 --allow-noisy quick:faithfulness
 git diff --stat
 uv run python -m evals.extract_eval.run --rescore evals\runs\extract-20261116-231424
 Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 40
