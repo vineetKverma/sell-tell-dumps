@@ -422,6 +422,18 @@ for mode, rolls in (("full", [aggregate(s, pr) for s in reps]),
 
 Report the lines.
 
+### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
+
+```powershell
+uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-001317 evals\runs\full-20261117-025305 evals\runs\full-20261117-110639 --allow-noisy full:disposition quick:disposition
+git diff --stat
+uv run python -m evals.extract_eval.run --rescore evals\runs\extract-20261116-231424
+Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 40
+```
+
+`git diff --stat` must now list `evals/baselines/golden_v1.json`. Report the
+export's output and the scorecard's first 40 lines.
+
 ### Step 12 -- key v1.5 to the shared bucket (only once agreed)
 
 The README now tells people to fetch `golden_v1.5`, so the PR needs it there.
