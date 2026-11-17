@@ -138,6 +138,11 @@ behavioral_rules: |
       fits, the answer is 99, not the closest-sounding one. A record flagged
       99 gets corrected by a human; a confidently wrong code never gets
       noticed.
+      Quotes: code 1 is for a quote the rep has ALREADY GIVEN the customer
+      for THAT topic's products ("gave them a quote for the appliances").
+      A quote the rep will send later ("will email quote"), a quote for
+      other products than the topic's, or the rep asking the customer to
+      order is not code 1 -- use whatever else fits, or 99.
     - executive_summary: a condensed, professional 1-2 sentence summary of
       THAT topic only (or the rep's reason if it was not discussed).
     - discussed: true if the rep actually covered the topic. Only set it to

@@ -127,6 +127,14 @@ def test_code_1_cues_do_not_contradict_99_guidance():
     assert "the answer is 99" in _RULES
 
 
+def test_the_quote_cue_is_limited_to_a_quote_given_for_that_topic():
+    # The cue "quoted" alone pulled the agent to 1 on "will email quote" and on
+    # a quote for other products, in some runs and not others.
+    text = " ".join(_RULES.split())
+    assert "a quote the rep has ALREADY GIVEN the customer for THAT topic's products" in text
+    assert '("will email quote")' in text and "the rep asking the customer to order is not code 1" in text
+
+
 def test_the_planned_topics_key_is_named_once():
     tools_src = (_PKG / "tools.py").read_text(encoding="utf-8")
     assert '"planned_topics"' not in tools_src

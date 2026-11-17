@@ -434,6 +434,35 @@ uv run python C:\tmp\agent_flips.py full-20261117-001317 full-20261117-025305 fu
 Send the whole output (screenshots of every part; it is long). It prints the
 notes of the topics that differ, so share it only with me.
 
+### Step 11d -- the fix: the agent's quote rule, then three new full runs
+
+Paste the `fp` function first (top of this file).
+
+```powershell
+$base = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/sell-n-tell"
+foreach ($f in "app/voice_notes_agent/resources/behavioral_rules.yaml", "tests/test_prompt_rules.py") { Invoke-WebRequest "$base/$f" -OutFile $f -UseBasicParsing }
+fp app/voice_notes_agent/resources/behavioral_rules.yaml tests/test_prompt_rules.py
+uv run pytest tests/ -q
+```
+
+Expected fingerprints: `ae5f8814aac0` and `edc8efc167e8`. Tests: one more
+passed than before (345 passed, 1 xfailed). Then, one after another:
+
+```powershell
+uv run python -m evals.agent_eval.run full
+uv run python -m evals.agent_eval.run full
+uv run python -m evals.agent_eval.run full
+```
+
+Then Step 10b (the run check), and the topic-by-topic view with the three new
+folder names in place of X, Y, Z:
+
+```powershell
+uv run python C:\tmp\agent_flips.py full-X full-Y full-Z
+```
+
+Send both outputs (no `--notes` this time unless a topic still differs).
+
 ### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
 
 ```powershell
