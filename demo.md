@@ -463,6 +463,30 @@ uv run python C:\tmp\agent_flips.py full-X full-Y full-Z
 
 Send both outputs (no `--notes` this time unless a topic still differs).
 
+### Step 11e -- three cases of the first new run (reads only; no model calls)
+
+From `C:\Developer\sellNtell\sell-n-tell`, paste the whole block at once:
+
+```powershell
+@'
+import json
+from evals.agent_eval.cases import load_cases
+notes = {c.id: c.note for c in load_cases()}
+for line in open("evals/runs/full-20261117-175125/run1.jsonl", encoding="utf-8"):
+    r = json.loads(line)
+    if r["id"] in ("HL-005", "MH-015", "HL-006"):
+        print("==", r["id"], "| error:", r.get("error"), "| stage calls:", r.get("stage_calls"))
+        print("note:", notes[r["id"]])
+        for t in (r.get("final") or {}).get("topics") or []:
+            print("  saved:", t.get("topic"), "| discussed", t.get("discussed"), "| code", t.get("disposition_code"), "|", t.get("executive_summary"))
+        for who, text in (r.get("transcript") or [])[-4:]:
+            print("  ", who, ":", text[:200])
+'@ | uv run python -
+```
+
+It prints the notes of HL-005, MH-015 and HL-006: send the output only to me.
+Do not start the next full runs until this is read.
+
 ### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
 
 ```powershell
