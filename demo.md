@@ -422,6 +422,18 @@ for mode, rolls in (("full", [aggregate(s, pr) for s in reps]),
 
 Report the lines.
 
+### Step 11c -- topic by topic: what moves the agent's disposition between runs
+
+Reads the three runs only; no model calls.
+
+```powershell
+Invoke-WebRequest "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/tools/agent_flips.py" -OutFile C:\tmp\agent_flips.py -UseBasicParsing
+uv run python C:\tmp\agent_flips.py full-20261117-001317 full-20261117-025305 full-20261117-110639 --notes
+```
+
+Send the whole output (screenshots of every part; it is long). It prints the
+notes of the topics that differ, so share it only with me.
+
 ### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
 
 ```powershell
