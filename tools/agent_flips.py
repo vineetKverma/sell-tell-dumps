@@ -129,9 +129,11 @@ def main() -> None:
             else:
                 c[t["actual"]] += 1
         right = sum(1 for _, _, items in disc if items[r] and items[r].get("code_ok"))
-        print(f"run{r+1}: {right}/{len(disc)} right; misses: {dict(c)}")
+        scored = sum(1 for _, _, items in disc if items[r])  # a case left out (connection error) is not scored
+        print(f"run{r+1}: {right}/{scored} right; misses: {dict(c)}")
 
-    rates = [100 * sum(1 for _, _, it in disc if it[r] and it[r].get("code_ok")) / len(disc) for r in range(n)]
+    rates = [100 * sum(1 for _, _, it in disc if it[r] and it[r].get("code_ok"))
+             / max(1, sum(1 for _, _, it in disc if it[r])) for r in range(n)]
     sd = statistics.stdev(rates) if n > 1 else 0.0
     print(f"\nrates {[round(x, 1) for x in rates]}  stdev {sd:.2f}  limit 3 x stdev = {3*sd:.1f} (gate refuses above 20)")
     k = Counter(kind(it) for _, _, it in disc)
