@@ -154,11 +154,12 @@ Agent baseline (three full runs):
 
 ## Known limits
 
+- **What this branch gains, and what it does not**: disposition is the same as `development` (95.2% in both); the gain is against the agent (83.5%). The branch brings evidence that cannot be misquoted, the business rules in the prompt, and event type +2.3 points. Trade-offs: over-claimed 0 → 0.7% (1 of 102 in the last repeat); topic status (99.5 → 99.2) and faithfulness (90.7 → 90.0) slightly lower, within the run-to-run spread.
 - **HL-005**: the key gives code 1 to a quote the customer asked for; by the business's answer and the prompts' own worked example that is 99, which both `extract()` and the agent now answer. To settle with the business.
 - **The agent and `extract()` follow different rules, by design**: the agent's prompt has the quote rule only, not the topic rule (material left) or the event-type rule, so key v1.5 counts those cases against it. Code 5 for "another brand preferred" is stated in neither prompt (code 5's cues are about vendors); both got it right on the golden set. MH-002 ("ownership wants a different brand"): the agent gives 99, the key says 7.
 - **Sentence splitting**: evidence is no finer than a sentence. A note with no sentence end is one unit (30 of the 90 golden notes), so citing it counts for any topic. A full stop after an abbreviation ("Mr. Smith", "approx.", "e.g.") splits a sentence.
 - **Bracketed numbers**: a "[3]" typed in a dictation looks like a sentence number to the model, and a bracketed number in a summary or field ("Suite [204]") is removed with the sentence numbers. Spoken input has no brackets, so neither is expected live.
-- **Cost**: $0.25 more per 1,000 notes. Per-call time varies by day (p95 6.7 s in the final run, 10.7 s in an earlier run of the same prompt, 8.9 s for `development`), so no speed difference is claimed.
+- **Cost**: about 7% more ($3.60 → $3.85 per 1,000 notes; 2,836 → 3,174 input tokens per note, from the numbered sentences and the rules). Per-call time varies by day (p95 6.7 s in the final run, 10.7 s in an earlier run of this branch before the quote rule, 8.9 s for `development`), so no speed difference is claimed.
 - **Connection drops**: the agent runs lost 1-4 cases each to dropped connections, under the 10% limit.
 - **Text, not speech**: the golden notes are typed text; spoken input is not measured.
 - **For the live-flow story**: an unconfirmed topic keeps its summary for the rep's question; nothing yet stops it being saved as confirmed.
@@ -201,3 +202,21 @@ uv run python -m evals.agent_eval.baseline show
 - The first compare gives the PR table's two columns (before = `development`, after = this branch).
 - The re-score and the second compare must give the same figures as the first compare's second row.
 - Send all the output (numbers, run names and checksums only). Do not send the scorecard file: it quotes customer notes.
+
+## Step 8 -- two lines of the PR description (the reviewer's last note)
+
+On the pull request, Edit the description, in "Known limits":
+
+1. Add this as the first bullet:
+
+```text
+- **What this branch gains, and what it does not**: disposition is the same as `development` (95.2% in both); the gain is against the agent (83.5%). The branch brings evidence that cannot be misquoted, the business rules in the prompt, and event type +2.3 points. Trade-offs: over-claimed 0 → 0.7% (1 of 102 in the last repeat); topic status (99.5 → 99.2) and faithfulness (90.7 → 90.0) slightly lower, within the run-to-run spread.
+```
+
+2. Replace the "**Cost**" bullet with:
+
+```text
+- **Cost**: about 7% more ($3.60 → $3.85 per 1,000 notes; 2,836 → 3,174 input tokens per note, from the numbered sentences and the rules). Per-call time varies by day (p95 6.7 s in the final run, 10.7 s in an earlier run of this branch before the quote rule, 8.9 s for `development`), so no speed difference is claimed.
+```
+
+Save the description.
