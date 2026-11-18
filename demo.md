@@ -182,3 +182,22 @@ Send the pull request link once it is open.
 ```text
 PR raised for review: extract() evidence by sentence number, the business's topic and quote rules, answer key v1.5 (in the eval bucket) and the agent baseline re-measured on it; final run: disposition 95.2%, topic status 99.2%, event type 93.4%.
 ```
+
+## Step 7 -- the reviewer's number check (numbers only; no model calls)
+
+From `C:\Developer\sellNtell\sell-n-tell`. The first line keeps a copy of the
+run folder, because the re-score rewrites its summary and scorecard.
+
+```powershell
+git log --oneline -1
+Copy-Item -Recurse evalsuns\extract-20261118-132816 C:	mp\extract-20261118-132816-copy
+uv run python -m evals.extract_eval.compare evals/runs/extract-20261116-230453 evals/runs/extract-20261118-132816
+uv run python -m evals.extract_eval.run --rescore evals/runs/extract-20261118-132816 | Select-String -Pattern "Disposition by|Cost:|^\| all|^\| event_type|^\| topic_status|^\| over_claimed|^\| disposition|^\| faithfulness|written"
+uv run python -m evals.extract_eval.compare evals/runs/extract-20261118-132816
+uv run python -m evals.agent_eval.baseline show
+```
+
+- `git log` must show `37196ad` (the PR's head).
+- The first compare gives the PR table's two columns (before = `development`, after = this branch).
+- The re-score and the second compare must give the same figures as the first compare's second row.
+- Send all the output (numbers, run names and checksums only). Do not send the scorecard file: it quotes customer notes.
