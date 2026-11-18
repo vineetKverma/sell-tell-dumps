@@ -28,7 +28,19 @@ Send the output and wait.
 
 ## Step 2b -- upload key v1.5 to the bucket
 
-Written here after Step 2a is confirmed.
+Step 2a confirmed: the file is key v1.5 (`a0baafdd8d68`) and the bucket has
+no `golden_v1.5/` yet. The four files to upload (not the v1.4 manifest):
+
+```powershell
+gcloud storage cp evals\v1\golden_v1.evalset.json evals\v1\golden_v1.5.manifest.json evals\v1\universal_fields.csv evals\v1\vertical_fields.csv gs://sellntell-eval-np/golden_v1.5/
+gcloud storage ls -l gs://sellntell-eval-np/golden_v1.5/
+```
+
+The list must show exactly these four, with these sizes:
+`golden_v1.evalset.json` 220491, `golden_v1.5.manifest.json` 1495,
+`universal_fields.csv` 4221, `vertical_fields.csv` 21557.
+
+Send the output and wait.
 
 ## Step 3a -- the README with the new baseline figures
 
