@@ -15,8 +15,11 @@ function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path
 
 ## Step 1 -- upgrade Git (Bitbucket blocks this Git Credential Manager on November 30, 2026)
 
+Git is already 2.56.1, but its credential manager is still 2.9.1: install the
+credential manager on its own.
+
 ```powershell
-winget upgrade --id Git.Git -e
+winget install --id Git.GCM -e
 ```
 
 Close the terminal, open a new one, then:
@@ -28,7 +31,7 @@ git credential-manager --version
 
 The credential manager must be 3.0.0 or newer. Send the output and wait.
 
-## Step 2 -- the review fixes: three files, then the tests
+## Step 2 -- the review fixes: three files, then the tests (DONE: fingerprints match, 347 passed)
 
 What changed: `extract()` now states the quote rule (a quote already given for
 that topic's products is code 1), and sentence numbers like "[2]" are removed
@@ -51,7 +54,26 @@ Send the output and wait.
 
 ## Step 3 -- the extract() runs again (the prompt changed; a few minutes)
 
-Written here after Step 2 is confirmed.
+The same command as the earlier runs (3 repeats, golden set):
+
+```powershell
+uv run python -m evals.extract_eval.run --model gemini-3.8-flash --thinking low --allow-labelling-model --dispositions
+```
+
+Then, with the new run folder picked up automatically:
+
+```powershell
+$new = (Get-ChildItem evals\runs -Directory -Filter "extract-*" | Sort-Object Name | Select-Object -Last 1).Name
+$new
+Invoke-WebRequest "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/tools/disposition_paired.py" -OutFile C:\tmp\disposition_paired.py -UseBasicParsing
+uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-231424 --new evals\runs\$new
+Get-Content evals\runs\$new\scorecard_golden.md -TotalCount 40
+```
+
+- `$new` must be a folder from today, not `extract-20261116-231424`.
+- Expected: about the same as before, with HL-005 possibly moving to 99.
+
+Send all the output and wait.
 
 ## Step 4 -- the commit and the push
 
