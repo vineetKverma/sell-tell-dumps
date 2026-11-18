@@ -75,7 +75,7 @@ Get-Content evals\runs\$new\scorecard_golden.md -TotalCount 40
 
 Send all the output and wait.
 
-## Step 4 -- the commit and the push
+## Step 4 -- the commit and the push (DONE: 37196ad pushed)
 
 ```powershell
 git add app/extraction/extract.py tests/test_extraction.py evals/README.md
@@ -90,7 +90,7 @@ git status --short
 
 Send the output and wait.
 
-## Step 5 -- the pull request (after Step 4 is pushed)
+## Step 5 -- the pull request (DONE: open, target development)
 
 Open this link; the target branch must be **development**:
 
@@ -173,3 +173,12 @@ Data: `gs://sellntell-eval-np/golden_v1.5/` into `evals/v1/`.
 ````
 
 Send the pull request link once it is open.
+
+## Step 6 -- the Jira update and the reviewer (the last step)
+
+1. On the pull request, add Suresh as a reviewer (it shows 0 reviewers).
+2. On AIML-3152 in Jira, add this comment and move the ticket to review:
+
+```text
+PR raised for review: extract() evidence by sentence number, the business's topic and quote rules, answer key v1.5 (in the eval bucket) and the agent baseline re-measured on it; final run: disposition 95.2%, topic status 99.2%, event type 93.4%.
+```
