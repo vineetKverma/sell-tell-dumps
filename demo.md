@@ -220,3 +220,16 @@ On the pull request, Edit the description, in "Known limits":
 ```
 
 Save the description.
+
+## Step 9 -- the reviewer's test count (reads only)
+
+```powershell
+git ls-files evals/dataset "tests/test_dataset_*"
+git ls-tree -r --name-only origin/development | Select-String "dataset"
+uv run pytest tests/test_dataset_fix_left_material.py -q
+```
+
+- The first two lines must print nothing: neither the PR branch nor `development` tracks the dataset pipeline or its tests.
+- The last line runs the key-fix script's tests (the script that made key v1.5).
+
+Send the output.
