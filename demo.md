@@ -521,6 +521,24 @@ Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 4
 
 Send all outputs.
 
+### Step 11g -- the baseline export (quick-mode disposition left out by design)
+
+Step 11f's export refused only `quick:disposition` (9 topics, one topic is 11
+points: it cannot gate). From `C:\Developer\sellNtell\sell-n-tell`:
+
+```powershell
+uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-175125 evals\runs\full-20261117-203642 evals\runs\full-20261117-234544 --allow-noisy quick:faithfulness quick:disposition
+git diff --stat
+uv run python -m evals.extract_eval.run --rescore evals\runs\extract-20261116-231424
+Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 40
+```
+
+- `git diff --stat` must now list `evals/baselines/golden_v1.json`.
+- The scorecard must no longer say "re-score the baseline first".
+
+Send the export's output and the scorecard lines. Do not commit yet: the
+README gets its baseline figures from this first (Step 13).
+
 ### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
 
 ```powershell
