@@ -190,7 +190,9 @@ CODES_RULE = """- Outcome codes: for each discussed topic, choose the code below
   outcome the rep stated for that campaign, and list the numbers of the sentences that
   state that outcome in outcome_lines. If no code fits, or the rep stated no outcome,
   the code is 99: never pick a code because it sounds close. A topic that was not
-  discussed has no code."""
+  discussed has no code. A quote is code 1 only when the rep has already given the
+  customer a quote for that topic's products; a quote to be sent later, a quote for
+  other products, or the rep asking the customer to order is not code 1."""
 
 
 def build_prompt(note: str, planned: list[str], vertical: str,
@@ -212,6 +214,15 @@ def build_prompt(note: str, planned: list[str], vertical: str,
         codes = f"{CODES_RULE}\n\nOutcome codes:\n{code_lines}\n"
     return (f"{RULES}{codes}\nAccount vertical: {vertical}\n\nPlanned topics (the topic field is the label "
             f"only, never the description):\n{topic_lines}\n\nDictation:\n<<<\n{note}\n>>>")
+
+
+# A sentence number the model wrote into its own text ("Quote asked [2].", "[2, 3]",
+# "[2-3]"). The prompt forbids it; postprocess removes it, so it never reaches the record.
+_LINE_REF = re.compile(r"\s*\[\d+(?:\s*[,;\-–]\s*\d+)*\]")
+
+
+def _no_line_refs(text: Any) -> Any:
+    return _LINE_REF.sub("", text).strip() if isinstance(text, str) else text
 
 
 def _norm(text: str) -> str:
@@ -333,7 +344,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                  "evidence_lines": lines if status == DISCUSSED else [],
                  # kept for an unconfirmed topic (the rep's question is built from it);
                  # the status marks it unverified
-                 "summary": (t or {}).get("summary", "") if status != NOT_DISCUSSED else ""}
+                 "summary": _no_line_refs((t or {}).get("summary", "")) if status != NOT_DISCUSSED else ""}
         if codes:
             code, outcome_lines, outcome = None, [], ""
             if status == DISCUSSED:
@@ -350,12 +361,12 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                     outcome_lines, outcome = [], ""
             topic.update(disposition_code=code, outcome_evidence=outcome, outcome_lines=outcome_lines)
         topics.append(topic)
-    fields = {k.replace("_", "-"): (None if v is None or _norm(v) in NOT_STATED else v)
-              for k, v in (raw.get("must_capture") or {}).items()}
+    fields = {k.replace("_", "-"): _no_line_refs(v) for k, v in (raw.get("must_capture") or {}).items()}
+    fields = {k: (None if v is None or _norm(v) in NOT_STATED else v) for k, v in fields.items()}
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count
         if fields.get(fid) and not _HAS_NUMBER.search(re.sub(r"\s+", " ", fields[fid])):
             fields[fid] = None
-    record = {"event_type": raw["event_type"], "executive_summary": raw.get("executive_summary", ""),
+    record = {"event_type": raw["event_type"], "executive_summary": _no_line_refs(raw.get("executive_summary", "")),
               "topics": topics, "must_capture": fields}
     return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan,
                          codes_downgraded=downgraded, rejected=rejected, ignored_lines=ignored)

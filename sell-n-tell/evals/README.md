@@ -51,7 +51,10 @@ Topic status follows the business's answers from key v1.5: a campaign is
 discussed only if the rep talked with someone at the customer about it, the
 customer's reaction included (preferring another brand or vendor is
 discussed, code 5); material or a voicemail left with no one spoken to is not
-discussed. A quote the rep gave is code 1. `extract()` states these rules.
+discussed. A quote the rep gave is code 1. `extract()` states the topic rule
+and the quote rule; that another brand preferred is code 5 is stated in
+neither prompt (code 5's cues are about vendors), and both got it right on
+the golden set.
 The agent's prompt states only the quote rule (a quote already given for
 that topic's products is code 1; one to be sent later, one for other
 products, or asking for an order is not): with the outcome list's quote cue
@@ -144,8 +147,11 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   lists the numbers, and code copies those sentences into the
   record. The model never types evidence, so it cannot misquote it; a number
   that is not a sentence of the note is ignored (a run saves those as
-  `ignored_lines`). Evidence can be no finer than a sentence: a note with no
-  sentence end is one unit (30 of the 90 golden notes, 27 of them under 20 words).
+  `ignored_lines`); a number the model writes into a summary or a field
+  ("[2]") is removed. Evidence can be no finer than a sentence: a note with no
+  sentence end is one unit (30 of the 90 golden notes, 27 of them under 20
+  words), so citing it counts for any topic; a full stop after an abbreviation
+  ("Mr. Smith") splits a sentence in two.
 - A topic is `discussed` only if the sentences cited for it hold at least two
   different non-filler words, checked in code. That proves the words are the
   rep's, not that they are about the campaign ("Nothing on pools." passes);

@@ -603,6 +603,27 @@ def test_the_prompt_lists_the_codes_only_when_asked():
     assert p.index("Outcome codes") < p.index("Dictation")
 
 
+def test_the_prompt_limits_code_1_to_a_quote_given_for_that_topic():
+    # The business's answer: a quote the rep gave is code 1. The cue words alone ("quoted")
+    # would also pull "will email quote" or a quote for other products to 1.
+    p = " ".join(build_prompt(NOTE, PLANNED, "HS", dispositions=CODES).split())
+    assert "code 1 only when the rep has already given the customer a quote for that topic's products" in p
+    assert "a quote to be sent later, a quote for other products, or the rep asking the customer to order is not code 1" in p
+
+
+def test_sentence_numbers_never_reach_the_record():
+    leaked = raw(executive_summary="Met Frank [1]. Quote asked [2, 3].",
+                 topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": [1],
+                          "summary": "Pricing shared [1]; quote asked [1-2]."},
+                         {"topic": PLANNED[1], "status": "not_discussed", "evidence_lines": [], "summary": ""}],
+                 must_capture={"U_01": "Frank [1]", "U_04": "[2]", "U_10": "[2]", "HS_01": "Rooms [pending]"})
+    rec = postprocess(leaked, NOTE, PLANNED).record
+    assert rec["executive_summary"] == "Met Frank. Quote asked."
+    assert rec["topics"][0]["summary"] == "Pricing shared; quote asked."
+    # a value that was only a number is empty, so null; a count left with no number is dropped
+    assert rec["must_capture"] == {"U-01": "Frank", "U-04": None, "U-10": None, "HS-01": "Rooms [pending]"}
+
+
 def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
     from app.extraction import load_dispositions
     codes = load_dispositions()
