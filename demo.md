@@ -191,6 +191,7 @@ run folder, because the re-score rewrites its summary and scorecard.
 ```powershell
 git log --oneline -1
 Copy-Item -Recurse evalsuns\extract-20261118-132816 C:	mp\extract-20261118-132816-copy
+uns\extract-20261118-132816 C:	mp\extract-20261118-132816-copy
 uv run python -m evals.extract_eval.compare evals/runs/extract-20261116-230453 evals/runs/extract-20261118-132816
 uv run python -m evals.extract_eval.run --rescore evals/runs/extract-20261118-132816 | Select-String -Pattern "Disposition by|Cost:|^\| all|^\| event_type|^\| topic_status|^\| over_claimed|^\| disposition|^\| faithfulness|written"
 uv run python -m evals.extract_eval.compare evals/runs/extract-20261118-132816
