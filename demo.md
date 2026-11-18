@@ -135,7 +135,7 @@ AIML-3152: extract() evidence by sentence number; rules per the business answers
 | Disposition | 80/84 = 95.2% | 80/84 = 95.2% |
 | Topics right by majority | 27 of 28 | 27 of 28 |
 | Topic status | 99.5% | 99.2% |
-| Over-claimed | 0% | 0.7% (one topic, 2 of 3 repeats) |
+| Over-claimed | 0% | 0.7% (2 of 306) |
 | Event type | 91.1% | 93.4% |
 | Faithfulness | 90.7% | 90.0% |
 | Invented fields | 1.6% | 1.3% |
