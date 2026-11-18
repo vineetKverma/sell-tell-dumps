@@ -17,7 +17,7 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 | **AIML-2929** `extract()` go/no-go | **Merged** (PR #13, squash), approved by Suresh. Final head `1fbae31`; results in §6a | — |
 | **AIML-3011 / 3116 / 3117** dialogue steps + `extract()` in the live flow | 8-pointer split into three 3-pointers at Bobby's ask (§11) | Pick in order after 2929 merges |
 | **AIML-3004** disposition code per discussed topic | **Merged** (PR #17, squash), approved by Suresh. Final head `2aabf50`; run `extract-20261110-230607`: disposition 85.6% (agent 67.8%; 25 against 20 of 30 topics, p = 0.23), over-claimed 0%, no wrong code; details in decisions D-73 to D-77 | Follow-up story after the business answers (material left, a quote, a brand refusal): evidence by sentence number, the topic rule, the key correction |
-| **AIML-3152** extract() follow-up | **In progress**, branch `feature/AIML-3152-extract-followup`, no PR yet. Done and measured: evidence by sentence number (the model cites sentence numbers, code copies the words). Run `extract-20261112-151039`: disposition 90.0% (85.6%), topic status 98.2%, unconfirmed 0.0, over-claimed 1/300; value accuracy 75.0% (77.3%) from rewording, event type 237/258 (240); details in decision D-78 | Waits for the business answers (material left, a quote, another brand): the topic and quote rules, the answer-key correction, one more golden run, then the PR |
+| **AIML-3152** extract() follow-up | **Ready for PR**, branch `feature/AIML-3152-extract-followup`. Evidence by sentence number; the business answers in `extract()`'s prompt (topic rule, quote rule) and key v1.5 (in the bucket); the agent's quote rule; sentence numbers stripped from the record. Run `extract-20261118-132816` (key v1.5): disposition 80/84 = 95.2%, topic status 99.2%, event type 93.4%, faithfulness 90.0%, over-claimed 0.7%. Agent baseline re-exported on key v1.5. Decisions D-78 to D-84 | Raise the PR; then Suresh's review |
 | **Dev deployment** | Tested end to end; 12 gaps posted to the team (§10) | App fixes 2-6 when Suresh confirms; no code changes until then |
 | **AIML-3037** Python 3.11+ runtime | Backlog (raised from the PR #11 review) | — |
 | **AIML-3054** scorecard counters (disposition loss, needless reminders) | Backlog (raised from the PR #11 review) | — |
@@ -79,18 +79,20 @@ include 99, an empty record is refused when nothing was planned. Coverage
 needs a planned topic's own label; the read-back says what the rep said; the
 gate's limits are never finer than one item.
 
-**The committed baseline** (three full runs of the merged code, key v1.4):
+**The committed baseline**: replaced by AIML-3152 with three full runs on key
+v1.5, with the agent's quote rule (full-20261117-175125, -203642, -234544):
 
 | Score | Full | Quick |
 |---|---|---|
-| Event type | 81.0% | 90.2% |
-| Topic status | 80.0% | 85.2% |
-| Over-claimed | 21.3% | 18.5% |
-| Disposition | 67.8% | 81.5% |
-| Faithfulness | 56.3% | 52.1% (not gated) |
+| Event type | 83.7% | 87.8% |
+| Topic status | 92.8% | 93.6% |
+| Over-claimed | 7.8% | 9.4% |
+| Disposition | 83.5% (80.0-85.2, limit ±9) | 68.5% (not gated: 9 topics) |
+| Faithfulness | 77.2% | 92.4% |
 
-Full-mode disposition varies 63.3-73.3 between runs, so its limit is about
-±15 points (stated in the README). Over-claimed was added by AIML-2929.
+The AIML-2928 baseline it replaces (key v1.4): event type 81.0%, topic
+status 80.0%, over-claimed 21.3%, disposition 67.8% (63.3-73.3, limit about
+±15), faithfulness 56.3%.
 
 **What was tried for the event-type rule (key v1.4):**
 
