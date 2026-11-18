@@ -539,7 +539,7 @@ Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 4
 Send the export's output and the scorecard lines. Do not commit yet: the
 README gets its baseline figures from this first (Step 13).
 
-### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
+### Step 11b -- NOT NEEDED (replaced by Step 11d's fix and Step 11g)
 
 ```powershell
 uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-001317 evals\runs\full-20261117-025305 evals\runs\full-20261117-110639 --allow-noisy full:disposition quick:disposition
