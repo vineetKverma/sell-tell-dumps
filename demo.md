@@ -52,7 +52,7 @@ git status --short
 
 Send the output and wait.
 
-## Step 3 -- the extract() runs again (the prompt changed; a few minutes)
+## Step 3 -- the extract() runs again (DONE: extract-20261118-132816)
 
 The same command as the earlier runs (3 repeats, golden set):
 
@@ -77,7 +77,18 @@ Send all the output and wait.
 
 ## Step 4 -- the commit and the push
 
-Written here after Step 3 is confirmed.
+```powershell
+git add app/extraction/extract.py tests/test_extraction.py evals/README.md
+git commit -m "AIML-3152: extract() quote rule; sentence numbers removed from summaries and fields"
+git push
+git log --oneline -3
+git status --short
+```
+
+- The commit reports 3 files changed; the push goes to `feature/AIML-3152-extract-followup`.
+- `git status --short` shows only the two untracked items (`??`).
+
+Send the output and wait.
 
 ## Step 5 -- the pull request
 
