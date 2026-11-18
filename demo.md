@@ -5,7 +5,7 @@ Run everything in `C:\Developer\sellNtell\sell-n-tell`.
 ## Step 1 -- the baseline export
 
 ```powershell
-uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-175125 evals\runs\full-20261117-203642 evals\runs\full-20261117-234544 --allow-noisy quick:faithfulness quick:disposition
+uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-175125 evals\runs\full-20261117-203642 evals\runs\full-20261117-234544 --allow-noisy quick:faithfulness --allow-noisy quick:disposition
 git diff --stat
 uv run python -m evals.extract_eval.run --rescore evals\runs\extract-20261116-231424
 Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 40
