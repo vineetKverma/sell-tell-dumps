@@ -487,6 +487,40 @@ for line in open("evals/runs/full-20261117-175125/run1.jsonl", encoding="utf-8")
 It prints the notes of HL-005, MH-015 and HL-006: send the output only to me.
 Do not start the next full runs until this is read.
 
+### Step 11f -- the three new runs: check, compare, export the baseline
+
+From `C:\Developer\sellNtell\sell-n-tell`. First the check and the topic-by-topic view:
+
+```powershell
+Invoke-WebRequest "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/tools/agent_flips.py" -OutFile C:\tmp\agent_flips.py -UseBasicParsing
+Get-ChildItem evals\runs -Directory -Filter "full-*" | ForEach-Object {
+  $f = Join-Path $_.FullName "final_scores.json"
+  if (Test-Path $f) {
+    $j = Get-Content $f -Raw | ConvertFrom-Json
+    "{0}  {1}  scored {2}/{3}  connection errors {4}  no reply {5}  [{6}]" -f $_.Name, $j.verdict, $j.scored, $j.cases, @($j.connection_errors).Count, @($j.no_reply).Count, ($j.problems -join "; ")
+  } else { "{0}  no final_scores.json (stopped early; do not use)" -f $_.Name }
+}
+uv run python C:\tmp\agent_flips.py full-20261117-175125 full-20261117-203642 full-20261117-234544
+```
+
+Then the baseline from the three new runs, and the extract run compared with it:
+
+```powershell
+uv run python -m evals.agent_eval.baseline export evals\runs\full-20261117-175125 evals\runs\full-20261117-203642 evals\runs\full-20261117-234544 --allow-noisy quick:faithfulness
+git diff --stat
+uv run python -m evals.extract_eval.run --rescore evals\runs\extract-20261116-231424
+Get-Content evals\runs\extract-20261116-231424\scorecard_golden.md -TotalCount 40
+```
+
+- If the export refuses and names only `quick:disposition`: quick mode has 9
+  disposition topics, one topic is 11 points, so it cannot gate by design.
+  Run the export line again with `--allow-noisy quick:faithfulness quick:disposition`,
+  then the other three lines.
+- If it names `full:disposition` or anything else: stop and send the message.
+- `git diff --stat` must list `evals/baselines/golden_v1.json`.
+
+Send all outputs.
+
 ### Step 11b -- the export with the agent's disposition out of the verdict (only once agreed)
 
 ```powershell
