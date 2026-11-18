@@ -51,10 +51,12 @@ Topic status follows the business's answers from key v1.5: a campaign is
 discussed only if the rep talked with someone at the customer about it, the
 customer's reaction included (preferring another brand or vendor is
 discussed, code 5); material or a voicemail left with no one spoken to is not
-discussed. A quote the rep gave is code 1. `extract()` states these rules;
-the agent's prompt does not (it shares only the outcome list, with the quote
-cue), so on those cases the key scores the agent against rules it was not
-given.
+discussed. A quote the rep gave is code 1. `extract()` states these rules.
+The agent's prompt states only the quote rule (a quote already given for
+that topic's products is code 1; one to be sent later, one for other
+products, or asking for an order is not): with the outcome list's quote cue
+alone, it gave code 1 to "will email quote" in some runs and not others. On
+the other rules the key scores the agent against rules it was not given.
 For event type the agent's prompt keeps its earlier rule -- "a person they met or spoke
 with, by name or by role" is a Meeting -- because every wording of the
 business rule tried in the prompt cost topic status and faithfulness. So
@@ -85,20 +87,20 @@ rep spoke only to the front desk (the key says On-site visit). `extract()`
   silently: `baseline export` refuses it unless it is named with
   `--allow-noisy`, the baseline records it, and every run lists it under "not
   in the verdict" (in `final_scores.json`, the scorecard header and the
-  console). Today that is faithfulness in quick mode (one summary moves it 6
-  points). Every limit is also at least one item's worth, so a single flipped
-  topic in quick mode (about 9 topics, ~11 points each) is never a
-  regression on its own; still confirm a quick-mode REGRESSION with a full
-  run. Full mode judges both. The committed baseline is three full runs of
-  the code as merged with AIML-2910. Its disposition varies a lot from run
-  to run (63.3-73.3), so the full-mode disposition limit is about +-15
-  points: a drop smaller than about 5 of 30 topics passes unnoticed. Treat
-  a smaller disposition drop as something to look at, not as a pass.
+  console). Today that is disposition in quick mode (9 topics, one topic
+  moves it 11 points). Every limit is also at least one item's worth, so a
+  single flipped topic in quick mode is never a regression on its own; still
+  confirm a quick-mode REGRESSION with a full run. Full mode judges every
+  score. The committed baseline is three full runs on key v1.5, with the
+  agent's quote rule (AIML-3152). Its disposition is 80.0-85.2 from run to
+  run, so the full-mode disposition limit is +-9 points: a drop smaller than
+  about 3 of 28 topics passes unnoticed. Treat a smaller disposition drop as
+  something to look at, not as a pass.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
 not speech; quick mode (18 cases) only catches large drops, and leaves out
 of its verdict whatever the baseline records as too noisy there (today
-faithfulness; field scores are compared, at 0% until the agent captures
+disposition; field scores are compared, at 0% until the agent captures
 fields); per-vertical
 numbers rest on 15 cases each; faithfulness is judged by a model whose
 agreement with a human reviewer has not been measured yet.

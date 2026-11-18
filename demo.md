@@ -31,5 +31,35 @@ gcloud storage ls gs://sellntell-eval-np/golden_v1.5/
 
 ## Step 3 -- the README's final figures, then the commit and the push
 
-Wait for the word: the commands are added here once Step 1's numbers are in
-the README.
+Done (Step 1): `written: ...\evals\baselines\golden_v1.json`.
+
+First the README with the new baseline figures. Paste the `fp` function
+first (one line, plain PowerShell):
+
+```powershell
+function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path $f).Path); $o = New-Object System.Collections.Generic.List[byte]; for ($i = 0; $i -lt $b.Length; $i++) { if (-not ($b[$i] -eq 13 -and $i + 1 -lt $b.Length -and $b[$i + 1] -eq 10)) { $o.Add($b[$i]) } }; $h = [Security.Cryptography.SHA256]::Create().ComputeHash($o.ToArray()); (($h | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 12) + ' ' + $f } }
+```
+
+```powershell
+Invoke-WebRequest "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup/sell-n-tell/evals/README.md" -OutFile evals/README.md -UseBasicParsing
+fp evals/README.md
+uv run pytest tests/ -q
+git branch --show-current
+git status --short
+```
+
+- `fp` must print `3502c09b949a`.
+- Tests: 345 passed, 1 xfailed.
+- The branch is `feature/AIML-3152-extract-followup`.
+- `git status --short` lists exactly these six, all ` M`:
+  `app/extraction/extract.py`, `app/voice_notes_agent/resources/behavioral_rules.yaml`,
+  `evals/README.md`, `evals/baselines/golden_v1.json`, `tests/test_extraction.py`,
+  `tests/test_prompt_rules.py`.
+
+Send the output. Then, only when I say so, the commit and the push:
+
+```powershell
+git add app/extraction/extract.py app/voice_notes_agent/resources/behavioral_rules.yaml evals/README.md evals/baselines/golden_v1.json tests/test_extraction.py tests/test_prompt_rules.py
+git commit -m "AIML-3152: agent quote rule; agent baseline on key v1.5; README figures"
+git push
+```
