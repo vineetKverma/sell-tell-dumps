@@ -49,9 +49,9 @@ Then replay the new evidence rule on the saved run's real sentence numbers
 (no model calls, ids and counts only):
 
 ```powershell
-Invoke-WebRequest "$raw/tools/grounded_check.py" -OutFile C:	mp\grounded_check.py -UseBasicParsing
-fp C:	mp\grounded_check.py
-uv run python C:	mp\grounded_check.py extract-20261118-132816
+Invoke-WebRequest "$raw/tools/grounded_check.py" -OutFile C:\tmp\grounded_check.py -UseBasicParsing
+fp C:\tmp\grounded_check.py
+uv run python C:\tmp\grounded_check.py extract-20261118-132816
 ```
 
 - `fp` must print `bd75134efbf1`.
