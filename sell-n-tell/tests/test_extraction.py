@@ -638,12 +638,23 @@ def test_a_bracketed_number_that_is_not_a_sentence_stays():
                                    "HS-01": "Rooms"}
 
 
-@pytest.mark.xfail(strict=True, reason="known limit: words are counted over all the cited sentences together")
-def test_one_word_in_each_of_two_cited_sentences_is_not_evidence():
-    from app.extraction.extract import cited, enough_words
-    _, text = cited([1, 3], ["Frank.", "Called back today.", "Pools."])
-    assert text == "Frank. ... Pools."
-    assert enough_words(text) is False
+def test_one_word_in_each_of_two_sentences_far_apart_is_not_evidence():
+    from app.extraction.extract import grounded
+    units = ["Frank.", "Called back today.", "Pools.", "Interested."]
+    assert grounded([1, 3], units) is False           # "Frank. ... Pools."
+    assert grounded([3, 4], units) is True            # "Pools. Interested.": neighbours, terse notes need it
+    assert grounded([1, 2], units) is True and grounded([2], units) is True
+    assert grounded([], units) is False
+
+
+def test_a_topic_and_a_code_on_sentences_far_apart_are_not_kept():
+    note = "Frank. Called back today. Pools. Interested."
+    far = raw(topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": [1, 3], "summary": "s"},
+                      {"topic": PLANNED[1], "status": "discussed", "evidence_lines": [3, 4], "summary": "s",
+                       "disposition_code": "1", "outcome_lines": [1, 4]}])
+    res = postprocess(far, note, PLANNED, codes=[1, 99])
+    assert res.unconfirmed == [PLANNED[0]]
+    assert res.record["topics"][1]["status"] == DISCUSSED and res.record["topics"][1]["disposition_code"] == 99
 
 
 def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():

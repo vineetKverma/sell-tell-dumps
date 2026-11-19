@@ -160,10 +160,10 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
 - A topic is `discussed` only if the sentences cited for it hold at least two
   different non-filler words, checked in code. That proves the words are the
   rep's, not that they are about the campaign ("Nothing on pools." passes);
-  that judgement stays the model's and `over_claimed` measures it. The words
-  are counted over all the cited sentences together, so two one-word
-  sentences pass ("Frank. ... Pools."): terse notes need it ("Pools.
-  Interested."), and a test marks the limit. Otherwise
+  that judgement stays the model's and `over_claimed` measures it. The two
+  words must sit in neighbouring sentences: "Pools. Interested." passes,
+  "Frank. ... Pools." (one word from each of two sentences far apart) does
+  not. The same holds for a code's sentences. Otherwise
   the topic is `unconfirmed` (the live flow would ask
   the rep), drops its evidence but keeps its summary (the question to the rep
   is built from it; the status marks it unverified), and scores as not

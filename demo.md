@@ -27,7 +27,8 @@ What changes:
 - A full stop after Mr, Mrs, Ms, Dr, e.g., i.e., vs. or approx. no longer
   ends a sentence. The 90 golden notes split exactly as before.
 - The bare cue "quoted" is dropped from code 1 ("gave a quote" stays).
-- A test pins the one-word-sentences limit again.
+- The two-word evidence check counts words within neighbouring sentences only:
+  "Pools. Interested." passes, "Frank. ... Pools." no longer does.
 - The README states the limits.
 
 ```powershell
@@ -39,16 +40,28 @@ git status --short
 ```
 
 - `git log` must show `028730b`.
-- `fp` must print `806aa777f091`, `d62e52df2912`, `b41c4c6b09f2`, `53a9dcab5586`, `25a5e90e12f8`.
-- Tests: 422 passed, 2 xfailed, 0 failed.
+- `fp` must print `92308b03d3ed`, `d62e52df2912`, `15cdda22da9f`, `53a9dcab5586`, `29d369cd8c63`.
+- Tests: 424 passed, 1 xfailed, 0 failed.
 - `git status --short` lists ` M` for exactly these five files, plus the two
   untracked items.
+
+Then replay the new evidence rule on the saved run's real sentence numbers
+(no model calls, ids and counts only):
+
+```powershell
+Invoke-WebRequest "$raw/tools/grounded_check.py" -OutFile C:	mp\grounded_check.py -UseBasicParsing
+fp C:	mp\grounded_check.py
+uv run python C:	mp\grounded_check.py extract-20261118-132816
+```
+
+- `fp` must print `bd75134efbf1`.
+- Expected: `rejected by the new rule: 0`. If it is not 0, stop and send the output.
 
 If all of that holds:
 
 ```powershell
 git add app/extraction/extract.py app/voice_notes_agent/resources/dispositions.yaml tests/test_extraction.py tests/test_prompt_rules.py evals/README.md
-git commit -m "AIML-3152: review fixes: sentence-number strip, abbreviations, quote cue"
+git commit -m "AIML-3152: review fixes: sentence-number strip, abbreviations, evidence in neighbouring sentences, quote cue"
 git push
 git log --oneline -2
 ```
@@ -77,7 +90,7 @@ Fixed: a bracket is removed only when all its numbers are sentences of that note
 On `two non-adjacent one-word sentences pass enough_words`:
 
 ```text
-Kept as a known limit, since terse notes ("Pools. Interested.") need words counted across sentences. The strict xfail is back, and the docstring and README say so.
+Fixed: the two words must sit in neighbouring sentences, for a topic's evidence and for a code's. "Pools. Interested." still passes, "Frank. ... Pools." does not (tests added). Replayed on the saved run's sentence numbers: no result changes.
 ```
 
 On `sentence splitter breaks on abbreviations`:

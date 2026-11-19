@@ -16,7 +16,8 @@ After the call, code (not the model) settles each planned topic:
 
   - a topic the model marked discussed keeps that status only if the
     sentences it cites hold at least MIN_EVIDENCE_WORDS different words that
-    are not filler (no sentence cited, or only "Pools.", is not evidence).
+    are not filler, within neighbouring sentences (no sentence cited, only
+    "Pools.", or "Frank. ... Pools." is not evidence).
     Otherwise it becomes ``unconfirmed`` (the live flow asks the rep about
     it), never discussed, and it keeps no evidence. Its
     summary is kept, marked unverified by the ``unconfirmed`` status: it is
@@ -267,10 +268,21 @@ def cited(lines: Any, units: list[str]) -> tuple[list[int], str]:
 
 def enough_words(text: str) -> bool:
     """Evidence needs at least MIN_EVIDENCE_WORDS different words that are not
-    filler. Known limits, kept: an apostrophe splits a word ("pool's" is two);
-    words are counted over all the cited sentences together, so two one-word
-    sentences pass ("Frank. ... Pools."), as terse dictations need ("Pools. Interested.")."""
+    filler. Known limit, kept: an apostrophe splits a word ("pool's" is two)."""
     return len(set(re.findall(r"\w+", _norm(text or ""))) - _FILLER) >= MIN_EVIDENCE_WORDS
+
+
+def grounded(ids: list[int], units: list[str]) -> bool:
+    """The cited sentences (``cited``'s numbers) pass ``enough_words`` within
+    one run of neighbouring sentences: "Pools. Interested." passes, one word
+    from each of two sentences far apart ("Frank. ... Pools.") does not."""
+    runs: list[list[int]] = []
+    for i in ids:
+        if runs and i == runs[-1][-1] + 1:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    return any(enough_words(" ".join(units[i - 1] for i in run)) for run in runs)
 
 
 @dataclass
@@ -316,7 +328,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
     Evidence is copied from the note's sentences by the numbers the model
     gave (``cited``), never taken as text from the model.
     With ``codes``: a discussed topic keeps a code other than 99 only if it
-    is one of ``codes`` and the sentences cited for it pass ``enough_words``,
+    is one of ``codes`` and the sentences cited for it pass ``grounded``,
     otherwise 99; a missing code is 99; a topic that is not discussed has
     none. ``codes`` must include 99, the code every fallback writes."""
     if codes and NONE_FITS not in codes:
@@ -347,7 +359,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                  if not (type(i) is int and 1 <= i <= len(units))]
         if stray:
             ignored[label] = stray
-        if status == DISCUSSED and not enough_words(evidence):
+        if status == DISCUSSED and not grounded(lines, units):
             status = UNCONFIRMED
             unconfirmed.append(label)
             rejected[label] = {"evidence_lines": given(t, "evidence_lines")}
@@ -367,7 +379,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                 outcome_lines, outcome = cited(given(t, "outcome_lines"), units)
                 # A code outside the list (the schema refuses it; a direct caller might not),
                 # or one whose sentences fail the topic evidence's rule, is not kept.
-                if code != NONE_FITS and (code not in codes or not enough_words(outcome)):
+                if code != NONE_FITS and (code not in codes or not grounded(outcome_lines, units)):
                     rejected[label] = {"disposition_code": code, "outcome_lines": given(t, "outcome_lines")}
                     code = NONE_FITS
                     downgraded.append(label)
