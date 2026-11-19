@@ -3,14 +3,11 @@
 Run everything in `C:\Developer\sellNtell\sell-n-tell`. Do the steps in order;
 do not start a step until the one before it is confirmed.
 
-This round answers the review on the pull request:
+Done: `development` is merged into the branch (`028730b`, pushed); `app/.env`
+needs no change.
 
-1. bring `development` into the branch (the PR is 8 commits behind);
-2. run the agent on `development` (the "before" the reviewer asked for);
-3. the review fixes;
-4. `extract()` again;
-5. the agent on the branch, for the new baseline;
-6. the commit, the PR text and the replies (written once the numbers are in).
+Steps 1-2 finish the review: the fixes go onto the PR and every comment gets
+its reply. The measurements (Step 3, optional) come after that.
 
 ## Before anything: the `fp` function and the download address
 
@@ -21,43 +18,7 @@ function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path
 $raw = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup"
 ```
 
-Step 1 is done: `development` (at `c5b76c3`) adds AIML-3012, the confirmation
-classifier: 14 files, none of them a file this PR changes.
-Step 2 is done: `development` is merged (`028730b`, pushed); `app/.env` needs
-no change (the four new settings default to the example's values).
-
-## Step 3 -- the agent on `development`, three full runs (the reviewer's "before")
-
-The tree must be clean. This switches to `development` for
-the runs only:
-
-```powershell
-git switch --detach origin/development
-git log --oneline -1
-uv run python -m evals.agent_eval.run full
-uv run python -m evals.agent_eval.run full
-uv run python -m evals.agent_eval.run full
-git switch feature/AIML-3152-extract-followup
-git log --oneline -1
-```
-
-- Each run ends **INVALID**. That is expected: `development`'s committed
-  baseline is on key v1.4. The scores are still written; only the verdict is skipped.
-- The last line must show the merge commit from Step 2.
-
-Then read the three runs (ids and codes only):
-
-```powershell
-$dev = Get-ChildItem evals\runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 3 | ForEach-Object Name
-$dev
-$dev | Set-Content C:\tmp\dev-runs.txt
-Invoke-WebRequest "$raw/tools/agent_flips.py" -OutFile C:\tmp\agent_flips.py -UseBasicParsing
-uv run python C:\tmp\agent_flips.py $dev
-```
-
-Send all the output (not with `--notes`: notes are customer text) and wait.
-
-## Step 4 -- the review fixes: four files, then the tests
+## Step 1 -- the review fixes: five files, the tests, the commit and the push
 
 What changes:
 
@@ -67,68 +28,91 @@ What changes:
   ends a sentence. The 90 golden notes split exactly as before.
 - The bare cue "quoted" is dropped from code 1 ("gave a quote" stays).
 - A test pins the one-word-sentences limit again.
+- The README states the limits.
 
 ```powershell
-foreach ($f in "app/extraction/extract.py", "app/voice_notes_agent/resources/dispositions.yaml", "tests/test_extraction.py", "tests/test_prompt_rules.py") { Invoke-WebRequest "$raw/sell-n-tell/$f" -OutFile $f -UseBasicParsing }
-fp app/extraction/extract.py app/voice_notes_agent/resources/dispositions.yaml tests/test_extraction.py tests/test_prompt_rules.py
+git log --oneline -1
+foreach ($f in "app/extraction/extract.py", "app/voice_notes_agent/resources/dispositions.yaml", "tests/test_extraction.py", "tests/test_prompt_rules.py", "evals/README.md") { Invoke-WebRequest "$raw/sell-n-tell/$f" -OutFile $f -UseBasicParsing }
+fp app/extraction/extract.py app/voice_notes_agent/resources/dispositions.yaml tests/test_extraction.py tests/test_prompt_rules.py evals/README.md
 uv run pytest tests/ -q
 git status --short
 ```
 
-- `fp` must print `806aa777f091`, `d62e52df2912`, `b41c4c6b09f2`, `53a9dcab5586`
-  (confirmed again after Step 2, in case `development` changed any of them).
-- Tests: 422 passed, 2 xfailed (Step 2 gave 421 passed, 1 xfailed).
-- `git status --short` lists ` M` for exactly these four files, plus the two
+- `git log` must show `028730b`.
+- `fp` must print `806aa777f091`, `d62e52df2912`, `b41c4c6b09f2`, `53a9dcab5586`, `25a5e90e12f8`.
+- Tests: 422 passed, 2 xfailed, 0 failed.
+- `git status --short` lists ` M` for exactly these five files, plus the two
   untracked items.
+
+If all of that holds:
+
+```powershell
+git add app/extraction/extract.py app/voice_notes_agent/resources/dispositions.yaml tests/test_extraction.py tests/test_prompt_rules.py evals/README.md
+git commit -m "AIML-3152: review fixes: sentence-number strip, abbreviations, quote cue"
+git push
+git log --oneline -2
+```
 
 Send the output and wait.
 
-## Step 5 -- `extract()` again (3 repeats, golden set)
+## Step 2 -- the PR text and the replies
 
-```powershell
-uv run python -m evals.extract_eval.run --model gemini-3.8-flash --thinking low --allow-labelling-model --dispositions
-$new = (Get-ChildItem evals\runs -Directory -Filter "extract-*" | Sort-Object Name | Select-Object -Last 1).Name
-$new
-uv run python -m evals.extract_eval.compare evals/runs/extract-20261116-230453 evals/runs/$new
-Invoke-WebRequest "$raw/tools/disposition_paired.py" -OutFile C:\tmp\disposition_paired.py -UseBasicParsing
-uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-230453 --new evals\runs\$new
-uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261118-132816 --new evals\runs\$new
-Invoke-WebRequest "$raw/tools/overclaim_units.py" -OutFile C:\tmp\overclaim_units.py -UseBasicParsing
-fp C:\tmp\overclaim_units.py
-uv run python C:\tmp\overclaim_units.py extract-20261116-230453 extract-20261118-132816 $new
+**PR description:** Edit, and in "What changes" replace the `dispositions.yaml`
+bullet with:
+
+```text
+- `dispositions.yaml`: code 1 is also cued by "gave a quote" ("send a quote", "interested" and the bare "quoted" stay out: "quoted" also fits a vendor's quote).
 ```
 
-- `$new` must be a folder from today.
-- `extract-20261116-230453` is `development`, `extract-20261118-132816` is the
-  branch before these fixes. The first paired table compares against
-  `development`; the second shows what dropping "quoted" did.
-- `fp` must print `d65b82929e82`. The last line lists each over-claimed topic
-  and how many sentences its note has (the reviewer's one-unit question).
+Save the description.
 
-Send all the output (numbers and ids only; not the scorecard) and wait.
+**Replies** (one per comment; post each as a reply on its comment, do not resolve):
 
-## Step 6 -- the agent on the branch, three full runs
+On `_no_line_refs strips any [digits]`:
 
-```powershell
-git log --oneline -1
-uv run python -m evals.agent_eval.run full
-uv run python -m evals.agent_eval.run full
-uv run python -m evals.agent_eval.run full
-$br = Get-ChildItem evals\runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 3 | ForEach-Object Name
-$br
-$br | Set-Content C:\tmp\branch-runs.txt
-$dev = Get-Content C:\tmp\dev-runs.txt
-uv run python C:\tmp\agent_flips.py $br
-uv run python C:\tmp\disposition_paired.py --old ($dev | ForEach-Object { "evals\runs\$_" }) --new ($br | ForEach-Object { "evals\runs\$_" })
+```text
+Fixed: a bracket is removed only when all its numbers are sentences of that note and it is not glued to a word. "PO [1234567]", "Qty [10-12] units" and "Model X[2]" now stay (test added).
 ```
 
-- Each run gives a verdict against the committed baseline (same key, v1.5).
-- The paired table is the reviewer's before/after for the agent:
-  `development` against this branch, topic by topic.
+On `two non-adjacent one-word sentences pass enough_words`:
 
-Send all the output and wait.
+```text
+Kept as a known limit, since terse notes ("Pools. Interested.") need words counted across sentences. The strict xfail is back, and the docstring and README say so.
+```
 
-## Step 7 -- the new baseline, the commit, the PR text and the replies
+On `sentence splitter breaks on abbreviations`:
 
-Written once Step 6's numbers are in: the baseline export, the README
-figures, one commit, the PR description and the replies on each comment.
+```text
+(a) Fixed: no split after Mr, Mrs, Ms, Dr, e.g., i.e., vs., approx.; the 90 golden notes split exactly as before. (b) Kept: splitting on ";" or " - " would change 1 of the 30 one-unit notes, and 24 of the 30 discuss no planned topic. Documented in the README.
+```
+
+On `the bare cue "quoted" is risky`:
+
+```text
+Dropped; "gave a quote" stays. 2 of the 3 golden notes with "quoted" are quotes for other products. Tests pin it for both prompts.
+```
+
+On the review summary:
+
+```text
+Production impact: agreed. The quote cue is narrower now; a v1.5 agent run of development next to this branch will be added here. Fields FYI: by design, the agent's stage_visit_notes has no must_capture argument yet (the run report says "Not captured", README: 0% until the agent captures fields). field_invented_rate still catches the agent starting to fill fields.
+```
+
+Send a screenshot once they are posted.
+
+## Step 3 -- the measurements (optional; only if the reviewer asks for them before approving)
+
+Dropping "quoted" changes both prompts, so the PR's figures were taken before
+this change. To refresh them:
+
+- **`extract()`** (minutes):
+
+  ```powershell
+  uv run python -m evals.extract_eval.run --model gemini-3.8-flash --thinking low --allow-labelling-model --dispositions
+  ```
+
+- **The agent before/after the reviewer asked for:** one full run of
+  `development`, then one of the branch. The baseline is re-exported only if
+  the reviewer wants it refreshed.
+
+The exact commands are written when this step starts.
