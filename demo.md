@@ -21,37 +21,22 @@ function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path
 $raw = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup"
 ```
 
-## Step 1 -- what `development` has that the branch does not (reads only)
-
-```powershell
-git branch --show-current
-git log --oneline -1
-git status --short
-git fetch origin
-git log --oneline 37196ad..origin/development
-git diff --stat 37196ad...origin/development
-git diff --name-only 37196ad...origin/development -- app/extraction app/voice_notes_agent/resources evals tests/test_extraction.py tests/test_prompt_rules.py
-```
-
-- The branch is `feature/AIML-3152-extract-followup` at `37196ad`.
-- `git status` shows only the two untracked items (`evals/dataset/` and
-  `tests/test_dataset_fix_left_material.py`).
-- The second `git log` lists the 8 commits.
-- The last line lists the files that both this PR and `development` changed
-  (empty is best). It decides whether the fixes in Step 4 need rework first.
-
-Send all the output and wait.
+Step 1 is done: `development` (at `c5b76c3`) adds AIML-3012, the confirmation
+classifier: 14 files, none of them a file this PR changes.
 
 ## Step 2 -- bring `development` into the branch
 
 ```powershell
 git merge --no-edit origin/development
 git status --short
+fp app/extraction/extract.py tests/test_extraction.py tests/test_prompt_rules.py evals/README.md app/voice_notes_agent/resources/behavioral_rules.yaml
 uv run pytest tests/ -q
 ```
 
 - If the merge reports a conflict, stop and send the output. Do not fix it by hand.
-- Tests: 347 passed, 1 xfailed, plus any tests `development` added.
+- `fp` must still print `3068a1c48c33`, `c4bd3d9b8a30`, `edc8efc167e8`,
+  `383af0f09a08`, `ae5f8814aac0` (the merge left this PR's files as they were).
+- Tests: more than 347 passed (AIML-3012 adds two test files), 1 xfailed, 0 failed.
 
 If both are fine:
 
@@ -73,7 +58,9 @@ powershell -ExecutionPolicy Bypass -Command "& C:\tmp\export-files-md.ps1 -Out C
 - Open `C:\tmp\dev-sync.md`, copy all of it, and paste it into
   `C:\tmp\dev-sync.md` on the local machine (a new file, saved as is).
 
-Send the output, and say when the file is pasted. Wait.
+Send the output, and say when the file is pasted. Wait: before Step 3 the
+local side checks AIML-3012's `app/.env.example` (15 new lines) for settings
+the agent now needs in `app/.env`.
 
 ## Step 3 -- the agent on `development`, three full runs (the reviewer's "before")
 
