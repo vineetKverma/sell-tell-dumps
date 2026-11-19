@@ -113,7 +113,7 @@ git status --short
 
 - `fp` must print `806aa777f091`, `d62e52df2912`, `b41c4c6b09f2`, `53a9dcab5586`
   (confirmed again after Step 2, in case `development` changed any of them).
-- Tests: one more passed than in Step 2, and 2 xfailed.
+- Tests: 422 passed, 2 xfailed (Step 2 gave 421 passed, 1 xfailed).
 - `git status --short` lists ` M` for exactly these four files, plus the two
   untracked items.
 
