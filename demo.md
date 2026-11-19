@@ -8,9 +8,8 @@ the PR description and the replies posted.
 
 What is measured now: dropping the cue "quoted" changed both prompts, so:
 
-- **Step 1 (done):** `extract()` once more;
-- **Steps 2-3:** the agent on `development` and on the branch, one full run
-  each (the reviewer's before/after).
+- **Steps 1-2 (done):** `extract()` once more; the agent on `development`;
+- **Step 3:** the agent on the branch, one full run, and the before/after.
 
 Nothing here changes code or commits anything.
 
@@ -30,24 +29,8 @@ fp C:\tmp\overclaim_units.py
 Step 1 is done: `extract-20261119-175710` (disposition 77/84, 27 of 28 by
 majority, MH-006 right in all 3 repeats, over-claimed 1 of 306).
 
-## Step 2 -- the agent on `development`, one full run (the "before")
-
-```powershell
-git switch --detach origin/development
-git log --oneline -1
-uv run python -m evals.agent_eval.run full
-$dev = (Get-ChildItem evals\runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 1).Name
-$dev
-$dev | Set-Content C:\tmp\agent-dev.txt
-git switch feature/AIML-3152-extract-followup
-git log --oneline -1
-```
-
-- The first `git log` shows `c5b76c3`; the last shows `3bc5683`.
-- The run ends **INVALID**, which is expected: `development`'s committed
-  baseline is on key v1.4, so the verdict is skipped. The scores are written.
-
-Send the output and wait.
+Step 2 is done: the agent on `development` is `full-20261119-182215` (saved in
+`C:\tmp\agent-dev.txt`; INVALID as expected, key v1.4 baseline).
 
 ## Step 3 -- the agent on the branch, one full run (the "after"), and the before/after
 
