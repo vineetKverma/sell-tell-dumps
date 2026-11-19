@@ -8,7 +8,7 @@ the PR description and the replies posted.
 
 What is measured now: dropping the cue "quoted" changed both prompts, so:
 
-- **Step 1:** `extract()` once more;
+- **Step 1 (done):** `extract()` once more;
 - **Steps 2-3:** the agent on `development` and on the branch, one full run
   each (the reviewer's before/after).
 
@@ -27,61 +27,8 @@ fp C:\tmp\overclaim_units.py
 
 - `fp` must print `d65b82929e82`.
 
-## Step 1 -- `extract()` again (3 repeats, golden set; minutes)
-
-```powershell
-git log --oneline -1
-git status --short
-uv run python -m evals.extract_eval.run --model gemini-3.8-flash --thinking low --allow-labelling-model --dispositions
-$new = (Get-ChildItem evals\runs -Directory -Filter "extract-*" | Sort-Object Name | Select-Object -Last 1).Name
-$new
-$new | Set-Content C:\tmp\extract-new.txt
-uv run python -m evals.extract_eval.compare evals/runs/extract-20261116-230453 evals/runs/extract-20261118-132816 evals/runs/$new
-uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-230453 --new evals\runs\$new
-uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261118-132816 --new evals\runs\$new
-uv run python C:\tmp\overclaim_units.py extract-20261116-230453 extract-20261118-132816 $new
-```
-
-- `git log` shows `3bc5683`; `git status` shows only the two untracked items.
-- `$new` must be a folder from today.
-- The three runs are:
-  - `extract-20261116-230453`: `development`;
-  - `extract-20261118-132816`: the branch before the review fixes;
-  - `$new`: the branch now.
-- The compare gives all three side by side.
-- The first paired table compares the branch now against `development`; the
-  second shows what dropping "quoted" did (MH-006 is the topic to watch).
-- The last command lists each over-claimed topic with how many sentences its
-  note has.
-
-Send all the output (numbers and ids only; not the scorecard) and wait.
-
-## Step 1b -- the two read-outs left from Step 1 (reads only)
-
-Step 1's run is `extract-20261119-175710`. The first command is the one that
-failed (`-d` instead of `--old`); the second lists, per topic, the codes that
-were wrong in any repeat (ids and codes only):
-
-```powershell
-uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-230453 --new evals\runs\extract-20261119-175710
-@'
-import json
-for run in ("extract-20261116-230453", "extract-20261118-132816", "extract-20261119-175710"):
-    reps = json.load(open(f"evals/runs/{run}/scores_golden.json", encoding="utf-8"))["cases"]
-    seen = {}
-    for rep in reps:
-        for s in rep:
-            for i, t in enumerate((s or {}).get("topics", []), 1):
-                if "code_ok" in t:
-                    seen.setdefault((s["id"], i, t["expected_code"]), []).append((t["actual_code"], t["code_ok"]))
-    print(run)
-    for (cid, i, want), got in sorted(seen.items()):
-        if not all(ok for _, ok in got):
-            print(f"  {cid} topic {i}: key {want}, repeats {[c for c, _ in got]}")
-'@ | uv run python -
-```
-
-Send the output and wait.
+Step 1 is done: `extract-20261119-175710` (disposition 77/84, 27 of 28 by
+majority, MH-006 right in all 3 repeats, over-claimed 1 of 306).
 
 ## Step 2 -- the agent on `development`, one full run (the "before")
 
