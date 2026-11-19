@@ -122,6 +122,8 @@ def test_code_1_cues_do_not_contradict_99_guidance():
     cues = {k.lower() for k in code_1["mapping_keywords"]}
     assert "interested" not in cues
     assert "send a quote" not in cues
+    # "The customer was quoted $4/ft by their current vendor": the bare word is not the rep's quote.
+    assert "quoted" not in cues
     # The worked example in the prompt maps interest + a quote request to 99.
     assert "interested and asked for a" in _RULES
     assert "the answer is 99" in _RULES

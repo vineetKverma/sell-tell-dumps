@@ -19,7 +19,9 @@ dispositions:
   # an explicit opportunity, or a quote the rep gave: the business confirmed
   # that a quote given to the customer is Create Opportunity, until the list
   # gets an option of its own for it (AIML-3152). A quote only asked for is
-  # still not cued here.
+  # still not cued here, nor the bare word "quoted": it also fits a quote from
+  # another vendor and a quote for other products (2 of the 3 golden notes
+  # with it).
   - name: CREATE_OPPORTUNITY
     code: 1
     label: "Create Opportunity"
@@ -29,7 +31,6 @@ dispositions:
       - "create an opportunity"
       - "new opportunity"
       - "gave a quote"
-      - "quoted"
 
   - name: ORDER_PLACED
     code: 2

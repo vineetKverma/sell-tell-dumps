@@ -218,11 +218,17 @@ def build_prompt(note: str, planned: list[str], vertical: str,
 
 # A sentence number the model wrote into its own text ("Quote asked [2].", "[2, 3]",
 # "[2-3]"). The prompt forbids it; postprocess removes it, so it never reaches the record.
-_LINE_REF = re.compile(r"\s*\[\d+(?:\s*[,;\-–]\s*\d+)*\]")
+# Not glued to a word: "Model X[2]" is a name.
+_LINE_REF = re.compile(r"\s*(?<!\w)\[(\d+(?:\s*[,;\-–]\s*\d+)*)\]")
 
 
-def _no_line_refs(text: Any) -> Any:
-    return _LINE_REF.sub("", text).strip() if isinstance(text, str) else text
+def _no_line_refs(text: Any, count: int) -> Any:
+    """``text`` without the sentence numbers in it: a bracket whose numbers are
+    all sentences of the note (1 to ``count``). Any other bracketed number is
+    the rep's and stays ("PO [1234567]"; "Suite [204]" in a 5-sentence note)."""
+    def drop(m: re.Match) -> str:
+        return "" if all(1 <= int(n) <= count for n in re.findall(r"\d+", m.group(1))) else m.group(0)
+    return _LINE_REF.sub(drop, text).strip() if isinstance(text, str) else text
 
 
 def _norm(text: str) -> str:
@@ -232,13 +238,19 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" .,;:!?\"'")
 
 
+# A full stop after one of these does not end a sentence ("Met Mr. Lee", "e.g. Carrier").
+# Not "etc.", "a.m." or "p.m.": those end a sentence as often as not.
+_NOT_AN_END = "".join(rf"(?<!\b{re.escape(a)})" for a in ("mr.", "mrs.", "ms.", "dr.", "e.g.", "i.e.", "vs.", "approx."))
+_SENTENCE_END = re.compile(rf"(?<=[.!?]){_NOT_AN_END}\s+", re.IGNORECASE)
+
+
 def sentences(note: str) -> list[str]:
     """The dictation as the units the model cites by number: each line, split
     where a sentence ends. The prompt numbers these from 1 and ``postprocess``
     copies evidence from the same list, so a number means the same sentence
     on both sides."""
     return [s.strip() for line in (note or "").splitlines()
-            for s in re.split(r"(?<=[.!?])\s+", line) if s.strip()]
+            for s in _SENTENCE_END.split(line) if s.strip()]
 
 
 def cited(lines: Any, units: list[str]) -> tuple[list[int], str]:
@@ -255,7 +267,9 @@ def cited(lines: Any, units: list[str]) -> tuple[list[int], str]:
 
 def enough_words(text: str) -> bool:
     """Evidence needs at least MIN_EVIDENCE_WORDS different words that are not
-    filler. Known limit, kept: an apostrophe splits a word ("pool's" is two)."""
+    filler. Known limits, kept: an apostrophe splits a word ("pool's" is two);
+    words are counted over all the cited sentences together, so two one-word
+    sentences pass ("Frank. ... Pools."), as terse dictations need ("Pools. Interested.")."""
     return len(set(re.findall(r"\w+", _norm(text or ""))) - _FILLER) >= MIN_EVIDENCE_WORDS
 
 
@@ -344,7 +358,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                  "evidence_lines": lines if status == DISCUSSED else [],
                  # kept for an unconfirmed topic (the rep's question is built from it);
                  # the status marks it unverified
-                 "summary": _no_line_refs((t or {}).get("summary", "")) if status != NOT_DISCUSSED else ""}
+                 "summary": _no_line_refs((t or {}).get("summary", ""), len(units)) if status != NOT_DISCUSSED else ""}
         if codes:
             code, outcome_lines, outcome = None, [], ""
             if status == DISCUSSED:
@@ -361,12 +375,12 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                     outcome_lines, outcome = [], ""
             topic.update(disposition_code=code, outcome_evidence=outcome, outcome_lines=outcome_lines)
         topics.append(topic)
-    fields = {k.replace("_", "-"): _no_line_refs(v) for k, v in (raw.get("must_capture") or {}).items()}
+    fields = {k.replace("_", "-"): _no_line_refs(v, len(units)) for k, v in (raw.get("must_capture") or {}).items()}
     fields = {k: (None if v is None or _norm(v) in NOT_STATED else v) for k, v in fields.items()}
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count
         if fields.get(fid) and not _HAS_NUMBER.search(re.sub(r"\s+", " ", fields[fid])):
             fields[fid] = None
-    record = {"event_type": raw["event_type"], "executive_summary": _no_line_refs(raw.get("executive_summary", "")),
+    record = {"event_type": raw["event_type"], "executive_summary": _no_line_refs(raw.get("executive_summary", ""), len(units)),
               "topics": topics, "must_capture": fields}
     return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan,
                          codes_downgraded=downgraded, rejected=rejected, ignored_lines=ignored)

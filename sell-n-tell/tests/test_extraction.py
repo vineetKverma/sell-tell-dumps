@@ -80,7 +80,10 @@ def test_the_dictation_is_split_into_lines_and_sentences():
     assert sentences(NOTE) == ["Shared mini fridge pricing with Frank.", "He wants a quote for 6 units."]
     assert sentences(BULLETS) == ["- Met Frank", "- Shared mini fridge pricing.", "He wants 6 units!",
                                   "Any discount?", "- Will call back"]
-    assert sentences("3.5 tons, approx. 40 units") == ["3.5 tons, approx.", "40 units"]   # an abbreviation splits; a decimal does not
+    assert sentences("3.5 tons, approx. 40 units") == ["3.5 tons, approx. 40 units"]     # neither an abbreviation nor a decimal splits
+    assert sentences("Met Mr. Lee at 3 p.m. Wants e.g. Carrier. Dr. Ames vs. Mrs. Ruiz, i.e. Ms. Ko.") == [
+        "Met Mr. Lee at 3 p.m.", "Wants e.g. Carrier.", "Dr. Ames vs. Mrs. Ruiz, i.e. Ms. Ko."]
+    assert sentences("Left material etc. Will call back.") == ["Left material etc.", "Will call back."]  # "etc." ends a sentence
     assert sentences("no sentence end at all") == ["no sentence end at all"]              # one unit: the whole note
     assert sentences("") == [] and sentences(None) == [] and sentences(" \n \n") == []
 
@@ -612,7 +615,7 @@ def test_the_prompt_limits_code_1_to_a_quote_given_for_that_topic():
 
 
 def test_sentence_numbers_never_reach_the_record():
-    leaked = raw(executive_summary="Met Frank [1]. Quote asked [2, 3].",
+    leaked = raw(executive_summary="Met Frank [1]. Quote asked [1, 2].",
                  topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": [1],
                           "summary": "Pricing shared [1]; quote asked [1-2]."},
                          {"topic": PLANNED[1], "status": "not_discussed", "evidence_lines": [], "summary": ""}],
@@ -624,6 +627,25 @@ def test_sentence_numbers_never_reach_the_record():
     assert rec["must_capture"] == {"U-01": "Frank", "U-04": None, "U-10": None, "HS-01": "Rooms [pending]"}
 
 
+def test_a_bracketed_number_that_is_not_a_sentence_stays():
+    # NOTE has 2 sentences: only a bracket of 1s and 2s, not glued to a word, is a sentence number.
+    kept = raw(executive_summary="PO [1234567] for Model X[2]; Suite [3].",
+               must_capture={"U_01": "Frank [0]", "U_04": "Qty [10-12] units", "U_10": "[2, 5] units",
+                             "HS_01": "Rooms [1]"})
+    rec = postprocess(kept, NOTE, PLANNED).record
+    assert rec["executive_summary"] == "PO [1234567] for Model X[2]; Suite [3]."
+    assert rec["must_capture"] == {"U-01": "Frank [0]", "U-04": "Qty [10-12] units", "U-10": "[2, 5] units",
+                                   "HS-01": "Rooms"}
+
+
+@pytest.mark.xfail(strict=True, reason="known limit: words are counted over all the cited sentences together")
+def test_one_word_in_each_of_two_cited_sentences_is_not_evidence():
+    from app.extraction.extract import cited, enough_words
+    _, text = cited([1, 3], ["Frank.", "Called back today.", "Pools."])
+    assert text == "Frank. ... Pools."
+    assert enough_words(text) is False
+
+
 def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
     from app.extraction import load_dispositions
     codes = load_dispositions()
@@ -631,7 +653,7 @@ def test_the_registry_gives_codes_1_to_10_and_99_with_their_cues():
     assert codes[2].startswith("Order Placed (e.g. ") and codes[99].startswith("Outcome not covered")
     # The business's answer (AIML-3152): a quote the rep gave is Create Opportunity. A quote
     # only asked for, and interest alone, stay uncued: those cues pulled answers to 1.
-    assert "gave a quote" in codes[1] and "quoted" in codes[1]
+    assert "gave a quote" in codes[1] and "quoted" not in codes[1]   # "quoted" fits a vendor's quote too
     assert "send a quote" not in codes[1] and "interested" not in codes[1]
 
 

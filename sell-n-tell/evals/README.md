@@ -147,15 +147,23 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   lists the numbers, and code copies those sentences into the
   record. The model never types evidence, so it cannot misquote it; a number
   that is not a sentence of the note is ignored (a run saves those as
-  `ignored_lines`); a number the model writes into a summary or a field
-  ("[2]") is removed. Evidence can be no finer than a sentence: a note with no
-  sentence end is one unit (30 of the 90 golden notes, 27 of them under 20
-  words), so citing it counts for any topic; a full stop after an abbreviation
-  ("Mr. Smith") splits a sentence in two.
+  `ignored_lines`); a sentence number the model writes into a summary or a
+  field ("[2]") is removed -- only a bracket whose numbers are all sentences
+  of that note and that is not glued to a word, so "PO [1234567]" and "Model
+  X[2]" stay, while "Suite [2]" in a note of 2 or more sentences is lost. A
+  full stop after Mr, Mrs, Ms, Dr, e.g., i.e., vs. or approx. does not end a
+  sentence; after "etc.", "a.m." or "p.m." it does. Evidence can be no finer
+  than a sentence: a note with no sentence end is one unit (30 of the 90
+  golden notes, 27 of them under 20 words; 24 of the 30 discuss no planned
+  topic), so citing it counts for any topic and the rep's whole note is the
+  evidence. Splitting those on ";" or " - " would change 1 of the 30.
 - A topic is `discussed` only if the sentences cited for it hold at least two
   different non-filler words, checked in code. That proves the words are the
   rep's, not that they are about the campaign ("Nothing on pools." passes);
-  that judgement stays the model's and `over_claimed` measures it. Otherwise
+  that judgement stays the model's and `over_claimed` measures it. The words
+  are counted over all the cited sentences together, so two one-word
+  sentences pass ("Frank. ... Pools."): terse notes need it ("Pools.
+  Interested."), and a test marks the limit. Otherwise
   the topic is `unconfirmed` (the live flow would ask
   the rep), drops its evidence but keeps its summary (the question to the rep
   is built from it; the status marks it unverified), and scores as not
