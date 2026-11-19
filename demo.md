@@ -56,6 +56,33 @@ uv run python C:\tmp\overclaim_units.py extract-20261116-230453 extract-20261118
 
 Send all the output (numbers and ids only; not the scorecard) and wait.
 
+## Step 1b -- the two read-outs left from Step 1 (reads only)
+
+Step 1's run is `extract-20261119-175710`. The first command is the one that
+failed (`-d` instead of `--old`); the second lists, per topic, the codes that
+were wrong in any repeat (ids and codes only):
+
+```powershell
+uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-230453 --new evals\runs\extract-20261119-175710
+@'
+import json
+for run in ("extract-20261116-230453", "extract-20261118-132816", "extract-20261119-175710"):
+    reps = json.load(open(f"evals/runs/{run}/scores_golden.json", encoding="utf-8"))["cases"]
+    seen = {}
+    for rep in reps:
+        for s in rep:
+            for i, t in enumerate((s or {}).get("topics", []), 1):
+                if "code_ok" in t:
+                    seen.setdefault((s["id"], i, t["expected_code"]), []).append((t["actual_code"], t["code_ok"]))
+    print(run)
+    for (cid, i, want), got in sorted(seen.items()):
+        if not all(ok for _, ok in got):
+            print(f"  {cid} topic {i}: key {want}, repeats {[c for c, _ in got]}")
+'@ | uv run python -
+```
+
+Send the output and wait.
+
 ## Step 2 -- the agent on `development`, one full run (the "before")
 
 ```powershell
