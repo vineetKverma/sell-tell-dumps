@@ -22,7 +22,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -38,7 +38,6 @@ from main import (
 )
 from voice_notes_agent import notes_workflow, turn_guard
 from voice_notes_agent.tools import commit_visit_notes, stage_visit_notes
-
 
 
 class MockWebSocket:
@@ -229,22 +228,27 @@ async def test_tools_dual_sync_and_rehydration_restart() -> None:
 
     # Simulate agent delivered readback and rep replied "yes save it"
     turn_guard.record_agent_speech(staged_sid, "Read back summary")
-    turn_guard.record_user_turn(staged_sid)
+    turn_guard.record_user_turn(staged_sid, "yes save it")
 
-    # 3. Call commit_visit_notes in the fresh process
-    commit_res = await commit_visit_notes(tool_context=tool_context)
-    assert commit_res["status"] == "success", f"Commit failed: {commit_res}"
-    assert commit_res["session_id"] == staged_sid
+    from app.voice_notes_agent.confirmation import ConfirmationResult
 
-    # Verify that RAM was rehydrated and tool_context.state has commit_result
-    assert notes_workflow.get_staged(staged_sid) is not None, "Did not rehydrate into RAM"
-    assert tool_context.state.get("commit_result") is not None
-    assert tool_context.state.get("committed") is True
+    with patch("voice_notes_agent.confirmation.interpret_async", new_callable=AsyncMock) as mock_interpret:
+        mock_interpret.return_value = ConfirmationResult(intent="confirm", reasoning="Confirmed in test")
 
-    # 4. Immediate tool retry on committed session
-    retry_res = await commit_visit_notes(tool_context=tool_context)
-    assert retry_res["status"] == "success"
-    assert retry_res["session_id"] == staged_sid
+        # 3. Call commit_visit_notes in the fresh process
+        commit_res = await commit_visit_notes(tool_context=tool_context)
+        assert commit_res["status"] == "success", f"Commit failed: {commit_res}"
+        assert commit_res["session_id"] == staged_sid
+
+        # Verify that RAM was rehydrated and tool_context.state has commit_result
+        assert notes_workflow.get_staged(staged_sid) is not None, "Did not rehydrate into RAM"
+        assert tool_context.state.get("commit_result") is not None
+        assert tool_context.state.get("committed") is True
+
+        # 4. Immediate tool retry on committed session
+        retry_res = await commit_visit_notes(tool_context=tool_context)
+        assert retry_res["status"] == "success"
+        assert retry_res["session_id"] == staged_sid
 
     # Clean up
     notes_workflow.cleanup_session(staged_sid)
@@ -262,7 +266,7 @@ async def test_websocket_disconnect_cleanup_hook() -> None:
 
     async def mock_dictation(ws, uid, sid, planned, campaign):
         # Stage something and set turn_guard state during active call
-        turn_guard.record_user_turn(sid)
+        turn_guard.record_user_turn(sid, "test turn")
         notes_workflow._STAGED_NOTES[sid] = {"mock": "data"}
 
     with patch.object(app_main, "_run_dictation_session", side_effect=mock_dictation):
@@ -371,10 +375,15 @@ async def test_multi_stage_corrections_with_midstream_drop_and_reconnection() ->
 
     # After reconnect, rep speaks on new connection: "Looks good, save it."
     turn_guard.record_agent_speech(session_id, "Summary read back")
-    turn_guard.record_user_turn(session_id)
+    turn_guard.record_user_turn(session_id, "Looks good, save it.")
 
-    # Commit on reconnected session
-    commit_res = await commit_visit_notes(tool_context=tool_context)
+    from app.voice_notes_agent.confirmation import ConfirmationResult
+
+    with patch("voice_notes_agent.confirmation.interpret_async", new_callable=AsyncMock) as mock_interpret:
+        mock_interpret.return_value = ConfirmationResult(intent="confirm", reasoning="Confirmed in test")
+
+        # Commit on reconnected session
+        commit_res = await commit_visit_notes(tool_context=tool_context)
     assert commit_res["status"] == "success"
     assert commit_res["executive_summary"] == "Discussed pricing and efficacy with Dr. Smith."
     assert len(commit_res["topics"]) == 2

@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 # session_id -> number of genuine, non-empty, finished user speech turns seen.
 _TURN_COUNTS: dict[str, int] = {}
+# session_id -> most recent finished user transcript text.
+_LATEST_USER_TEXT: dict[str, str] = {}
 # session_id -> the turn count baseline a reply must exceed to count as new.
 _BASELINES: dict[str, int] = {}
 # session_id -> True if the agent still owes the rep a spoken readback of the
@@ -42,9 +44,16 @@ _AWAITING_READBACK: dict[str, bool] = {}
 _NUDGE_SENT: dict[str, bool] = {}
 
 
-def record_user_turn(session_id: str) -> None:
+def record_user_turn(session_id: str, text: str) -> None:
     """Call from the WS downstream loop on every real finished user turn."""
     _TURN_COUNTS[session_id] = _TURN_COUNTS.get(session_id, 0) + 1
+    # Unconditionally set latest text (or clear on empty turn) to prevent stale reply reuse
+    _LATEST_USER_TEXT[session_id] = (text or "").strip()
+
+
+def get_latest_user_text(session_id: str) -> str:
+    """Return the most recent finished user transcript text for this session."""
+    return _LATEST_USER_TEXT.get(session_id, "")
 
 
 def snapshot(tool_context: ToolContext) -> None:
@@ -139,6 +148,7 @@ def cleanup_session(session_id: str) -> None:
     Evicts session_id from all process-local tracking dictionaries to prevent memory leaks.
     """
     _TURN_COUNTS.pop(session_id, None)
+    _LATEST_USER_TEXT.pop(session_id, None)
     _BASELINES.pop(session_id, None)
     _AWAITING_READBACK.pop(session_id, None)
     _NUDGE_SENT.pop(session_id, None)

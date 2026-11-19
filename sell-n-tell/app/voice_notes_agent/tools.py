@@ -23,8 +23,10 @@ Two tools cover the whole flow:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 
 from google.adk.tools import ToolContext
 
@@ -42,6 +44,10 @@ logger = logging.getLogger(__name__)
 _STAGED_SESSION_KEY = "crm_staged_session_id"
 _LAST_CONFIRMATION_KEY = "crm_last_confirmation_text"
 _CLOSING_STATEMENT = notes_workflow._CLOSING_STATEMENT
+
+# AIML-3012: Per-attempt timeout budget and retry attempts for confirmation intent classification
+CONFIRMATION_TIMEOUT_S = float(os.getenv("CONFIRMATION_TIMEOUT_S", "4.0"))
+CONFIRMATION_MAX_ATTEMPTS = int(os.getenv("CONFIRMATION_MAX_ATTEMPTS", "2"))
 
 # The disposition registry is universal now (no campaign_type, no per-session
 # fetch) -- codes legal for a topic are just every code notes_workflow knows
@@ -447,6 +453,115 @@ async def commit_visit_notes(tool_context: ToolContext) -> dict:
             "error": "no_confirmation_heard",
             "instruction_for_model": reask,
         }
+
+    # AIML-3012: Intent classification guard for rep confirmation.
+    # Look up user transcript using tool_context.session.id (the live WS session),
+    # falling back to staged session_id if tool_context.session is unavailable.
+    user_session_id = (
+        getattr(getattr(tool_context, "session", None), "id", None)
+        or session_id
+    )
+    user_reply = turn_guard.get_latest_user_text(user_session_id)
+    if not user_reply or not user_reply.strip():
+        # Fail safe: missing or whitespace-only transcript is treated as unclear confirmation
+        turn_guard.snapshot(tool_context)
+        return {
+            "status": "error",
+            "error": "unclear_confirmation",
+            "instruction_for_model": (
+                "Do not call commit_visit_notes -- you have not actually "
+                "heard the rep reply yet. Say out loud: 'Sorry, I didn't quite "
+                "catch that. Did you want me to save these visit notes?' "
+                "and wait for their confirmation."
+            ),
+        }
+
+    from .confirmation import ConfirmationResult, interpret_async
+
+    intent_result = None
+    for attempt in range(1, CONFIRMATION_MAX_ATTEMPTS + 1):
+        try:
+            intent_result = await asyncio.wait_for(
+                interpret_async(user_reply),
+                timeout=CONFIRMATION_TIMEOUT_S,
+            )
+            break
+        except asyncio.TimeoutError:
+            if attempt < CONFIRMATION_MAX_ATTEMPTS:
+                logger.info(
+                    "Confirmation classification timed out (attempt %d/%d); retrying...",
+                    attempt,
+                    CONFIRMATION_MAX_ATTEMPTS,
+                )
+                continue
+            logger.warning(
+                "Confirmation classification timed out after %d attempts: session_id=%s",
+                CONFIRMATION_MAX_ATTEMPTS,
+                session_id,
+            )
+            intent_result = ConfirmationResult(
+                intent="unclear",
+                reasoning=f"Async classification timed out after {CONFIRMATION_MAX_ATTEMPTS} attempts",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Confirmation classification failed: session_id=%s, exc=%s",
+                session_id,
+                type(exc).__name__,
+            )
+            intent_result = ConfirmationResult(
+                intent="unclear",
+                reasoning=f"Async classification failed: {type(exc).__name__}",
+            )
+            break
+
+    if intent_result is None:
+        intent_result = ConfirmationResult(
+            intent="unclear",
+            reasoning="Async classification failed: no attempts executed",
+        )
+
+    if intent_result.intent != "confirm":
+        # Snapshot turn count so model cannot retry commit_visit_notes without a new rep reply
+        turn_guard.snapshot(tool_context)
+        logger.warning(
+            "commit_visit_notes BLOCKED by intent classifier: session_id=%s, "
+            "intent=%s, reply_len=%d",
+            session_id,
+            intent_result.intent,
+            len(user_reply),
+        )
+        if intent_result.intent == "correction":
+            detail = intent_result.correction_detail or user_reply
+            return {
+                "status": "blocked",
+                "error": "correction_requested",
+                "instruction_for_model": (
+                    f"The user requested a correction: '{detail}'. Do NOT save "
+                    "or commit the notes. Acknowledge the change, update the notes, "
+                    "and ask for confirmation again."
+                ),
+            }
+        elif intent_result.intent == "skip":
+            return {
+                "status": "blocked",
+                "error": "save_skipped",
+                "instruction_for_model": (
+                    "The user indicated they want to cancel or skip saving these notes. "
+                    "Do NOT call commit_visit_notes. Acknowledge that the notes are not "
+                    "saved and ask how they would like to proceed."
+                ),
+            }
+        else:  # unclear
+            return {
+                "status": "error",
+                "error": "unclear_confirmation",
+                "instruction_for_model": (
+                    "Do not call commit_visit_notes -- the rep's reply was unclear. "
+                    "Say out loud: 'Sorry, I didn't quite catch that. Shall I go ahead "
+                    "and save your visit notes?' and wait for their confirmation."
+                ),
+            }
 
     logger.info("commit_visit_notes tool invoked: session_id=%s", session_id)
 

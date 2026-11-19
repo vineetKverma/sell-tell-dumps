@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pydantic
@@ -32,8 +32,8 @@ sys.path.insert(0, str(_REPO_ROOT))
 import main as app_main
 from main import (
     _SESSION_SLOTS,
-    _SessionSlot,
     NonBlockingVertexAiSessionService,
+    _SessionSlot,
     app,
     websocket_endpoint,
 )
@@ -209,64 +209,69 @@ async def test_comment_7_and_9_consecutive_visits_and_idempotency() -> None:
     tool_context.session = mock_session
     tool_context.state = State(value={"planned_topics": ["TopicA"]}, delta={})
 
-    # --- VISIT 1 ---
-    # 1. Stage Visit 1
-    await stage_visit_notes(
-        event_type="Meeting",
-        executive_summary="Visit 1 Summary",
-        raw_transcript_backup="Visit 1 Transcript",
-        topics=[
-            {
-                "topic": "TopicA",
-                "discussed": True,
-                "disposition_code": 1,
-                "executive_summary": "TopicA discussed",
-            }
-        ],
-        tool_context=tool_context,
-    )
-    turn_guard.record_agent_speech(session_id, "Summary 1")
-    turn_guard.record_user_turn(session_id)
+    from app.voice_notes_agent.confirmation import ConfirmationResult
 
-    # 2. Commit Visit 1
-    commit1 = await commit_visit_notes(tool_context=tool_context)
-    assert commit1["status"] == "success"
-    assert commit1["executive_summary"] == "Visit 1 Summary"
-    assert tool_context.state.get("committed") is True
+    with patch("voice_notes_agent.confirmation.interpret_async", new_callable=AsyncMock) as mock_interpret:
+        mock_interpret.return_value = ConfirmationResult(intent="confirm", reasoning="Confirmed in test")
 
-    # 3. Idempotent Retry of Visit 1 (without fresh staging) returns the same result
-    commit1_retry = await commit_visit_notes(tool_context=tool_context)
-    assert commit1_retry["status"] == "success"
-    assert commit1_retry["executive_summary"] == "Visit 1 Summary"
+        # --- VISIT 1 ---
+        # 1. Stage Visit 1
+        await stage_visit_notes(
+            event_type="Meeting",
+            executive_summary="Visit 1 Summary",
+            raw_transcript_backup="Visit 1 Transcript",
+            topics=[
+                {
+                    "topic": "TopicA",
+                    "discussed": True,
+                    "disposition_code": 1,
+                    "executive_summary": "TopicA discussed",
+                }
+            ],
+            tool_context=tool_context,
+        )
+        turn_guard.record_agent_speech(session_id, "Summary 1")
+        turn_guard.record_user_turn(session_id, "yes, save it")
 
-    # --- VISIT 2 IN SAME SESSION ---
-    # 4. Stage Visit 2 (fresh note in same session)
-    await stage_visit_notes(
-        event_type="Phone Call",
-        executive_summary="Visit 2 Summary (Fresh Note)",
-        raw_transcript_backup="Visit 2 Transcript",
-        topics=[
-            {
-                "topic": "TopicA",
-                "discussed": True,
-                "disposition_code": 2,
-                "executive_summary": "TopicA discussed again",
-            }
-        ],
-        tool_context=tool_context,
-    )
+        # 2. Commit Visit 1
+        commit1 = await commit_visit_notes(tool_context=tool_context)
+        assert commit1["status"] == "success"
+        assert commit1["executive_summary"] == "Visit 1 Summary"
+        assert tool_context.state.get("committed") is True
 
-    # Verify stage_visit_notes cleared commit_result and committed:
-    assert tool_context.state.get("commit_result") is None, "commit_result was not cleared!"
-    assert tool_context.state.get("committed") in (None, False), "committed was not cleared!"
+        # 3. Idempotent Retry of Visit 1 (without fresh staging) returns the same result
+        commit1_retry = await commit_visit_notes(tool_context=tool_context)
+        assert commit1_retry["status"] == "success"
+        assert commit1_retry["executive_summary"] == "Visit 1 Summary"
 
-    turn_guard.record_agent_speech(session_id, "Summary 2")
-    turn_guard.record_user_turn(session_id)
+        # --- VISIT 2 IN SAME SESSION ---
+        # 4. Stage Visit 2 (fresh note in same session)
+        await stage_visit_notes(
+            event_type="Phone Call",
+            executive_summary="Visit 2 Summary (Fresh Note)",
+            raw_transcript_backup="Visit 2 Transcript",
+            topics=[
+                {
+                    "topic": "TopicA",
+                    "discussed": True,
+                    "disposition_code": 2,
+                    "executive_summary": "TopicA discussed again",
+                }
+            ],
+            tool_context=tool_context,
+        )
 
-    # 5. Commit Visit 2 -> MUST commit fresh note and NOT replay Visit 1!
-    commit2 = await commit_visit_notes(tool_context=tool_context)
-    assert commit2["status"] == "success"
-    assert commit2["executive_summary"] == "Visit 2 Summary (Fresh Note)", f"Got stale result: {commit2}"
+        # Verify stage_visit_notes cleared commit_result and committed:
+        assert tool_context.state.get("commit_result") is None, "commit_result was not cleared!"
+        assert tool_context.state.get("committed") in (None, False), "committed was not cleared!"
+
+        turn_guard.record_agent_speech(session_id, "Summary 2")
+        turn_guard.record_user_turn(session_id, "yes, save it")
+
+        # 5. Commit Visit 2 -> MUST commit fresh note and NOT replay Visit 1!
+        commit2 = await commit_visit_notes(tool_context=tool_context)
+        assert commit2["status"] == "success"
+        assert commit2["executive_summary"] == "Visit 2 Summary (Fresh Note)", f"Got stale result: {commit2}"
 
     # Clean up
     notes_workflow.cleanup_session(session_id)
@@ -293,7 +298,7 @@ def test_comment_8_turn_guard_fail_safe_on_restart() -> None:
     # Once snapshotted and rep turn recorded, it passes:
     turn_guard.snapshot(tool_context)
     assert turn_guard.has_new_reply(tool_context) is False  # current = 0, baseline = 0 -> False
-    turn_guard.record_user_turn(session_id)
+    turn_guard.record_user_turn(session_id, "rep reply")
     assert turn_guard.has_new_reply(tool_context) is True   # current = 1, baseline = 0 -> True
 
     turn_guard.cleanup_session(session_id)
@@ -385,10 +390,15 @@ async def test_comment_11_commit_nudge_owed_arms_on_real_commit() -> None:
     )
 
     turn_guard.record_agent_speech(session_id, "Summary readback")
-    turn_guard.record_user_turn(session_id)
+    turn_guard.record_user_turn(session_id, "yes, save it")
 
-    # Call the real commit_visit_notes function
-    real_commit_resp = await commit_visit_notes(tool_context=tool_context)
+    from app.voice_notes_agent.confirmation import ConfirmationResult
+
+    with patch("voice_notes_agent.confirmation.interpret_async", new_callable=AsyncMock) as mock_interpret:
+        mock_interpret.return_value = ConfirmationResult(intent="confirm", reasoning="Confirmed in test")
+
+        # Call the real commit_visit_notes function
+        real_commit_resp = await commit_visit_notes(tool_context=tool_context)
 
     # Verify that the real commit_visit_notes returned status: "success"
     assert real_commit_resp["status"] == "success"

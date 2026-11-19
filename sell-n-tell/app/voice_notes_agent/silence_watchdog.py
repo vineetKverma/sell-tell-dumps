@@ -199,6 +199,18 @@ class SilenceWatchdog:
         self.user_spoke_event.set()
         self.wake_event.set()
 
+    def get_effective_max_prompts(self) -> int:
+        """Return maximum silence prompts for the current session state.
+
+        When notes are staged and awaiting confirmation, AIML-3012 mandates
+        exactly one reminder before closing (2 cycles total: reminder + closing).
+        Otherwise, falls back to self.max_silence_prompts.
+        """
+        staged = notes_workflow.get_staged(self.session_id)
+        if staged is not None:
+            return min(2, self.max_silence_prompts)
+        return self.max_silence_prompts
+
     def build_nudge_prompt(self, count: int, is_final: bool) -> str:
         """Construct context-aware prompt text for Gemini Live."""
         staged = notes_workflow.get_staged(self.session_id)
@@ -233,10 +245,13 @@ class SilenceWatchdog:
         if is_final:
             return (
                 "(automated check-in) The user has remained silent after "
-                "multiple prompts and has not confirmed the staged notes. "
+                "a reminder and has not confirmed the staged notes. "
                 "Politely inform the user out loud that you are closing this "
-                "session due to inactivity, say goodbye, and do not say anything "
-                "further. Do NOT call any tools."
+                "session due to inactivity and that their notes stay unsaved. "
+                "Say EXACTLY out loud: 'I haven't heard back from you, so I've "
+                "left your notes unsaved. You can review or complete them anytime.' "
+                "Say goodbye, and do not say anything further. "
+                "Do NOT call commit_visit_notes or any other tools."
             )
         if count == 1:
             return (
@@ -308,7 +323,6 @@ class SilenceWatchdog:
     ) -> bool:
         """Send prompt to Gemini Live and wait for delivery."""
         count = self.consecutive_silence_count + 1
-        is_final = count >= self.max_silence_prompts
 
         self.user_spoke_event.clear()
         await asyncio.sleep(self.settle_delay_s)
@@ -322,6 +336,8 @@ class SilenceWatchdog:
         ):
             return False
 
+        effective_max = self.get_effective_max_prompts()
+        is_final = count >= effective_max
         prompt_text = self.build_nudge_prompt(count, is_final=is_final)
         self.consecutive_silence_count += 1
         count = self.consecutive_silence_count
@@ -330,7 +346,7 @@ class SilenceWatchdog:
             "(prompt #%d/%d).",
             self.session_id,
             count,
-            self.max_silence_prompts,
+            effective_max,
         )
 
         if is_final:
@@ -358,7 +374,7 @@ class SilenceWatchdog:
         if is_final:
             await asyncio.sleep(self.goodbye_grace_s)
             if (
-                self.consecutive_silence_count >= self.max_silence_prompts
+                self.consecutive_silence_count >= effective_max
                 and not self.is_committed
                 and not self.is_closed
             ):

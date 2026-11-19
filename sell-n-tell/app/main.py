@@ -169,6 +169,23 @@ async def lifespan(app: FastAPI):
     if "_analytics_plugins" in globals() and _analytics_plugins:
         await prewarm_analytics_plugins(_analytics_plugins)
 
+    # Pre-warm and probe confirmation classifier client (AIML-3012)
+    try:
+        from voice_notes_agent.confirmation import (
+            check_confirmation_client,
+            prewarm_confirmation_client,
+            probe_confirmation_client,
+        )
+
+        prewarm_confirmation_client()
+        check_confirmation_client()
+        await probe_confirmation_client()
+    except Exception as exc:
+        logger.warning(
+            "Failed to pre-warm or probe confirmation client during startup: %s",
+            type(exc).__name__,
+        )
+
     yield
 
     prune_task.cancel()
@@ -1102,7 +1119,7 @@ async def _run_dictation_session(
                     # rep had already been asked.
                     if text.strip():
                         silence_watchdog.on_user_speech()
-                        turn_guard.record_user_turn(session_id)
+                        turn_guard.record_user_turn(session_id, text)
                         content = types.Content(parts=[types.Part(text=text)])
                         live_request_queue.send_content(content)
                     else:
@@ -1245,7 +1262,7 @@ async def _run_dictation_session(
                     silence_watchdog.on_user_speech()
                     if it.finished:
                         _cancel_nudges()
-                        turn_guard.record_user_turn(session_id)
+                        turn_guard.record_user_turn(session_id, it.text)
                         responded_since_user_turn = False
                         tool_called_since_user_turn = False
                         nudge_sent_this_cycle = False
