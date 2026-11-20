@@ -8,11 +8,11 @@ the first replies, one agent run of `development` (`full-20261119-182215`)
 and one of the branch (`full-20261119-234138`), and the second-round fixes
 (`15a1bb2`, pushed: citations out of summaries, "sq.", "ft.", "no."; 424
 passed, 1 xfailed; 1 of 90 golden notes splits differently, 0 of 355 saved
-summaries held a bracketed number).
+summaries held a bracketed number), and the replies on the two new comments
+(posted; not resolved until Suresh's "verified").
 
 Left:
 
-- **Step 2:** the replies on those two comments;
 - **Step 3:** the measurements after every fix: `extract()` once more, and the
   agent baseline re-taken (two more branch runs, plus `full-20261119-234138`);
 - then the PR description's results and the reply on the reminder.
@@ -25,22 +25,6 @@ Paste once in the terminal (again in every new terminal):
 function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path $f).Path); $o = New-Object System.Collections.Generic.List[byte]; for ($i = 0; $i -lt $b.Length; $i++) { if (-not ($b[$i] -eq 13 -and $i + 1 -lt $b.Length -and $b[$i + 1] -eq 10)) { $o.Add($b[$i]) } }; $h = [Security.Cryptography.SHA256]::Create().ComputeHash($o.ToArray()); (($h | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 12) + ' ' + $f } }
 $raw = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup"
 ```
-
-## Step 2 -- the replies on the two new comments
-
-Under "Medium: the fix introduces a regression for the usual citation shape":
-
-```text
-Fixed as suggested: summaries and executive_summary drop every bracketed number (glued or out of range); fields keep the conservative rule, so "PO [1234567]" and "Qty [10-12] units" stay. The leak test now has the glued and out-of-range cases (none of the 355 summaries in the last golden run had one).
-```
-
-Under "Low: the abbreviation list misses forms common in pool, hospitality and trades dictation":
-
-```text
-Fixed: no split after "sq." or "ft.", and after "no." only when no number follows, so a bare "No." stays a sentence; "Inc." and "St." left as they are. Tests cover both examples; 1 of the 90 golden notes splits differently.
-```
-
-Do not resolve them yet: wait for Suresh's "verified".
 
 ## Step 3 -- the measurements after every fix (about 3.5 hours, unattended)
 
