@@ -67,20 +67,9 @@ agent runs (development, the baselines, the branch) the agent asks the rep a
 question and stages nothing, and the scripted rep does not answer. The same in
 every run, so it does not move any comparison.
 
-### Terminal 2 -- Step A4: is the unit test's example name the real note?
-
-`tests/test_agent_eval_regression.py` uses a two-word name for HL-006. This
-prints only True or False, never the note:
-
-```powershell
-@'
-from evals.agent_eval.cases import load_cases
-c = next(c for c in load_cases() if c.id == "HL-006")
-print("same as the test's name:", c.note.strip().lower() == "dan lake")
-'@ | uv run python -
-```
-
-Send the output.
+Step A4 done: a unit test held the real note; it is replaced by a placeholder
+(a file to bring in with the baseline commit, after Step B). Terminal 2 is
+finished.
 
 ### Terminal 1 (the one running the agent) -- Step B: the second agent run and the export
 

@@ -388,7 +388,7 @@ def test_a_limit_is_never_finer_than_one_item():
 
 def test_an_agent_that_never_replied_is_counted_on_its_own():
     from evals.agent_eval.run import no_reply
-    silent = {"id": "HL-006", "final": None, "transcript": [["rep (sent)", "Dan Lake"]]}
+    silent = {"id": "HL-006", "final": None, "transcript": [["rep (sent)", "n"]]}
     answered = {"id": "HL-007", "final": None, "transcript": [["rep (sent)", "n"], ["agent", "Could you repeat?"]]}
     broken = {"id": "HL-008", "final": None, "error": "connect: refused", "transcript": [["rep (sent)", "n"]]}
     staged = {"id": "HL-009", "final": {"x": 1}, "transcript": [["rep (sent)", "n"]]}
