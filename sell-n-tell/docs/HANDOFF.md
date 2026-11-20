@@ -17,7 +17,7 @@ moving to, `AIML-2702-baseline.md` for what the agent scores today, and
 | **AIML-2929** `extract()` go/no-go | **Merged** (PR #13, squash), approved by Suresh. Final head `1fbae31`; results in §6a | — |
 | **AIML-3011 / 3116 / 3117** dialogue steps + `extract()` in the live flow | 8-pointer split into three 3-pointers at Bobby's ask (§11) | Pick in order after 2929 merges |
 | **AIML-3004** disposition code per discussed topic | **Merged** (PR #17, squash), approved by Suresh. Final head `2aabf50`; run `extract-20261110-230607`: disposition 85.6% (agent 67.8%; 25 against 20 of 30 topics, p = 0.23), over-claimed 0%, no wrong code; details in decisions D-73 to D-77 | Follow-up story after the business answers (material left, a quote, a brand refusal): evidence by sentence number, the topic rule, the key correction |
-| **AIML-3152** extract() follow-up | **In review** (PR to `development`, reviewer Suresh), branch `feature/AIML-3152-extract-followup`. Evidence by sentence number; the business answers in `extract()`'s prompt (topic rule, quote rule) and key v1.5 (in the bucket); the agent's quote rule; sentence numbers stripped from the record. Run `extract-20261118-132816` (key v1.5): disposition 80/84 = 95.2%, topic status 99.2%, event type 93.4%, faithfulness 90.0%, over-claimed 0.7%. Agent baseline re-exported on key v1.5. Review round: `development` (AIML-3012, confirmation classifier) merged in (`028730b`); fixes pushed (`3bc5683`): only this note's sentence numbers stripped, no split after Mr/Dr/e.g./approx., evidence words within neighbouring sentences, bare cue "quoted" dropped; 424 passed, 1 xfailed on dev; replies posted. Re-measured after the fixes: `extract-20261119-175710` disposition 77/84, 27 of 28 by topic, over-claimed 1 of 306; agent `development` `full-20261119-182215` vs branch `full-20261119-234138`: disposition 24/28 both (3 flips each way, p = 1.0; MH-006 right only on the branch), branch PASS against the baseline. Second review round: summaries drop every bracketed number (glued or out of range; fields keep the narrow rule), no split after "sq.", "ft.", or "no." before a number; Suresh asked for the agent baseline re-taken after the cue change. Decisions D-78 to D-86 | Second-round fixes pushed (`15a1bb2`; 424 passed, 1 xfailed; 1 of 90 golden notes splits differently). Replies posted. Next: `extract()` once more, two more branch agent runs and the baseline re-export (with `full-20261119-234138`); then the README baseline figures, the PR description's results, the reply on the reminder; Suresh's "verified", resolve, merge |
+| **AIML-3152** extract() follow-up | **In review** (PR to `development`, reviewer Suresh), branch `feature/AIML-3152-extract-followup`. Evidence by sentence number; the business answers in `extract()`'s prompt (topic rule, quote rule) and key v1.5 (in the bucket); the agent's quote rule; sentence numbers stripped from the record. Run `extract-20261118-132816` (key v1.5): disposition 80/84 = 95.2%, topic status 99.2%, event type 93.4%, faithfulness 90.0%, over-claimed 0.7%. Agent baseline re-exported on key v1.5. Review round: `development` (AIML-3012, confirmation classifier) merged in (`028730b`); fixes pushed (`3bc5683`): only this note's sentence numbers stripped, no split after Mr/Dr/e.g./approx., evidence words within neighbouring sentences, bare cue "quoted" dropped; 424 passed, 1 xfailed on dev; replies posted. Re-measured after the fixes: `extract-20261119-175710` disposition 77/84, 27 of 28 by topic, over-claimed 1 of 306; agent `development` `full-20261119-182215` vs branch `full-20261119-234138`: disposition 24/28 both (3 flips each way, p = 1.0; MH-006 right only on the branch), branch PASS against the baseline. Second review round: summaries drop every bracketed number (glued or out of range; fields keep the narrow rule), no split after "sq.", "ft.", or "no." before a number; Suresh asked for the agent baseline re-taken after the cue change. Decisions D-78 to D-86 | Second-round fixes pushed (`15a1bb2`; 424 passed, 1 xfailed; 1 of 90 golden notes splits differently). Replies posted. Re-measured: `extract-20261120-113412` disposition 79/84 = 94.0%, 26 of 28 by topic (p = 1.0 vs `development`); agent baseline re-taken from three branch runs (disposition 24/28 in all three, every score in the verdict). A unit test held a real note: replaced by a placeholder. Next: the baseline commit (`golden_v1.json`, README, the test), the PR description's results, the reply on the reminder; Suresh's "verified", resolve, merge |
 | **Dev deployment** | Tested end to end; 12 gaps posted to the team (§10) | App fixes 2-6 when Suresh confirms; no code changes until then |
 | **AIML-3037** Python 3.11+ runtime | Backlog (raised from the PR #11 review) | — |
 | **AIML-3054** scorecard counters (disposition loss, needless reminders) | Backlog (raised from the PR #11 review) | — |
@@ -79,16 +79,22 @@ include 99, an empty record is refused when nothing was planned. Coverage
 needs a planned topic's own label; the read-back says what the rep said; the
 gate's limits are never finer than one item.
 
-**The committed baseline**: replaced by AIML-3152 with three full runs on key
-v1.5, with the agent's quote rule (full-20261117-175125, -203642, -234544):
+**The committed baseline**: re-taken by AIML-3152 after the review fixes,
+three full runs of the branch on key v1.5 (full-20261119-234138,
+full-20261120-113919, full-20261120-141514); every score is in the verdict:
 
 | Score | Full | Quick |
 |---|---|---|
-| Event type | 83.7% | 87.8% |
-| Topic status | 92.8% | 93.6% |
-| Over-claimed | 7.8% | 9.4% |
-| Disposition | 83.5% (80.0-85.2, limit ±9) | 68.5% (not gated: 9 topics) |
-| Faithfulness | 77.2% | 92.4% |
+| Event type | 84.1% (82.6-86.0) | 88.2% |
+| Topic status | 92.0% (91.5-92.3) | 91.4% (88.9-92.6) |
+| Over-claimed | 8.5% (7.8-8.8) | 9.3% (5.6-11.1) |
+| Disposition | 85.7% (all three, limit 5) | 77.8% (all three, limit one topic) |
+| Faithfulness | 77.2% (71.9-79.8) | 90.7% (83.3-94.4) |
+
+The one it replaces (before the review fixes, full-20261117-175125, -203642,
+-234544): event type 83.7%, topic status 92.8%, over-claimed 7.8%,
+disposition 83.5% (80.0-85.2, limit ±9; quick 68.5%, not gated),
+faithfulness 77.2%.
 
 The AIML-2928 baseline it replaces (key v1.4): event type 81.0%, topic
 status 80.0%, over-claimed 21.3%, disposition 67.8% (63.3-73.3, limit about

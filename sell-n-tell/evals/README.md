@@ -90,15 +90,16 @@ rep spoke only to the front desk (the key says On-site visit). `extract()`
   silently: `baseline export` refuses it unless it is named with
   `--allow-noisy`, the baseline records it, and every run lists it under "not
   in the verdict" (in `final_scores.json`, the scorecard header and the
-  console). Today that is disposition in quick mode (9 topics, one topic
-  moves it 11 points). Every limit is also at least one item's worth, so a
-  single flipped topic in quick mode is never a regression on its own; still
-  confirm a quick-mode REGRESSION with a full run. Full mode judges every
-  score. The committed baseline is three full runs on key v1.5, with the
-  agent's quote rule (AIML-3152). Its disposition is 80.0-85.2 from run to
-  run, so the full-mode disposition limit is +-9 points: a drop smaller than
-  about 3 of 28 topics passes unnoticed. Treat a smaller disposition drop as
-  something to look at, not as a pass.
+  console). The committed baseline has none: every score is in the verdict.
+  Every limit is also at least one item's worth, so a single flipped topic in
+  quick mode (9 topics, one topic moves it 11 points) is never a regression on
+  its own; still confirm a quick-mode REGRESSION with a full run. The
+  committed baseline is three full runs of the AIML-3152 branch on key v1.5,
+  after the review fixes. Disposition was the same in all three (full 24 of
+  28 = 85.7%, quick 77.8%), so its limit is the 5-point floor: a drop of 2
+  topics in 28 is a REGRESSION, 1 is not. The earlier baseline's disposition
+  moved 80.0-85.2 between runs, so three equal runs may understate the noise;
+  confirm a disposition-only REGRESSION with a second full run.
 
 Limits to keep in mind: the golden notes are written text sent as text turns,
 not speech; quick mode (18 cases) only catches large drops, and leaves out
