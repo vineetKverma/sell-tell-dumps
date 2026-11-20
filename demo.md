@@ -37,27 +37,9 @@ What changes:
   follows ("PO no. 4567"); a bare "No." still ends a sentence.
 - The README says so.
 
-```powershell
-git log --oneline -1
-foreach ($f in "app/extraction/extract.py", "tests/test_extraction.py", "evals/README.md") { Invoke-WebRequest "$raw/sell-n-tell/$f" -OutFile $f -UseBasicParsing }
-Invoke-WebRequest "$raw/tools/split_check.py" -OutFile C:\tmp\split_check.py -UseBasicParsing
-fp app/extraction/extract.py tests/test_extraction.py evals/README.md C:\tmp\split_check.py
-uv run pytest tests/ -q
-uv run python C:\tmp\split_check.py extract-20261119-175710
-git status --short
-```
-
-- `git log` must show `3bc5683`.
-- `fp` must print `363aff2451cc`, `00e5228cf7c2`, `3174e1833168`, `682eb21fa653`.
-- Tests: 424 passed, 1 xfailed, 0 failed.
-- `split_check` prints ids and counts only: how many golden notes now split
-  differently, and how many saved summaries of the last run still hold a
-  bracketed number (those the new rule removes). Any number is fine here; it
-  goes into the reply.
-- `git status --short` lists ` M` for exactly these three files, plus the two
-  untracked items.
-
-If the tests pass:
+Done: the files are in (fingerprints match), 424 passed, 1 xfailed;
+`split_check`: 1 of 90 golden notes splits differently (HL-001, 4 units to 3),
+0 of 355 saved summaries held a bracketed number. Left:
 
 ```powershell
 git add app/extraction/extract.py tests/test_extraction.py evals/README.md
@@ -73,13 +55,13 @@ Send the output and wait.
 Under "Medium: the fix introduces a regression for the usual citation shape":
 
 ```text
-Fixed as suggested: summaries and executive_summary drop every bracketed number (glued or out of range); fields keep the conservative rule, so "PO [1234567]" and "Qty [10-12] units" stay. The leak test now has the glued and out-of-range cases.
+Fixed as suggested: summaries and executive_summary drop every bracketed number (glued or out of range); fields keep the conservative rule, so "PO [1234567]" and "Qty [10-12] units" stay. The leak test now has the glued and out-of-range cases (none of the 355 summaries in the last golden run had one).
 ```
 
 Under "Low: the abbreviation list misses forms common in pool, hospitality and trades dictation":
 
 ```text
-Fixed: no split after "sq." or "ft.", and after "no." only when no number follows, so a bare "No." stays a sentence; "Inc." and "St." left as they are. Tests cover both examples.
+Fixed: no split after "sq." or "ft.", and after "no." only when no number follows, so a bare "No." stays a sentence; "Inc." and "St." left as they are. Tests cover both examples; 1 of the 90 golden notes splits differently.
 ```
 
 Do not resolve them yet: wait for Suresh's "verified".
