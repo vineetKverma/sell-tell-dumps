@@ -5,12 +5,13 @@ do not start a step until the one before it is confirmed.
 
 Done: `development` merged in (`028730b`), the first review fixes (`3bc5683`),
 the first replies, one agent run of `development` (`full-20261119-182215`)
-and one of the branch (`full-20261119-234138`).
+and one of the branch (`full-20261119-234138`), and the second-round fixes
+(`15a1bb2`, pushed: citations out of summaries, "sq.", "ft.", "no."; 424
+passed, 1 xfailed; 1 of 90 golden notes splits differently, 0 of 355 saved
+summaries held a bracketed number).
 
-The second review round asks for:
+Left:
 
-- **Step 1:** two `extract()` fixes (glued sentence numbers in summaries;
-  "sq.", "ft.", "no." splitting a fact), the tests, the commit and the push;
 - **Step 2:** the replies on those two comments;
 - **Step 3:** the measurements after every fix: `extract()` once more, and the
   agent baseline re-taken (two more branch runs, plus `full-20261119-234138`);
@@ -25,32 +26,7 @@ function fp { foreach ($f in $args) { $b = [IO.File]::ReadAllBytes((Resolve-Path
 $raw = "https://raw.githubusercontent.com/vineetKverma/sell-tell-dumps/feature/AIML-3152-extract-followup"
 ```
 
-## Step 1 -- the two fixes: three files, the tests, a check, the commit and the push
-
-What changes:
-
-- In a summary and `executive_summary` (the model's own text) every bracketed
-  number is removed, glued to a word or not ("shared[1]", "asked [7]"). In a
-  field (the rep's values) the rule stays as it was, so "PO [1234567]" and
-  "Qty [10-12] units" keep their numbers.
-- No sentence split after "sq." or "ft.", nor after "no." when a number
-  follows ("PO no. 4567"); a bare "No." still ends a sentence.
-- The README says so.
-
-Done: the files are in (fingerprints match), 424 passed, 1 xfailed;
-`split_check`: 1 of 90 golden notes splits differently (HL-001, 4 units to 3),
-0 of 355 saved summaries held a bracketed number. Left:
-
-```powershell
-git add app/extraction/extract.py tests/test_extraction.py evals/README.md
-git commit -m "AIML-3152: review fixes: citations in summaries, sq./ft./no. abbreviations"
-git push
-git log --oneline -2
-```
-
-Send the output and wait.
-
-## Step 2 -- the replies on the two new comments (after the push)
+## Step 2 -- the replies on the two new comments
 
 Under "Medium: the fix introduces a regression for the usual citation shape":
 
@@ -91,8 +67,9 @@ uv run python -m evals.agent_eval.baseline export evals/runs/full-20261119-23413
 git status --short
 ```
 
-- `git log` shows the Step 1 commit; `git status` (first) shows only the two
-  untracked items.
+- `git log` shows `15a1bb2`; `git status` (first) shows only the three
+  untracked items (`demo.md`, `evals/dataset/`,
+  `tests/test_dataset_fix_left_material.py`).
 - The three `extract()` runs in the compare are `development`, the branch
   after the first fixes, and the branch now.
 - `$b2` and `$b3` must be two different folders from today.
