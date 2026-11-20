@@ -11,6 +11,10 @@ passed, 1 xfailed; 1 of 90 golden notes splits differently, 0 of 355 saved
 summaries held a bracketed number), and the replies on the two new comments
 (posted; not resolved until Suresh's "verified").
 
+`extract()` re-measured: `extract-20261120-113412` (disposition 79/84 = 94.0%,
+key 99 45/45, real code 34/39; over-claimed 1 of 306; 0 unconfirmed). The two
+paired tables are re-run separately (the path broke in the paste).
+
 Left:
 
 - **Step 3:** the measurements after every fix: `extract()` once more, and the
@@ -37,15 +41,15 @@ The two fixes change only `extract()`, which the agent does not use, so
 git log --oneline -1
 git status --short
 uv run python -m evals.extract_eval.run --model gemini-3.8-flash --thinking low --allow-labelling-model --dispositions
-$new = (Get-ChildItem evals\runs -Directory -Filter "extract-*" | Sort-Object Name | Select-Object -Last 1).Name
+$new = (Get-ChildItem evals/runs -Directory -Filter "extract-*" | Sort-Object Name | Select-Object -Last 1).Name
 $new
 uv run python -m evals.extract_eval.compare evals/runs/extract-20261116-230453 evals/runs/extract-20261119-175710 evals/runs/$new
-uv run python C:\tmp\disposition_paired.py --old evals\runs\extract-20261116-230453 --new evals\runs\$new
-uv run python C:\tmp\overclaim_units.py extract-20261119-175710 $new
+uv run python C:/tmp/disposition_paired.py --old evals/runs/extract-20261116-230453 --new evals/runs/$new
+uv run python C:/tmp/overclaim_units.py extract-20261119-175710 $new
 uv run python -m evals.agent_eval.run full
-$b2 = (Get-ChildItem evals\runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 1).Name
+$b2 = (Get-ChildItem evals/runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 1).Name
 uv run python -m evals.agent_eval.run full
-$b3 = (Get-ChildItem evals\runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 1).Name
+$b3 = (Get-ChildItem evals/runs -Directory -Filter "full-*" | Sort-Object CreationTime | Select-Object -Last 1).Name
 $b2; $b3
 uv run python -m evals.agent_eval.baseline export evals/runs/full-20261119-234138 evals/runs/$b2 evals/runs/$b3 --allow-noisy quick:disposition
 git status --short
