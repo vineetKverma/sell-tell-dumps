@@ -18,11 +18,11 @@ request.
 ### Step F1 -- the message to Jeremy (Teams, the chat with his earlier answers)
 
 ```text
-Hi Jeremy, thanks again for the answers. Two follow-ups on quotes came out of testing them:
+Hi Jeremy, thanks again for the answers. Following your answer 2 (a quote given = Create Opportunity), two follow-ups on quotes not given yet. This only decides the campaign's outcome; the quote itself is recorded in the commercial outcome field either way.
 
-5. The customer asks for a quote on the campaign's products, but no quote has been given yet ("She asked me for a quote on the microwaves" or "He'll send me what he orders so I can quote it"). Create Opportunity, or needs review (99)?
+5. The customer asks for a quote on the campaign's products ("She asked me for a quote on the microwaves" or "He'll send me what he orders so I can quote it"). Create Opportunity, or needs review (99)?
 
-6. The rep says they'll send a quote, but the customer didn't ask for one ("Went over the microwaves, I'll email her a quote"). Create Opportunity, or needs review (99)?
+6. The rep offers to send a quote, but the customer didn't ask for one ("Went over the microwaves, I'll email her a quote"). Create Opportunity, or needs review (99)?
 
 Something like "5: 1, 6: 99" works perfectly. Thanks!
 ```
