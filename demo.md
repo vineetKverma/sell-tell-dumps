@@ -34,7 +34,40 @@ so its prompt is unchanged: a run-to-run difference).
 
 Step A2 done (per-topic misses): the branch now misses only HL-005 (99 in all
 3 repeats, the disputed key) and IS-010 (`[None, None, 3]`: marked not
-discussed in 2 repeats, right code when discussed). Terminal 2 is finished.
+discussed in 2 repeats, right code when discussed).
+
+### Terminal 2 -- Step A3 (optional): why HL-006 is never staged
+
+Reads only; counts only, no note or agent text:
+
+```powershell
+@'
+import json
+from pathlib import Path
+from evals.agent_eval.cases import load_cases
+c = next(c for c in load_cases() if c.id == "HL-006")
+print(f"HL-006 note: {len(c.note.split())} words, {len(c.planned_topics)} planned topics, "
+      f"key: {sum(bool(t.get('discussed')) for t in c.topics)} discussed")
+for run in sorted(Path("evals/runs").glob("full-*")):
+    f = run / "run1.jsonl"
+    if not f.exists():
+        continue
+    for line in f.read_text(encoding="utf-8").splitlines():
+        r = json.loads(line)
+        if r.get("id") == "HL-006":
+            agent = [t for who, t in r.get("transcript") or [] if who == "agent"]
+            print(f"  {run.name}: stage calls {r.get('stage_calls')}, agent lines {len(agent)} "
+                  f"({sum(len(t) for t in agent)} chars, ends with '?': {bool(agent) and agent[-1].strip().endswith('?')}), "
+                  f"error {bool(r.get('error'))}")
+'@ | uv run python -
+```
+
+- If the note is a few words and every run shows `stage calls 0` and
+  `agent lines 0`: the agent answers with an empty turn (the known S-05 case).
+- If `agent lines` is above 0 and ends with '?': the agent asks the rep a
+  question, which the scripted rep does not answer.
+
+Send the output.
 
 ### Terminal 1 (the one running the agent) -- Step B: the second agent run and the export
 
