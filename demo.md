@@ -11,9 +11,10 @@ request.
   re-taken and committed (`1d97230`).
 - The two misses explained by a focused experiment: HL-005 (the quote rule)
   and IS-010 (the topic rule). The business answers and the key correction go
-  to a follow-up story, with the baseline re-run.
+  to the follow-up story AIML-3338 (created, 3 points), with the baseline
+  re-run; picked up after Jeremy replies.
 
-## Now: three things to send (any order), then Step F on the PR
+## Now: the message to Jeremy, then Step F on the PR
 
 ### Step F1 -- the message to Jeremy (Teams, the chat with his earlier answers)
 
@@ -25,40 +26,6 @@ Hi Jeremy, thanks again for the answers. Following your answer 2 (a quote given 
 6. The rep offers to send a quote, but the customer didn't ask for one ("Went over the microwaves, I'll email her a quote"). Create Opportunity, or needs review (99)?
 
 Something like "5: 1, 6: 99" works perfectly. Thanks!
-```
-
-### Step F2 -- the follow-up story (Jira, 3 points)
-
-Title:
-
-```text
-Apply the product manager's quote answers and correct two answer-key labels; re-take the baselines
-```
-
-Description:
-
-```text
-Background
-AIML-3152 left two golden topics where development scores higher than the branch. A focused experiment traced each to a case the rules don't settle yet:
-- HL-005: a quote the customer asked for (key: code 1; the branch gives 99).
-- IS-010: "Revisit <campaign>" with no conversation stated (key: discussed, code 3; the branch is split between discussed and not discussed).
-
-Scope
-1. Quote rule: apply the product manager's answers (a quote the customer asked for; a quote the rep offers to send) to extract()'s prompt and to the agent's behavioral_rules.yaml, and to the dispositions.yaml cue if needed.
-2. Answer key v1.5, corrected in place:
-   - IS-010 becomes not discussed, per the business answer on material left (discussed only when someone was spoken to about it);
-   - HL-005 follows answer 5.
-   Done with a fix script and a test, uploaded to the bucket, README updated.
-3. Re-measure:
-   - extract() golden run (3 repeats) against development;
-   - three full agent runs and the baseline re-export;
-   - the README baseline figures.
-
-Acceptance criteria
-- Both prompts state the same quote rule, with tests that include a negative control: a quote for other products, or the rep asking for an order, is never code 1.
-- The rule experiment (tools/rule_probe.py) gets every written quote case right, including the two new ones, with no case flipping between repeats.
-- Key v1.5 corrected; every saved run used in comparisons is re-scored on it.
-- The extract() run and the new agent baseline are committed, with a before/after against development in the PR.
 ```
 
 ### Step F -- the PR description and the reply on the reminder
@@ -108,7 +75,7 @@ The title stays.
 | Faithfulness | 90.7% | 89.6% |
 | Invented fields | 1.6% | 1.3% |
 
-By topic the two differ on 3 topics, not significant (p = 1.0). The branch gets MH-006 right (a quote given, code 1). `development` gets HL-005 and IS-010, both explained under the limits: each is a case the business has not ruled on yet, and each goes to the follow-up story.
+By topic the two differ on 3 topics, not significant (p = 1.0). The branch gets MH-006 right (a quote given, code 1). `development` gets HL-005 and IS-010, both explained under the limits: each is a case the business has not ruled on yet, and each goes to AIML-3338.
 
 The agent, one full run each on key v1.5: `development` and this branch both get 24 of 28 topics' disposition right (3 flips each way, p = 1.0; MH-006 right only on the branch). The branch run is PASS against the earlier baseline.
 
@@ -133,7 +100,7 @@ Disposition did not move between runs, so its limit is the 5-point floor: a drop
 - **The two topics `development` gets and this branch does not** (5 of 84 repeats), measured with a focused experiment (5 repeats, one rule changed at a time):
   - **HL-005** (the customer will send items to be quoted; key: code 1). Cause: the quote rule here gives 99 to a quote not yet given. Saying "a quote the customer asked for is code 1" gives HL-005 code 1 in 5 of 5 and keeps every other quote case right, but also turns "I will email her a quote" (no one asked) into code 1 in 3 of 5. The business has answered only for a quote given; the two other cases are asked of the product manager.
   - **IS-010** ("Revisit <campaign>" with no conversation about it stated; key: discussed, code 3). Cause: the topic rule here, which needs someone at the customer to have talked about the campaign; `development`'s wording gets it 5 of 5 but marked a material-left topic discussed once. By the business's answer on material left (discussed only when someone was spoken to about it), the key's "discussed" is the one to correct.
-  - **Follow-up story:** apply the product manager's answers to both prompts, correct both labels in key v1.5, re-run `extract()` and the agent baseline.
+  - **Follow-up story AIML-3338:** apply the product manager's answers to both prompts, correct both labels in key v1.5, re-run `extract()` and the agent baseline.
 - **The agent and `extract()` follow different rules, by design**:
   - **Topic and event-type rules:** the agent's prompt has the quote rule only, not the topic rule (material left) or the event-type rule, so key v1.5 counts those cases against it.
   - **Code 5:** "another brand preferred" is stated in neither prompt (code 5's cues are about vendors); both got it right on the golden set.
@@ -159,9 +126,8 @@ Data: `gs://sellntell-eval-np/golden_v1.5/` into `evals/v1/`.
 Reply under it; do not resolve it.
 
 ```text
-Re-measured after both review rounds: extract() 79/84 vs development 80/84 (p = 1.0); agent 24/28 on both; baseline re-taken from three branch runs and committed. The two topics development gets (HL-005, IS-010) are traced to cases the business hasn't ruled on; they go to a follow-up story, details in the description.
+Re-measured after both review rounds: extract() 79/84 vs development 80/84 (p = 1.0); agent 24/28 on both; baseline re-taken from three branch runs and committed. The two topics development gets (HL-005, IS-010) are traced to cases the business hasn't ruled on; they go to AIML-3338, details in the description.
 ```
 
-Send a screenshot once the message, the story, the description and the reply
-are posted (the story's number, so the description can name it), then wait
-for Jeremy's answers and Suresh's "verified".
+Send a screenshot once the message, the description and the reply are
+posted, then wait for Jeremy's answers and Suresh's "verified".
