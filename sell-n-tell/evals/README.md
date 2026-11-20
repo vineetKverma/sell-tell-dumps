@@ -147,12 +147,15 @@ uv run python -m evals.extract_eval.run --model <model> --repeats 1 --limit 10  
   lists the numbers, and code copies those sentences into the
   record. The model never types evidence, so it cannot misquote it; a number
   that is not a sentence of the note is ignored (a run saves those as
-  `ignored_lines`); a sentence number the model writes into a summary or a
-  field ("[2]") is removed -- only a bracket whose numbers are all sentences
-  of that note and that is not glued to a word, so "PO [1234567]" and "Model
-  X[2]" stay, while "Suite [2]" in a note of 2 or more sentences is lost. A
-  full stop after Mr, Mrs, Ms, Dr, e.g., i.e., vs. or approx. does not end a
-  sentence; after "etc.", "a.m." or "p.m." it does. Evidence can be no finer
+  `ignored_lines`); a sentence number the model writes into its own text is
+  removed. In a summary (the model's prose) every bracketed number goes,
+  glued to a word or not, in range or not ("shared[1]", "asked [7]"). In a
+  field (the rep's values) only a bracket whose numbers are all sentences of
+  that note and that is not glued to a word, so "PO [1234567]", "Qty [10-12]
+  units" and "Model X[2]" stay, while "Suite [2]" in a note of 2 or more
+  sentences is lost. A full stop after Mr, Mrs, Ms, Dr, e.g., i.e., vs.,
+  approx., sq. or ft. does not end a sentence, nor after "no." when a number
+  follows ("PO no. 4567"); after "etc.", "a.m." or "p.m." it does. Evidence can be no finer
   than a sentence: a note with no sentence end is one unit (30 of the 90
   golden notes, 27 of them under 20 words; 24 of the 30 discuss no planned
   topic), so citing it counts for any topic and the rep's whole note is the

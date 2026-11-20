@@ -84,6 +84,11 @@ def test_the_dictation_is_split_into_lines_and_sentences():
     assert sentences("Met Mr. Lee at 3 p.m. Wants e.g. Carrier. Dr. Ames vs. Mrs. Ruiz, i.e. Ms. Ko.") == [
         "Met Mr. Lee at 3 p.m.", "Wants e.g. Carrier.", "Dr. Ames vs. Mrs. Ruiz, i.e. Ms. Ko."]
     assert sentences("Left material etc. Will call back.") == ["Left material etc.", "Will call back."]  # "etc." ends a sentence
+    assert sentences("Pool is 2,000 sq. ft. and needs heaters.") == ["Pool is 2,000 sq. ft. and needs heaters."]
+    # "no." ends a sentence only when no number follows: "PO no. 4567" is a label, "No." an answer
+    assert sentences("PO no. 4567 placed for 6 units.") == ["PO no. 4567 placed for 6 units."]
+    assert sentences("Any order? No. Will call back.") == ["Any order?", "No.", "Will call back."]
+    assert sentences("Left a card at Reno. 5 units next week.") == ["Left a card at Reno.", "5 units next week."]
     assert sentences("no sentence end at all") == ["no sentence end at all"]              # one unit: the whole note
     assert sentences("") == [] and sentences(None) == [] and sentences(" \n \n") == []
 
@@ -615,27 +620,28 @@ def test_the_prompt_limits_code_1_to_a_quote_given_for_that_topic():
 
 
 def test_sentence_numbers_never_reach_the_record():
-    leaked = raw(executive_summary="Met Frank [1]. Quote asked [1, 2].",
+    # The summaries are the model's prose: every bracketed number goes, glued to a word
+    # ("shared[1]", the usual citation shape) or out of range ("[7]" in a 2-sentence note).
+    leaked = raw(executive_summary="Met Frank [1]. Pricing shared[1]. Quote asked [7]; order pending[2, 9].",
                  topics=[{"topic": PLANNED[0], "status": "discussed", "evidence_lines": [1],
-                          "summary": "Pricing shared [1]; quote asked [1-2]."},
+                          "summary": "Pricing shared [1]; quote asked[1-2]."},
                          {"topic": PLANNED[1], "status": "not_discussed", "evidence_lines": [], "summary": ""}],
                  must_capture={"U_01": "Frank [1]", "U_04": "[2]", "U_10": "[2]", "HS_01": "Rooms [pending]"})
     rec = postprocess(leaked, NOTE, PLANNED).record
-    assert rec["executive_summary"] == "Met Frank. Quote asked."
+    assert rec["executive_summary"] == "Met Frank. Pricing shared. Quote asked; order pending."
     assert rec["topics"][0]["summary"] == "Pricing shared; quote asked."
     # a value that was only a number is empty, so null; a count left with no number is dropped
     assert rec["must_capture"] == {"U-01": "Frank", "U-04": None, "U-10": None, "HS-01": "Rooms [pending]"}
 
 
-def test_a_bracketed_number_that_is_not_a_sentence_stays():
-    # NOTE has 2 sentences: only a bracket of 1s and 2s, not glued to a word, is a sentence number.
-    kept = raw(executive_summary="PO [1234567] for Model X[2]; Suite [3].",
-               must_capture={"U_01": "Frank [0]", "U_04": "Qty [10-12] units", "U_10": "[2, 5] units",
-                             "HS_01": "Rooms [1]"})
+def test_a_bracketed_number_in_a_field_that_is_not_a_sentence_stays():
+    # Fields hold the rep's values. NOTE has 2 sentences: only a bracket of 1s and 2s,
+    # not glued to a word, is a sentence number there.
+    kept = raw(must_capture={"U_01": "PO [1234567] for Model X[2]", "U_04": "Qty [10-12] units",
+                             "U_10": "[2, 5] units", "HS_01": "Rooms [1]"})
     rec = postprocess(kept, NOTE, PLANNED).record
-    assert rec["executive_summary"] == "PO [1234567] for Model X[2]; Suite [3]."
-    assert rec["must_capture"] == {"U-01": "Frank [0]", "U-04": "Qty [10-12] units", "U-10": "[2, 5] units",
-                                   "HS-01": "Rooms"}
+    assert rec["must_capture"] == {"U-01": "PO [1234567] for Model X[2]", "U-04": "Qty [10-12] units",
+                                   "U-10": "[2, 5] units", "HS-01": "Rooms"}
 
 
 def test_one_word_in_each_of_two_sentences_far_apart_is_not_evidence():

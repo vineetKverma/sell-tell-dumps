@@ -217,16 +217,27 @@ def build_prompt(note: str, planned: list[str], vertical: str,
             f"only, never the description):\n{topic_lines}\n\nDictation:\n<<<\n{note}\n>>>")
 
 
-# A sentence number the model wrote into its own text ("Quote asked [2].", "[2, 3]",
-# "[2-3]"). The prompt forbids it; postprocess removes it, so it never reaches the record.
-# Not glued to a word: "Model X[2]" is a name.
+# A sentence number the model wrote into its own text ("Quote asked [2].", "shared[1].",
+# "[2, 3]", "[2-3]"). The prompt forbids it; postprocess removes it, so it never reaches
+# the record.
+_ANY_REF = re.compile(r"\s*\[\d+(?:\s*[,;\-–]\s*\d+)*\]")
+# In a field, only when not glued to a word: "Model X[2]" is a name.
 _LINE_REF = re.compile(r"\s*(?<!\w)\[(\d+(?:\s*[,;\-–]\s*\d+)*)\]")
 
 
+def _no_refs(text: Any) -> Any:
+    """Model prose (a summary, ``executive_summary``) without any bracketed
+    number, glued or not, a sentence of the note or not: the rep dictates no
+    brackets, so one in the model's own words is a citation (a wrong one
+    when it is out of range)."""
+    return _ANY_REF.sub("", text).strip() if isinstance(text, str) else text
+
+
 def _no_line_refs(text: Any, count: int) -> Any:
-    """``text`` without the sentence numbers in it: a bracket whose numbers are
-    all sentences of the note (1 to ``count``). Any other bracketed number is
-    the rep's and stays ("PO [1234567]"; "Suite [204]" in a 5-sentence note)."""
+    """A must-capture value (the rep's words) without the sentence numbers in
+    it: a bracket whose numbers are all sentences of the note (1 to ``count``),
+    not glued to a word. Any other bracketed number stays ("PO [1234567]",
+    "Qty [10-12] units", "Model X[2]")."""
     def drop(m: re.Match) -> str:
         return "" if all(1 <= int(n) <= count for n in re.findall(r"\d+", m.group(1))) else m.group(0)
     return _LINE_REF.sub(drop, text).strip() if isinstance(text, str) else text
@@ -239,10 +250,14 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" .,;:!?\"'")
 
 
-# A full stop after one of these does not end a sentence ("Met Mr. Lee", "e.g. Carrier").
-# Not "etc.", "a.m." or "p.m.": those end a sentence as often as not.
-_NOT_AN_END = "".join(rf"(?<!\b{re.escape(a)})" for a in ("mr.", "mrs.", "ms.", "dr.", "e.g.", "i.e.", "vs.", "approx."))
-_SENTENCE_END = re.compile(rf"(?<=[.!?]){_NOT_AN_END}\s+", re.IGNORECASE)
+# A full stop after one of these does not end a sentence ("Met Mr. Lee", "e.g. Carrier",
+# "2,000 sq. ft. and needs heaters"). Not "etc.", "a.m." or "p.m.": those end a sentence
+# as often as not.
+_NOT_AN_END = "".join(rf"(?<!\b{re.escape(a)})" for a in (
+    "mr.", "mrs.", "ms.", "dr.", "e.g.", "i.e.", "vs.", "approx.", "sq.", "ft."))
+# "no." only before a number ("PO no. 4567"): a bare "No." answer is a sentence.
+_NO_BEFORE_A_NUMBER = r"(?!(?<=\bno\.)\s+\d)"
+_SENTENCE_END = re.compile(rf"(?<=[.!?]){_NOT_AN_END}{_NO_BEFORE_A_NUMBER}\s+", re.IGNORECASE)
 
 
 def sentences(note: str) -> list[str]:
@@ -370,7 +385,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
                  "evidence_lines": lines if status == DISCUSSED else [],
                  # kept for an unconfirmed topic (the rep's question is built from it);
                  # the status marks it unverified
-                 "summary": _no_line_refs((t or {}).get("summary", ""), len(units)) if status != NOT_DISCUSSED else ""}
+                 "summary": _no_refs((t or {}).get("summary", "")) if status != NOT_DISCUSSED else ""}
         if codes:
             code, outcome_lines, outcome = None, [], ""
             if status == DISCUSSED:
@@ -392,7 +407,7 @@ def postprocess(raw: dict[str, Any], note: str, planned: list[str],
     for fid in COUNT_FIELDS:        # a count with no number in it is not a count
         if fields.get(fid) and not _HAS_NUMBER.search(re.sub(r"\s+", " ", fields[fid])):
             fields[fid] = None
-    record = {"event_type": raw["event_type"], "executive_summary": _no_line_refs(raw.get("executive_summary", ""), len(units)),
+    record = {"event_type": raw["event_type"], "executive_summary": _no_refs(raw.get("executive_summary", "")),
               "topics": topics, "must_capture": fields}
     return ExtractResult(record=record, raw=raw, unconfirmed=unconfirmed, off_plan=off_plan,
                          codes_downgraded=downgraded, rejected=rejected, ignored_lines=ignored)
