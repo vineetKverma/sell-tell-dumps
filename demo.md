@@ -13,7 +13,55 @@ request.
   and IS-010 (the topic rule). The business answers and the key correction go
   to a follow-up story, with the baseline re-run.
 
-## Now: Step F -- the PR description and the reply on the reminder
+## Now: three things to send (any order), then Step F on the PR
+
+### Step F1 -- the message to Jeremy (Teams, the chat with his earlier answers)
+
+```text
+Hi Jeremy, thanks again for the answers. Two follow-ups on quotes came out of testing them:
+
+5. The customer asks for a quote on the campaign's products, but no quote has been given yet ("She asked me for a quote on the microwaves" or "He'll send me what he orders so I can quote it"). Create Opportunity, or needs review (99)?
+
+6. The rep says they'll send a quote, but the customer didn't ask for one ("Went over the microwaves, I'll email her a quote"). Create Opportunity, or needs review (99)?
+
+Something like "5: 1, 6: 99" works perfectly. Thanks!
+```
+
+### Step F2 -- the follow-up story (Jira, 3 points)
+
+Title:
+
+```text
+Apply the product manager's quote answers and correct two answer-key labels; re-take the baselines
+```
+
+Description:
+
+```text
+Background
+AIML-3152 left two golden topics where development scores higher than the branch. A focused experiment traced each to a case the rules don't settle yet:
+- HL-005: a quote the customer asked for (key: code 1; the branch gives 99).
+- IS-010: "Revisit <campaign>" with no conversation stated (key: discussed, code 3; the branch is split between discussed and not discussed).
+
+Scope
+1. Quote rule: apply the product manager's answers (a quote the customer asked for; a quote the rep offers to send) to extract()'s prompt and to the agent's behavioral_rules.yaml, and to the dispositions.yaml cue if needed.
+2. Answer key v1.5, corrected in place:
+   - IS-010 becomes not discussed, per the business answer on material left (discussed only when someone was spoken to about it);
+   - HL-005 follows answer 5.
+   Done with a fix script and a test, uploaded to the bucket, README updated.
+3. Re-measure:
+   - extract() golden run (3 repeats) against development;
+   - three full agent runs and the baseline re-export;
+   - the README baseline figures.
+
+Acceptance criteria
+- Both prompts state the same quote rule, with tests that include a negative control: a quote for other products, or the rep asking for an order, is never code 1.
+- The rule experiment (tools/rule_probe.py) gets every written quote case right, including the two new ones, with no case flipping between repeats.
+- Key v1.5 corrected; every saved run used in comparisons is re-scored on it.
+- The extract() run and the new agent baseline are committed, with a before/after against development in the PR.
+```
+
+### Step F -- the PR description and the reply on the reminder
 
 **PR description.** On the pull request, click Edit and select everything in
 the description box. Paste the text inside the box below over it, then save.
@@ -114,4 +162,6 @@ Reply under it; do not resolve it.
 Re-measured after both review rounds: extract() 79/84 vs development 80/84 (p = 1.0); agent 24/28 on both; baseline re-taken from three branch runs and committed. The two topics development gets (HL-005, IS-010) are traced to cases the business hasn't ruled on; they go to a follow-up story, details in the description.
 ```
 
-Send a screenshot once both are posted, then wait for Suresh's "verified".
+Send a screenshot once the message, the story, the description and the reply
+are posted (the story's number, so the description can name it), then wait
+for Jeremy's answers and Suresh's "verified".
