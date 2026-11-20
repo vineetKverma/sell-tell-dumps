@@ -62,10 +62,23 @@ for run in sorted(Path("evals/runs").glob("full-*")):
 '@ | uv run python -
 ```
 
-- If the note is a few words and every run shows `stage calls 0` and
-  `agent lines 0`: the agent answers with an empty turn (the known S-05 case).
-- If `agent lines` is above 0 and ends with '?': the agent asks the rep a
-  question, which the scripted rep does not answer.
+Done: the note is 2 words (1 planned topic, key: nothing discussed); in all 9
+agent runs (development, the baselines, the branch) the agent asks the rep a
+question and stages nothing, and the scripted rep does not answer. The same in
+every run, so it does not move any comparison.
+
+### Terminal 2 -- Step A4: is the unit test's example name the real note?
+
+`tests/test_agent_eval_regression.py` uses a two-word name for HL-006. This
+prints only True or False, never the note:
+
+```powershell
+@'
+from evals.agent_eval.cases import load_cases
+c = next(c for c in load_cases() if c.id == "HL-006")
+print("same as the test's name:", c.note.strip().lower() == "dan lake")
+'@ | uv run python -
+```
 
 Send the output.
 
