@@ -32,29 +32,9 @@ Done: `development` 27/28 by topic, the branch now 26/28 (p = 1.0); against
 the branch before today's fixes only IS-010 differs (its note splits the same,
 so its prompt is unchanged: a run-to-run difference).
 
-### Terminal 2 -- Step A2: what each repeat answered on the topics it missed
-
-Reads only; ids and codes only:
-
-```powershell
-@'
-import json
-for run in ("extract-20261116-230453", "extract-20261119-175710", "extract-20261120-113412"):
-    reps = json.load(open(f"evals/runs/{run}/scores_golden.json", encoding="utf-8"))["cases"]
-    seen = {}
-    for rep in reps:
-        for s in rep:
-            for i, t in enumerate((s or {}).get("topics", []), 1):
-                if "code_ok" in t:
-                    seen.setdefault((s["id"], i, t["expected_code"]), []).append((t["actual_code"], t["code_ok"]))
-    print(run)
-    for (cid, i, want), got in sorted(seen.items()):
-        if not all(ok for _, ok in got):
-            print(f"  {cid} topic {i}: key {want}, repeats {[c for c, _ in got]}")
-'@ | uv run python -
-```
-
-Send the output.
+Step A2 done (per-topic misses): the branch now misses only HL-005 (99 in all
+3 repeats, the disputed key) and IS-010 (`[None, None, 3]`: marked not
+discussed in 2 repeats, right code when discussed). Terminal 2 is finished.
 
 ### Terminal 1 (the one running the agent) -- Step B: the second agent run and the export
 
